@@ -1,0 +1,43 @@
+# CargoChain — .gitattributes
+# Ensures consistent line endings across platforms
+
+# Default: LF for everything
+* text=auto eol=lf
+
+# Solidity: keep LF (compile tools expect it)
+*.sol text eol=lf
+
+# JS / TS: LF
+*.js text eol=lf
+*.mjs text eol=lf
+*.cjs text eol=lf
+*.ts text eol=lf
+
+# Shell scripts: LF
+*.sh text eol=lf
+
+# Windows batch files: CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Markdown: LF, but allow CRLF in case
+*.md text eol=lf
+
+# YAML / JSON: LF
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+
+# Binary files - no diff/merge
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.tar.gz binary
+
+# Truffle Migrations.sol - keep diff-friendly
+*.sol linguist-language=Solidity
+*.js linguist-language=JavaScript

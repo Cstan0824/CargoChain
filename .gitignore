@@ -1,0 +1,64 @@
+# ============================================================
+# CargoChain — .gitignore
+# BMIS2003 Blockchain Application Development (TARUMT Y3S1)
+# ============================================================
+
+# --- Node / Truffle / npm ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json.bak
+
+# --- Truffle build artifacts ---
+build/
+.openzeppelin/
+
+# --- Solidity coverage ---
+coverage/
+coverage.json
+
+# --- Ganache local chain state ---
+ganache-data/
+*.ganache
+
+# --- Local photo upload storage (dev only) ---
+uploads/*
+!uploads/.gitkeep
+
+# --- Environment & secrets ---
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets.json
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Logs ---
+logs/
+*.log
+
+# --- Test runners ---
+.nyc_output/
+
+# --- Python (any helper scripts) ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# --- Misc ---
+.cache/
+.tmp/
+tmp/
