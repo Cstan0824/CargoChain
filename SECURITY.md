@@ -4,6 +4,25 @@
 > running on the developer's laptop, not a production system." Keep that
 > in mind when reading these rules.
 
+## Supported versions
+
+| Branch | Status |
+|---|---|
+| `main` | Active — receives security-relevant fixes |
+| (older) | Unsupported |
+
+Only the latest commit on `main` is supported. No LTS branches are maintained. This is a student project; the supported-versions policy is intentionally narrow.
+
+## Reporting a vulnerability
+
+Open a GitHub issue at `https://github.com/Cstan0824/CargoChain/issues/new?labels=security`, or contact the project owner privately:
+
+- **Cstan (Cheong Soon Tian)** — tancs-wm23@student.tarc.edu.my
+
+Please **do not** include working exploit code in public issues. A short description of the vulnerability class and the affected file or function is enough to start a discussion.
+
+**Response targets:** Best-effort. This is a student project with no SLA. The owner will acknowledge within a reasonable time and coordinate disclosure before any public fix lands.
+
 ## Secret handling
 
 - **`.env` is the only place secrets live.** Truffle, Vite, and the upload
