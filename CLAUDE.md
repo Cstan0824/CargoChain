@@ -10,10 +10,10 @@ You are working on **CargoChain** (course code BMIS2003), a TARUMT Y3S1 Blockcha
 
 - **Truffle Suite** for compile / migrate / test. No Hardhat.
 - **Solidity 0.8.x**. Pin in `truffle-config.js` and `package.json`.
-- **Web3.js v1.x** in the browser. No ethers.js / wagmi / viem.
-- **Plain HTML + CSS + vanilla JS** in `src/`. No React / Vue / Next.
+- **ethers.js v6** in the browser (project owner override, 2026-07-06). No wagmi / viem.
+- **React 18 + Vite** in `src/`. No Next.js, no TypeScript.
 - **Mocha + Chai** via Truffle for tests.
-- **Ganache** locally. Optional **Sepolia** for demo.
+- **Ganache** locally. **Sepolia is a future plan, not part of v1** — do not enable or test against Sepolia until the team explicitly decides to ship v2.
 
 If a request implies changing any of the above, refuse and refer to `AGENTS.md` § "Non-Negotiable Course Stack".
 
@@ -32,7 +32,7 @@ If a request implies changing any of the above, refuse and refer to `AGENTS.md` 
 4. Add a test in `test/*.test.js` (Mocha + Chai).
 5. Run `npx truffle test`.
 6. Update `API_v1.md` (function name, params, returns, events, frontend page).
-7. Wire into `src/js/contracts.js` (ABI loader) and the relevant `*.js` page module.
+7. Wire into `src/contracts/index.js` (add to the `ARTIFACTS` map) and the relevant `src/pages/<Page>.jsx` component.
 
 ### Adding a new milestone verification mode
 
@@ -40,22 +40,25 @@ If a request implies changing any of the above, refuse and refer to `AGENTS.md` 
 
 ### Adding a frontend page
 
-1. New `src/<page>.html`.
-2. New `src/js/<page>.js`.
-3. Link from `src/index.html` navigation.
-4. Keep CSS in `src/css/style.css` — don't create a per-page stylesheet.
+1. New `src/pages/<Name>.jsx` exporting a default function component.
+2. Register a route in `src/App.jsx`.
+3. Add a nav link in `src/components/Navbar.jsx`.
+4. If the page needs a connected wallet, wrap the body in `<RequireWallet>` from `src/components/RequireWallet.jsx`.
+5. For component-scoped styles, use CSS Modules (`<Name>.module.css`) co-located with the component. Reserve `src/css/style.css` for layout, typography, navbar, and toasts.
 
 ## Verification before finishing any task
 
 - [ ] `npx truffle compile` succeeds (no warnings beyond style)
 - [ ] `npx truffle test` passes (all tests green)
-- [ ] Manual smoke: start Ganache, migrate, open `src/index.html`, connect MetaMask, browse marketplace, accept a request, submit a proof hash, verify, see payment release
+- [ ] Manual smoke: start Ganache, migrate, run `npm run dev`, open `http://127.0.0.1:5173`, connect MetaMask, browse marketplace, accept a request, submit a proof hash, verify, see payment release
+- [ ] `npm run build` succeeds (Vite production bundle)
 - [ ] `API_v1.md` is updated if any contract function changed
 
 ## Things Cstan has explicitly told me (don't second-guess)
 
 - **Two BE + two FE devs in parallel** for SPM (different project). CargoChain has 5 members — use the table in `AGENTS.md`.
-- **No wagmi / Next.js / Hardhat** even when modern tutorials push them. Course mandate.
+- **No wagmi / viem** even when modern tutorials push them. Course mandate.
+- **No Next.js, no TypeScript** (project owner choice 2026-07-06 — React 18 + Vite, plain JS).
 - **Truffle `migrate --reset` if state is broken**, never hand-edit `build/contracts/`.
 - **Photo-proof storage**: `crypto.subtle.digest('SHA-256', …)` in browser → POST to `server/upload-server.js` → store in `/uploads/{sha256prefix}.jpg` → return the hash to the page → page sends `submitProof(requestId, milestoneId, hash)`.
 - **Repo renamed** from "LogiChain" (PRD v3) to "CargoChain" (GitHub repo). When you see references to LogiChain in older docs, that's the same project.

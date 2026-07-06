@@ -1,0 +1,187 @@
+/* src/css/style.css — CargoChain
+ * Global stylesheet. Component-scoped styles should use CSS Modules
+ * (*.module.css) per the FE conventions in AGENTS.md.
+ *
+ * Kept intentionally minimal — the team styles as they build. This file
+ * is the layout/typography baseline.
+ */
+
+:root {
+  --bg:        #f7f7f5;
+  --surface:   #ffffff;
+  --border:    #e4e4e0;
+  --text:      #1a1a1a;
+  --muted:     #6b6b6b;
+  --accent:    #2563eb;
+  --danger:    #b91c1c;
+  --success:   #15803d;
+  --radius:    6px;
+  --max-width: 1080px;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+}
+
+main {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 24px 20px 48px;
+}
+
+h1 { font-size: 24px; margin: 0 0 16px; }
+h2 { font-size: 18px; margin: 24px 0 8px; }
+p  { margin: 0 0 12px; }
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover { text-decoration: underline; }
+
+button {
+  font: inherit;
+  padding: 8px 14px;
+  background: var(--accent);
+  color: white;
+  border: 0;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+button:hover  { filter: brightness(1.05); }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+button.secondary {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+input, textarea, select {
+  font: inherit;
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: 100%;
+}
+
+.error   { color: var(--danger); }
+.success { color: var(--success); }
+.muted   { color: var(--muted); }
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.92em;
+  background: rgba(0, 0, 0, 0.04);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+/* --- Navbar --- */
+.navbar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.navbar-inner {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 12px 20px;
+}
+.navbar .brand {
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+}
+.navbar nav {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+}
+.navbar nav a {
+  color: var(--muted);
+  text-decoration: none;
+  padding: 4px 0;
+  border-bottom: 2px solid transparent;
+}
+.navbar nav a.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.navbar nav a:hover { color: var(--text); }
+
+/* --- Wallet pill (connected state) --- */
+.wallet-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.wallet-pill:hover { background: var(--surface); }
+.wallet-pill .chain-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  background: var(--accent);
+  color: white;
+  border-radius: 999px;
+}
+.wallet-pill .addr {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* --- Timeline --- */
+.timeline {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0 0;
+}
+.timeline li {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.timeline li:last-child { border-bottom: 0; }
+
+/* --- Toasts --- */
+.toast-container {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 1000;
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  max-width: 360px;
+  cursor: pointer;
+}
+.toast-success { border-left-color: var(--success); }
+.toast-error   { border-left-color: var(--danger);  }

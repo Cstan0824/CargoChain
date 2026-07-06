@@ -27,17 +27,17 @@ node server/upload-server.js > .upload-server.log 2>&1 &
 UPLOAD_PID=$!
 echo "    PID=$UPLOAD_PID (logs: .upload-server.log)"
 
-echo "==> [4/4] Serving frontend on port 8080"
-(cd src && npx http-server -p 8080 -c-1) > .http-server.log 2>&1 &
-HTTP_PID=$!
-echo "    PID=$HTTP_PID (logs: .http-server.log)"
+echo "==> [4/4] Starting Vite dev server on port 5173"
+npm run dev > .vite.log 2>&1 &
+VITE_PID=$!
+echo "    PID=$VITE_PID (logs: .vite.log)"
 
 cat <<EOF
 
 ================================================================
   CargoChain dev environment ready
 ================================================================
-  Marketplace:    http://127.0.0.1:8080
+  Marketplace:    http://127.0.0.1:5173
   Upload server:  http://127.0.0.1:3000
   Ganache RPC:    http://127.0.0.1:7545
 
@@ -49,8 +49,8 @@ cat <<EOF
   PIDs:
     Ganache:    $GANACHE_PID
     Upload:     $UPLOAD_PID
-    HTTP:       $HTTP_PID
+    Vite:       $VITE_PID
 
-  Stop with:  kill $GANACHE_PID $UPLOAD_PID $HTTP_PID
+  Stop with:  kill $GANACHE_PID $UPLOAD_PID $VITE_PID
 ================================================================
 EOF

@@ -31,14 +31,14 @@ This is the **assignment version** — built for clarity, demo, and grading — 
 |---|---|
 | Smart contracts | Solidity `^0.8.0` |
 | Dev framework | Truffle Suite |
-| Local chain | Ganache |
-| Testnet (demo) | Sepolia (optional) |
-| Frontend | Plain HTML + CSS + vanilla JavaScript |
-| Wallet layer | Web3.js v1.x |
+| Local chain | Ganache (127.0.0.1:7545) |
+| Testnet | Sepolia — **future plan, not part of v1** |
+| Frontend | React 18 + Vite (plain JavaScript) |
+| Wallet layer | ethers.js v6 |
 | Photo upload | Tiny Node.js + Express.js server, browser-side SHA-256 hashing |
 | Tests | Mocha + Chai (Truffle built-in) |
 
-**Do not** introduce Hardhat, Next.js, React, wagmi, viem, or ethers.js — these are out of scope for this course.
+**Do not** introduce Hardhat, Next.js, Vue, wagmi, viem, or Web3.js — these are out of scope. ethers.js is approved as the client library (project owner decision 2026-07-06).
 
 ---
 
@@ -49,15 +49,25 @@ CargoChain/
 ├── contracts/              # Solidity sources (5 contracts)
 ├── migrations/             # Truffle deploy scripts
 ├── test/                   # Mocha + Chai tests
-├── src/                    # Frontend (HTML/CSS/JS)
+├── src/                    # React 18 + Vite frontend
+│   ├── pages/              # Marketplace, Shipper, Carrier, Track
+│   ├── components/         # Navbar, ConnectButton, RequireWallet
+│   ├── context/            # Web3, Contracts, Toast
+│   ├── hooks/              # useWallet, useContracts, useToast
+│   ├── contracts/          # getContract() factory
+│   ├── utils/              # format, upload
+│   └── css/                # global stylesheet
 ├── server/                 # Tiny Express upload server
 ├── uploads/                # Local photo storage (gitignored)
 ├── docs/                   # PRD, Spec, Architecture, Module-Split
-├── truffle-config.js
+├── truffle-config.js       # Ganache default; Sepolia commented (future plan)
+├── vite.config.js          # port 5173, /uploads proxy -> :3000
 ├── package.json
 ├── README.md               # this file
 ├── AGENTS.md               # Coding-agent rules (read first)
 ├── CLAUDE.md               # Claude Code specific instructions
+├── SECURITY.md             # Secret-handling + local-only defaults
+├── .env.example            # Template for .env (committed)
 └── API_v1.md               # Contract function reference
 ```
 
@@ -67,7 +77,7 @@ CargoChain/
 
 | Tool | Version | Why |
 |---|---|---|
-| **Node.js** | 18.x or 20.x LTS | Truffle + Web3.js + Express |
+| **Node.js** | 18.x or 20.x LTS | Truffle + ethers + Vite + Express |
 | **npm** | 9+ (bundled with Node) | package management |
 | **Git** | 2.30+ | version control |
 | **Ganache** | 7.x | local Ethereum chain |
@@ -102,6 +112,8 @@ Install the browser extension from [https://metamask.io/](https://metamask.io/).
 
 ## Quick start (5 minutes from a fresh clone)
 
+**First time only — one-time setup:**
+
 ```bash
 # 1. Clone
 git clone https://github.com/Cstan0824/CargoChain.git
@@ -110,43 +122,57 @@ cd CargoChain
 # 2. Install JS dependencies
 npm install
 
-# 3. Start Ganache (in a SEPARATE terminal)
-#    GUI: open Ganache, click "Quickstart"
-#    OR CLI: ganache --deterministic
-
-# 4. Compile + migrate contracts
+# 3. Compile + migrate contracts to Ganache
 npx truffle compile
 npx truffle migrate --reset --network development
-
-# 5. Run the test suite (should all pass)
-npx truffle test
-
-# 6. Start the upload server (in ANOTHER terminal)
-node server/upload-server.js
-# listens on http://127.0.0.1:3000
-
-# 7. Serve the frontend (in ANOTHER terminal)
-cd src
-npx http-server -p 8080
-# open http://127.0.0.1:8080 in your browser
-
-# 8. Connect MetaMask to http://127.0.0.1:7545 (chain 1337)
-#    Import a Ganache account using the MNEMONIC from step 3
-#    Browse the marketplace → create a request → etc.
 ```
 
-### One-command dev launcher (recommended)
-
-After the manual steps above work, you can use:
+**Every dev session — one command, one terminal:**
 
 ```bash
-# from the project root
-./start.sh        # macOS / Linux / Git Bash
-# or
-start.cmd         # Windows cmd
+npm run dev:all
 ```
 
-This opens 3 terminals: Ganache, upload server, http-server.
+That single command runs Ganache + the upload server + the Vite dev server in **one terminal**, with colour-coded prefixes so the logs are easy to read:
+
+```
+[ganache] Listening on 127.0.0.1:7545
+[upload]  [upload-server] listening on http://127.0.0.1:3000
+[vite]    VITE v5.4.21 ready in 311ms
+[vite]    ➜  Local: http://localhost:5173/
+```
+
+**Then in the browser:**
+
+1. Open **http://localhost:5173**
+2. Install **MetaMask** if you don't have it.
+3. MetaMask → Settings → Networks → Add network:
+   - Network name: `Ganache Local`
+   - RPC URL: `http://127.0.0.1:7545`
+   - Chain ID: `1337`
+   - Currency: `ETH`
+4. MetaMask → account icon → **Import account** → paste the MNEMONIC from the `[ganache]` log line.
+5. Back in the app, click **Connect Wallet** → approve in MetaMask.
+
+**Stop everything:** one `Ctrl+C` in the terminal kills all three.
+
+### If you'd rather use the GUI
+
+The CLI Ganache is just for one-line convenience. If you prefer the standalone Ganache app, open it and click "Quickstart" first, then run:
+
+```bash
+npm run dev       # Vite only
+npm run upload-server   # Express upload (in another terminal, or use the GUI)
+```
+
+The two commands above are equivalent to `npm run dev:all` minus Ganache.
+
+### Production build (for demo day)
+
+```bash
+npm run build     # writes dist/
+npm run preview   # serves dist/ on http://127.0.0.1:8080
+```
 
 ---
 
@@ -164,19 +190,20 @@ This opens 3 terminals: Ganache, upload server, http-server.
 
 See `API_v1.md` for the function reference, `docs/Module-Split.md` for per-file responsibilities.
 
-### `src/` — Frontend
+### `src/` — Frontend (React 18 + Vite)
 
-| File | Page |
+| File / Folder | Purpose |
 |---|---|
-| `index.html` | Marketplace — browse open requests, accept one |
-| `shipper.html` | Shipper dashboard — create request, verify milestones, cancel/refund |
-| `carrier.html` | Carrier dashboard — accept, upload photo-proof per milestone |
-| `track.html` | Public tracker (no wallet needed) — view timeline for a request |
+| `index.html`, `main.jsx`, `App.jsx` | Vite entry + React root + Router |
+| `pages/` | `Marketplace.jsx` (browse + accept), `Shipper.jsx` (create + verify), `Carrier.jsx` (accept + submit proof), `Track.jsx` (public timeline) |
+| `components/` | `Navbar.jsx`, `ConnectButton.jsx`, `RequireWallet.jsx` |
+| `context/` | `Web3Context.jsx` (ethers + MetaMask events), `ContractsContext.jsx` (5 contract handles), `ToastContext.jsx` |
+| `hooks/` | `useWallet`, `useContracts`, `useToast` (re-exports of context) |
+| `contracts/index.js` | `getContract(provider, name, networkId)` factory |
+| `utils/` | `format.js` (ETH, addresses, dates, status labels), `upload.js` (SHA-256 + POST) |
+| `css/style.css` | Global stylesheet (layout, navbar, toast, timeline) |
 
-| JS file | Purpose |
-|---|---|
-| `web3-init.js` | Web3.js setup, MetaMask detection, account switching |
-| `contracts.js` | Contract ABI loader (static ABI method), instance factory |
+See `src/README.md` for the full structure and conventions.
 | `app.js` | Shared helpers (formatters, toast notifications) |
 | `upload.js` | Photo upload + browser-side SHA-256 hashing |
 
@@ -248,7 +275,7 @@ The demo runs end-to-end on Ganache + a fresh `truffle migrate`:
 
 - Single active carrier per request (intentional; recovery is republish-based).
 - Photo off-chain storage is mutable; on-chain SHA-256 is the integrity anchor.
-- Time-travel tests depend on Ganache's `evm_increaseTime`; on Sepolia the clock is real-time.
+- Time-travel tests depend on Ganache's `evm_increaseTime`. (Sepolia is a future plan; when/if activated, its clock is real-time.)
 - No mobile-friendly layout — plain HTML only.
 
 ---

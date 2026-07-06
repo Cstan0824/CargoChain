@@ -23,24 +23,24 @@ Use the course-mandated stack only:
 
 - Smart contracts: **Solidity 0.8.x**
 - Development framework: **Truffle Suite**
-- Local blockchain: **Ganache**
-- Frontend: **plain HTML, CSS, and vanilla JavaScript**
-- Blockchain client library: **Web3.js v1.x**
+- Local blockchain: **Ganache** (127.0.0.1:7545)
+- Frontend: **React 18 + Vite** (plain JavaScript, no TypeScript)
+- Blockchain client library: **ethers.js v6** (project owner decision 2026-07-06 — supersedes the earlier Web3.js v1.x rule)
 - Tests: **Mocha + Chai through Truffle**
 - Optional upload backend: **Node.js + Express.js** for photo-proof upload only
+- **Sepolia testnet: future plan, NOT part of v1.** The team has explicitly deferred it. The Sepolia block in `truffle-config.js` is commented out and the `.env.example` Sepolia vars are blank by design. Do not enable or test against Sepolia until the team agrees to ship v2.
 
 Do **not** replace the stack with:
 
 - Hardhat
 - Foundry
 - Next.js
-- React
 - Vue
 - Angular
-- Vite frontend
 - wagmi
 - viem
-- ethers.js unless explicitly approved
+- Web3.js (the previous client library — now superseded by ethers.js)
+- TypeScript
 - Remix-only implementation
 
 The project must include UI integration with deployed smart contracts. A Remix-only demo is incomplete for this assignment.
@@ -58,7 +58,7 @@ The project must include UI integration with deployed smart contracts. A Remix-o
 | **b. Goods Request Management** | Shipper creates delivery request · Goods info + milestones · Pickup/destination + deadline · Carriers browse · FCFS acceptance · Cancel before acceptance · Delivery recovery (republish) | **GAN** | `DeliveryEscrow.sol`, `LifecycleManager.sol` |
 | **c. Payment & Escrow** | ETH escrow lock on request creation · Escrow balance check · Milestone-based release · Partial payment · Final completion · ETH refund (cancel/timeout) · Transaction history · Payment status | **Jeremy** | `DeliveryEscrow.sol` (re-used), `PaymentEvents.sol` |
 | **d. Milestone Tracking & Proof** | Shipper traces milestone progress · Carrier updates progress · Carrier uploads photo-proof per milestone · Browser SHA-256 hash · Hash on-chain · Shipper verifies/rejects · Milestone completion · Triggers payment release after verification | **Melissa** | `MilestoneVerifier.sol` |
-| **e. Frontend & UI/UX** | HTML/CSS/vanilla JS · Web3.js ↔ Solidity bridge · MetaMask integration · Contract calls · Transaction submission · Photo upload integration · Demo flow navigation · UI for all 4 BE modules | **Cstan (Cs)** | — |
+| **e. Frontend & UI/UX** | React 18 + Vite · ethers.js v6 ↔ Solidity bridge · MetaMask integration · Contract calls · Transaction submission · Photo upload integration · Demo flow navigation · UI for all 4 BE modules | **Cstan (Cs)** | — |
 
 ## Smart Contract Boundary
 
@@ -94,16 +94,34 @@ Important hand-offs:
   lifecycleManager.test.js
   userRegistry.test.js   # new
 /src
-  index.html              # marketplace
-  shipper.html            # create + manage + verify
-  carrier.html            # accept + submit proof
-  track.html              # public tracker
+  index.html              # Vite entry (mounts #root)
+  main.jsx                # React root, provider tree
+  App.jsx                 # Router setup
+  pages/
+    Marketplace.jsx       # /        — browse + accept
+    Shipper.jsx           # /shipper — create + verify
+    Carrier.jsx           # /carrier — accept + submit proof
+    Track.jsx             # /track/:id? — public timeline
+  components/
+    Navbar.jsx
+    ConnectButton.jsx
+    RequireWallet.jsx
+  context/
+    Web3Context.jsx       # ethers BrowserProvider + MetaMask events
+    ContractsContext.jsx  # 5 contract handles from build/contracts/*.json
+    ToastContext.jsx
+  hooks/
+    useWallet.js
+    useContracts.js
+    useToast.js
+  contracts/
+    index.js              # getContract() factory
+  utils/
+    format.js             # formatEth, shortAddress, status labels
+    upload.js             # hashFile + uploadPhoto
   css/
-  js/
-    web3-init.js
-    app.js
-    contracts.js
-    upload.js
+    style.css             # global stylesheet
+  abi/                    # (legacy — no longer used; ABIs now in build/contracts/)
 /server
   upload-server.js        # tiny Express for /uploads POST
 /uploads                  # local photo storage (dev only, gitignored)
@@ -112,11 +130,14 @@ Important hand-offs:
   Spec.md                 # concise functional + technical spec
   Architecture.md         # diagram-rich architecture doc
   Module-Split.md         # detailed module responsibilities
-truffle-config.js
+truffle-config.js         # Ganache default; Sepolia commented (future plan)
+vite.config.js            # port 5173, /uploads proxy -> :3000
 package.json
 README.md
 AGENTS.md                 # this file
 CLAUDE.md                 # Claude Code instructions
+SECURITY.md               # secret-handling rules, local-only defaults
+.env.example              # template for .env (committed)
 API_v1.md                 # contract function reference
 ```
 
@@ -146,15 +167,27 @@ Expected events:
 - `RefundIssued`
 - `RequestRepublished`
 
-### JavaScript / Web3.js
+### JavaScript / ethers.js v6
 
-- Use Web3.js v1.x.
-- Use `window.ethereum` for MetaMask.
+- Use **ethers v6** (not Web3.js, not ethers v5).
+- Use `window.ethereum` for MetaMask — wrapped in `new BrowserProvider(window.ethereum)`.
 - Request account access through `eth_requestAccounts`.
-- Read data using contract `.call()`.
-- Send transactions using contract `.send({ from, value })` where needed.
-- Keep JavaScript modular but simple.
+- **Read calls** (no signer): `await contract.methodName(args)` — returns a Promise directly.
+- **Write calls** (needs signer): `await contract.connect(signer).methodName(args)` — returns a tx; `await tx.wait()` for confirmation.
+- **Events** (listening): `contract.on('EventName', handler)` / `contract.once(...)`.
+- **Events** (history): `await contract.queryFilter('EventName', fromBlock, toBlock)`.
+- **ETH formatting**: `formatEther(wei)` / `parseEther('1.5')` from `ethers`.
+- **Web3 access in components**: always go through `useWallet()` / `useContracts()` — never read `window.ethereum` directly from a page.
 - Do not introduce TypeScript unless explicitly requested.
+
+### Frontend conventions
+
+- `PascalCase.jsx` for components and pages.
+- `camelCase.js` for utilities, hooks, factories.
+- Component-scoped styles use **CSS Modules** (`*.module.css`) co-located with the component.
+- The global stylesheet `src/css/style.css` is reserved for layout, typography, navbar, and toasts.
+- Pages that need a connected wallet wrap their body in `<RequireWallet>`.
+- All four local services bind to `127.0.0.1` by default — see `SECURITY.md`.
 
 ### Node.js / Express
 
@@ -212,7 +245,7 @@ Keep these assumptions unless the team decides otherwise:
 - Multi-carrier collaboration is represented only through recovery/republishing, not full custody transfer.
 - Photo-proof uses SHA-256 hash, not full forensic verification.
 - Payment uses ETH, not a custom token.
-- Ganache is used for local demo; Sepolia can be used for testnet demonstration.
+- Ganache is the v1 chain. Sepolia is a future plan (commented in `truffle-config.js`), not part of v1.
 
 ## Do-Not-Change List
 

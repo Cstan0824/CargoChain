@@ -33,8 +33,8 @@ truffle.on('exit', (code) => {
   spawnBg('truffle-migrate', 'npx', ['truffle', 'migrate', '--reset', '--network', 'development']);
   // 3. Upload server
   spawnBg('upload-server', 'node', ['server/upload-server.js']);
-  // 4. Frontend server
-  spawnBg('frontend', 'npx', ['http-server', 'src', '-p', '8080', '-c-1'], path.join(ROOT, 'src'));
+  // 4. Vite dev server (port 5173)
+  spawnBg('vite', 'npm', ['run', 'dev'], ROOT);
 });
 
 process.on('SIGINT', () => {

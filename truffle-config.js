@@ -1,5 +1,9 @@
 // truffle-config.js — CargoChain
-// Defaults: Ganache on 127.0.0.1:7545, chainId 1337, network_id *.
+// Active: Ganache on 127.0.0.1:7545, chainId 1337, network_id *.
+// Future plan: Sepolia (commented below — do NOT enable in v1).
+
+require('dotenv').config();
+const HDWalletProvider = require('@truffle/hdwallet-provider');
 
 module.exports = {
   networks: {
@@ -8,9 +12,20 @@ module.exports = {
       port: 7545,
       network_id: '*',
     },
-    // Optional Sepolia deployment — fill in your own keys here.
+
+    // =========================================================================
+    // FUTURE PLAN — Sepolia testnet
+    // -------------------------------------------------------------------------
+    // Not part of v1. The team has explicitly deferred Sepolia to a later
+    // milestone. To activate, uncomment the block below, fill in `.env`
+    // (SEPOLIA_RPC, TEAM_MNEMONIC), and run:
+    //   npx truffle migrate --network sepolia
+    // =========================================================================
     // sepolia: {
-    //   provider: () => new HDWalletProvider(process.env.MNEMONIC, process.env.SEPOLIA_RPC),
+    //   provider: () => new HDWalletProvider(
+    //     process.env.TEAM_MNEMONIC,
+    //     process.env.SEPOLIA_RPC,
+    //   ),
     //   network_id: 11155111,
     //   confirmations: 2,
     // },
