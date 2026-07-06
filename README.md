@@ -110,6 +110,121 @@ Install the browser extension from [https://metamask.io/](https://metamask.io/).
 
 ---
 
+## Ganache — your local blockchain
+
+**What it is:** A one-machine Ethereum blockchain that runs on your laptop.
+It speaks the same JSON-RPC protocol as mainnet / Sepolia, so MetaMask,
+Truffle, and ethers.js all work against it without any code changes. It's
+the project's v1 chain — Sepolia is a future plan, not active.
+
+### What Ganache gives you for free
+
+| Resource | Ganache default | Real network (mainnet) |
+|---|---|---|
+| **ETH balance per account** | **1,000 ETH** (fake) | Whatever you buy |
+| **Number of prefunded accounts** | **10**, all derived from one MNEMONIC | You bring your own |
+| **Gas cost** | **0 real ETH** — unlimited free transactions | Real money |
+| **Block time** | **Instant** (mined on demand) | ~12 seconds |
+| **Time travel** | `evm_increaseTime` works (use it in tests) | Block timestamp is real |
+| **Chain state** | In-memory, **lost on restart** | Permanent, public |
+
+You can spam thousands of transactions, send 100 ETH between accounts, and
+revert everything in a second. Nothing is real. That's the whole point.
+
+### Deterministic mode (`--deterministic`)
+
+When started with `--deterministic` (which `npm run dev:all` does by
+default), Ganache derives its 10 accounts from the same MNEMONIC every
+time. **Same mnemonic → same 10 addresses → same "Shipper" and "Carrier"
+accounts for every teammate on every run.** This is what lets the team
+share test data without coordinating.
+
+The 10 prefunded accounts look like this on first boot:
+
+```
+(0) 0x90F8...36A3  (1,000 ETH)  ← typically the deployer
+(1) 0x15d3...4Fb1  (1,000 ETH)
+(2) 0x9965...A0Dc  (1,000 ETH)
+… 7 more …
+```
+
+The private key for each is shown alongside in the Ganache log — use those
+to import into MetaMask, never the public addresses alone.
+
+### Two ways to run Ganache
+
+**Option A — CLI (used by `npm run dev:all`):**
+```bash
+npx ganache --deterministic          # uses the local copy from devDependencies
+```
+No global install needed. The command is in `package.json`'s `dev:all`
+script. Output appears with the `[ganache]` prefix in the same terminal as
+Vite and the upload server.
+
+**Option B — GUI (nicer for demos):**
+Download from <https://trufflesuite.com/ganache/>. Click **QUICKSTART** —
+it listens on `127.0.0.1:7545` with a fresh MNEMONIC (or you can enter a
+custom one to match the CLI's deterministic mode). The GUI shows live
+blocks, transactions, and logs in a dashboard.
+
+Both speak the same JSON-RPC; you can swap between them without restarting
+anything else.
+
+### Importing an account into MetaMask
+
+The 10 Ganache accounts are **not** in MetaMask by default — MetaMask
+manages its own keys, and Ganache's keys are separate. To use a Ganache
+account from the React app:
+
+1. Find the MNEMONIC in the `[ganache]` log line (or in the GUI's
+   "Accounts" panel — click the key icon next to any account to reveal it).
+2. In MetaMask, click the account icon → **Import account** → **Secret
+   Recovery Phrase** → paste the 12-word MNEMONIC.
+3. The first address derived from that mnemonic is now your active account
+   in MetaMask, with the 1,000 fake ETH visible.
+4. Repeat for additional accounts by switching to the next index in HD
+   derivation (MetaMask only shows the first; for the rest, import the
+   mnemonic in a fresh MetaMask profile or use a tool like
+   `ethers.Wallet.fromMnemonic` to derive specific indices).
+
+For the demo, **two accounts is enough** — one for the Shipper, one for
+the Carrier. Both come from the same MNEMONIC.
+
+### Resetting the chain
+
+Ganache state lives in memory. To wipe everything and redeploy from
+scratch:
+
+```bash
+# stop the dev:all process (Ctrl+C)
+npm run dev:all                            # restart
+npx truffle migrate --reset --network development
+```
+
+Use this freely during development. There's no state to lose — your real
+work is the contracts in `contracts/` and the React code in `src/`.
+
+### Time travel in tests
+
+Ganache supports `evm_increaseTime` and `evm_mine`, which let tests fast-
+forward the chain clock without sleeping. CargoChain's MilestoneVerifier
+tests use this to simulate the 48–72h dispute window for auto-release.
+See `test/milestoneVerifier.test.js` (when written) for the pattern.
+
+### What Ganache is **not**
+
+- **Not a public chain.** Nothing on Ganache is visible to anyone else. If
+  you want a "live" demo the tutor can verify on a block explorer, that's
+  Sepolia — which is a future plan.
+- **Not persistent.** A laptop restart wipes the chain. Don't store any
+  real data in the contracts.
+- **Not representative of mainnet gas costs.** A `createRequest` on
+  Ganache costs 0 fake ETH. On mainnet, the same tx might cost $0.50–$2
+  in real ETH. Design the contract logic to be gas-efficient anyway, but
+  don't tune the UX to Ganache's free-gas behaviour.
+
+---
+
 ## Quick start (5 minutes from a fresh clone)
 
 **First time only — one-time setup:**
@@ -204,12 +319,10 @@ See `API_v1.md` for the function reference, `docs/Module-Split.md` for per-file 
 | `css/style.css` | Global stylesheet (layout, navbar, toast, timeline) |
 
 See `src/README.md` for the full structure and conventions.
-| `app.js` | Shared helpers (formatters, toast notifications) |
-| `upload.js` | Photo upload + browser-side SHA-256 hashing |
 
 ### `server/` — Tiny Express server
 
-`upload-server.js` is a ~50-LOC Express endpoint that accepts `POST /uploads`, stores the file under `/uploads/{sha256prefix}.jpg`, and returns the hash. This is the **only** Node.js backend; the main app stays in `src/` as plain HTML/JS.
+`upload-server.js` is a ~50-LOC Express endpoint that accepts `POST /uploads`, stores the file under `/uploads/{sha256prefix}.jpg`, and returns the hash. This is the **only** Node.js backend; the main app is a React SPA in `src/`. See [the "What's the point of upload?" answer](#) in commit history or the "How the upload flow works" section below for why this exists.
 
 ### `test/` — Truffle tests
 
@@ -261,13 +374,13 @@ Before pushing:
 
 The demo runs end-to-end on Ganache + a fresh `truffle migrate`:
 
-1. **Connect MetaMask** to `http://127.0.0.1:7545`, import Shipper + Carrier accounts from the Ganache MNEMONIC.
-2. **Browse** the marketplace at `http://127.0.0.1:8080/index.html`.
+1. **Connect MetaMask** to `http://127.0.0.1:7545` (chain 1337), import Shipper + Carrier accounts from the Ganache MNEMONIC shown in the `[ganache]` log.
+2. **Browse** the marketplace at `http://localhost:5173/` (Vite dev server).
 3. **Carrier** accepts a request → status changes to **In progress**.
 4. **Carrier** uploads a photo-proof for Milestone 1 → SHA-256 hash written on-chain.
 5. **Shipper** verifies the proof in the dashboard → payment releases (proportional split).
 6. **Republish demo**: skip Milestone 2's deadline → anyone calls `republishIfStuck()` → the request returns to the marketplace.
-7. **Public tracker**: open `track.html?id=42` in an incognito tab → timeline visible without a wallet.
+7. **Public tracker**: open `http://localhost:5173/track/42` in an incognito tab → timeline visible without a wallet.
 
 ---
 
@@ -276,7 +389,7 @@ The demo runs end-to-end on Ganache + a fresh `truffle migrate`:
 - Single active carrier per request (intentional; recovery is republish-based).
 - Photo off-chain storage is mutable; on-chain SHA-256 is the integrity anchor.
 - Time-travel tests depend on Ganache's `evm_increaseTime`. (Sepolia is a future plan; when/if activated, its clock is real-time.)
-- No mobile-friendly layout — plain HTML only.
+- No mobile-friendly layout — the React app is desktop-first.
 
 ---
 
