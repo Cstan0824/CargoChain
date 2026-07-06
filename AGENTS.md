@@ -1,5 +1,12 @@
 # AGENTS.md — CargoChain Coding Agent Instructions
 
+## Canonical repo location
+
+**Repo root:** `C:\Cstan\Projects\CargoChain\` (Windows)
+**GitHub:** https://github.com/Cstan0824/CargoChain.git
+
+> All work happens at this path. Do not create a sibling copy at `C:\Users\<user>\projects\cargochain\` — that was an earlier draft location and has been removed. If you see references to the old path in any context (Notion, transcripts, docs), they refer to the same project that now lives here.
+
 ## Project Identity
 
 Project name: **CargoChain** (formerly "LogiChain" in the PRD v3 — renamed at repo init on 2026-07-05)
@@ -105,7 +112,6 @@ Important hand-offs:
   Spec.md                 # concise functional + technical spec
   Architecture.md         # diagram-rich architecture doc
   Module-Split.md         # detailed module responsibilities
-/uploads
 truffle-config.js
 package.json
 README.md
