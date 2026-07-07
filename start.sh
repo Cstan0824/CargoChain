@@ -11,7 +11,7 @@ cd "$(dirname "$0")"
 
 echo "==> [1/4] Starting Ganache on port 7545"
 if command -v ganache >/dev/null 2>&1; then
-  ganache --deterministic > .ganache.log 2>&1 &
+  ganache --deterministic --host 127.0.0.1 --port 7545 --chain.chainId 1337 --chain.networkId 1337 > .ganache.log 2>&1 &
   GANACHE_PID=$!
   echo "    PID=$GANACHE_PID (logs: .ganache.log)"
 else

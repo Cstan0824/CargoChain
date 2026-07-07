@@ -5,7 +5,7 @@ setlocal
 cd /d "%~dp0"
 
 echo ==^> [1/4] Starting Ganache
-start "CargoChain-Ganache" cmd /k "ganache --deterministic"
+start "CargoChain-Ganache" cmd /k "npx ganache --deterministic --host 127.0.0.1 --port 7545 --chain.chainId 1337 --chain.networkId 1337"
 
 echo ==^> [2/4] Compiling + migrating contracts
 call npx truffle compile
