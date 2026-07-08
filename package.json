@@ -5,7 +5,8 @@
   "description": "CargoChain — Decentralised escrow and milestone-based logistics tracking DApp on Ethereum (BMIS2003 TARUMT Y3S1).",
   "scripts": {
     "dev": "vite",
-    "dev:all": "concurrently -n ganache,upload,vite -c blue,green,magenta \"npx ganache --deterministic\" \"node server/upload-server.js\" \"npm run dev\"",
+    "dev:all": "concurrently -n upload,vite -c green,magenta \"node server/upload-server.js\" \"npm run dev\"",
+    "chain": "ganache --wallet.deterministic --server.host 127.0.0.1 --server.port 7545 --chain.chainId 1337 --chain.networkId 1337",
     "build": "vite build",
     "preview": "vite preview --port 8080",
     "compile": "truffle compile",

@@ -16,9 +16,20 @@ function spawnBg(name, cmd, args, cwd) {
   return p;
 }
 
-// 1. Ganache (assumes installed globally)
+// 1. Ganache on the same RPC endpoint used by Truffle and MetaMask.
 try {
-  spawnBg('ganache', 'ganache', ['--deterministic']);
+  spawnBg('ganache', 'npx', [
+    'ganache',
+    '--deterministic',
+    '--host',
+    '127.0.0.1',
+    '--port',
+    '7545',
+    '--chain.chainId',
+    '1337',
+    '--chain.networkId',
+    '1337',
+  ], ROOT);
 } catch (e) {
   console.warn('[dev-launcher] ganache CLI not found; please start Ganache GUI manually.');
 }
