@@ -1,0 +1,427 @@
+/* src/pages/Track.module.css — CargoChain */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding-bottom: var(--s-8);
+}
+
+/* --- Search card --- */
+.searchCard { padding: 0; }
+.searchInner {
+  display: flex;
+  align-items: center;
+  padding: var(--s-4) var(--s-5);
+}
+
+/* --- Empty state card (no request id entered) --- */
+.emptyCard {
+  padding: var(--s-6);
+}
+.searchInner > :global(.SearchInput) {
+  flex: 1;
+  max-width: 720px;
+}
+
+/* --- Summary card --- */
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+
+.summaryHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+}
+
+.summaryId {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.summaryIdLabel {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: var(--fw-semibold);
+  color: var(--text-secondary);
+}
+
+.summaryIdVal {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--tracking-tight);
+  text-wrap: balance;
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--s-4);
+}
+@media (max-width: 800px) {
+  .summaryGrid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 480px) {
+  .summaryGrid { grid-template-columns: 1fr; }
+}
+
+.summaryFieldLabel {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: var(--fw-semibold);
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+.summaryFieldVal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  font-weight: var(--fw-medium);
+}
+
+.routeArrow {
+  color: var(--text-muted);
+  margin: 0 2px;
+}
+
+/* --- Special instructions strip on the summary card --- */
+.specialNote {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  background: var(--primary-soft);
+  border-radius: var(--r-md);
+  border-left: 3px solid var(--primary);
+}
+.specialNoteIcon {
+  width: 20px;
+  height: 20px;
+  color: var(--primary);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.specialNoteTitle {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: var(--fw-semibold);
+  color: var(--primary-text);
+  margin-bottom: 2px;
+}
+.specialNoteBody {
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+/* --- Tabs card --- */
+.tabsCard { padding: 0; }
+.tabsWrap { padding: 0 var(--s-5); }
+.tabBody { padding: var(--s-3) var(--s-5) var(--s-5); }
+
+.tabEmpty {
+  padding: var(--s-6);
+  text-align: center;
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: var(--fs-sm);
+}
+
+/* --- Timeline --- */
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.tlItem {
+  position: relative;
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  gap: var(--s-4);
+  padding: var(--s-3) 0;
+}
+
+.tlItem:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  left: 15px;
+  top: 38px;
+  bottom: -8px;
+  width: 2px;
+  background: var(--border);
+}
+
+.tlDot {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-surface);
+  border: 2px solid var(--border);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  z-index: 1;
+}
+
+.tlDot img { width: 14px; height: 14px; filter: brightness(0) invert(1); }
+
+.tl_success .tlDot { background: var(--success); border-color: var(--success); }
+.tl_info    .tlDot { background: var(--info);    border-color: var(--info); }
+.tl_warning .tlDot { background: var(--warning); border-color: var(--warning); }
+.tl_danger  .tlDot { background: var(--danger);  border-color: var(--danger); }
+.tl_neutral .tlDot { background: var(--bg-surface); border-color: var(--border); }
+
+.tlBody { display: flex; flex-direction: column; gap: 2px; }
+
+.tlTime {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.tlTitle {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
+}
+
+.tlActor {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.tlDetails {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+
+/* --- Rejection block (Scenario B) --- */
+.rejectionBox {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger);
+  border-radius: var(--r-md);
+}
+.rejectionIcon {
+  width: 18px;
+  height: 18px;
+  color: var(--danger);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.rejectionTitle {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: var(--fw-semibold);
+  color: var(--danger);
+  margin-bottom: 2px;
+}
+.rejectionBody {
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.proofRow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+  flex-wrap: wrap;
+}
+
+.proofStub {
+  width: 72px;
+  height: 56px;
+  background: linear-gradient(135deg, var(--bg-subtle), var(--border-soft));
+  border: 1px dashed var(--border);
+  border-radius: var(--r-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-align: center;
+  padding: 4px;
+  line-height: 1.1;
+}
+
+.proofLink {
+  font-size: var(--fs-xs);
+  color: var(--primary);
+  font-weight: var(--fw-medium);
+  text-decoration: none;
+}
+.proofLink:hover { text-decoration: underline; }
+
+.actionRow {
+  display: flex;
+  gap: var(--s-2);
+  margin-top: var(--s-3);
+}
+
+/* --- Details tab --- */
+.detailsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--s-3);
+}
+@media (max-width: 600px) { .detailsGrid { grid-template-columns: 1fr; } }
+
+.detailRow {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) 0;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: var(--fs-sm);
+}
+
+.detailLabel { color: var(--text-secondary); font-weight: var(--fw-medium); }
+.detailValue { color: var(--text-primary); display: flex; align-items: center; gap: 8px; }
+
+/* --- Proof tab --- */
+.proofPanel { display: flex; flex-direction: column; gap: var(--s-3); }
+
+.proofHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  padding-bottom: var(--s-3);
+  border-bottom: 1px solid var(--border-soft);
+}
+.proofHeaderIcon { width: 32px; height: 32px; flex-shrink: 0; }
+.proofHeaderTitle { font-weight: var(--fw-semibold); color: var(--text-primary); font-size: var(--fs-md); }
+.proofHeaderBody { font-size: var(--fs-sm); color: var(--text-secondary); margin-top: 2px; }
+
+.proofList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--s-3);
+}
+
+.proofPlaceholder {
+  aspect-ratio: 4 / 3;
+  background: linear-gradient(135deg, var(--bg-subtle), var(--border-soft));
+  border: 1px dashed var(--border);
+  border-radius: var(--r-md);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
+}
+.proofPlaceholder:hover { border-color: var(--primary); background: var(--primary-soft); }
+.proofPlaceholderHint { font-size: var(--fs-xs); color: var(--text-muted); margin-top: 4px; }
+
+/* --- Payments tab --- */
+.paymentsPanel { display: flex; flex-direction: column; gap: var(--s-3); }
+
+.paymentsHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  padding-bottom: var(--s-3);
+  border-bottom: 1px solid var(--border-soft);
+}
+.paymentsHeaderIcon { width: 32px; height: 32px; flex-shrink: 0; }
+.paymentsHeaderTitle { font-weight: var(--fw-semibold); color: var(--text-primary); font-size: var(--fs-md); }
+.paymentsHeaderBody { font-size: var(--fs-sm); color: var(--text-secondary); margin-top: 2px; }
+
+.paymentRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--s-3) 0;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: var(--fs-sm);
+}
+.paymentLabel { color: var(--text-secondary); font-weight: var(--fw-medium); }
+.paymentValue { color: var(--text-primary); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+
+.paymentNote {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  background: var(--bg-subtle);
+  border-radius: var(--r-md);
+  padding: var(--s-3) var(--s-4);
+  line-height: 1.5;
+}
+
+/* --- Refund block (BusinessFlow Scenario C) --- */
+.refundBlock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  margin-top: var(--s-2);
+  background: var(--warning-soft);
+  border: 1px solid var(--warning);
+  border-radius: var(--r-md);
+  flex-wrap: wrap;
+}
+.refundText {
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  line-height: 1.5;
+  flex: 1;
+  min-width: 240px;
+}
+
+/* --- Intro card --- */
+.intro {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--s-3);
+  padding: var(--s-8) var(--s-6);
+}
+
+.introTitle {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
+}
+
+.introBody {
+  margin: 0;
+  max-width: 480px;
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}

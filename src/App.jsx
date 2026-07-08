@@ -1,28 +1,46 @@
 // src/App.jsx — CargoChain
-// Router setup. The Navbar lives outside <Routes> so it stays mounted
-// across page changes. Each <Route> renders one page component from
-// src/pages/. The four pages correspond 1:1 to the four pages described
-// in AGENTS.md § Repository Structure.
+// Router setup. The Layout (Sidebar + main slot) lives outside
+// <Routes> so it stays mounted across page changes.
+//
+// Note: only top-level destinations are surfaced in the sidebar (see
+// Sidebar.jsx). /track and /create-request stay as routes so that
+// list-page CTAs (MyShipments row click, Profile tx row, etc.) can
+// still navigate to them.
 
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { Navbar } from './components/Navbar.jsx';
+import { Layout } from './components/Layout.jsx';
 import { Marketplace } from './pages/Marketplace.jsx';
 import { Shipper } from './pages/Shipper.jsx';
 import { Carrier } from './pages/Carrier.jsx';
 import { Track } from './pages/Track.jsx';
+import { CreateRequest } from './pages/CreateRequest.jsx';
+import { MyShipments } from './pages/MyShipments.jsx';
+import { Profile } from './pages/Profile.jsx';
+import { RequestDetail } from './pages/RequestDetail.jsx';
 
 export function App() {
   return (
     <BrowserRouter>
-      <Navbar />
-      <Routes>
-        <Route path="/" element={<Marketplace />} />
-        <Route path="/shipper" element={<Shipper />} />
-        <Route path="/carrier" element={<Carrier />} />
-        <Route path="/track" element={<Track />} />
-        <Route path="/track/:id" element={<Track />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <Layout>
+        <Routes>
+          {/* Top-level destinations (in sidebar) */}
+          <Route path="/" element={<Marketplace />} />
+          <Route path="/my-shipments" element={<MyShipments />} />
+          <Route path="/profile" element={<Profile />} />
+
+          {/* Off-sidebar routes — reachable via list-page actions */}
+          <Route path="/create-request" element={<CreateRequest />} />
+          <Route path="/requests/:id" element={<RequestDetail />} />
+          <Route path="/track" element={<Track />} />
+          <Route path="/track/:id" element={<Track />} />
+
+          {/* Role-specific dashboards — kept for future module handoff */}
+          <Route path="/shipper" element={<Shipper />} />
+          <Route path="/carrier" element={<Carrier />} />
+
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Layout>
     </BrowserRouter>
   );
 }

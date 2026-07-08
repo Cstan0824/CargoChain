@@ -1,0 +1,10 @@
+/* src/components/Card.module.css */
+
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.padded { padding: var(--s-5); }

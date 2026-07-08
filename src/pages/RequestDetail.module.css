@@ -1,0 +1,265 @@
+/* src/pages/RequestDetail.module.css — CargoChain */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding-bottom: var(--s-8);
+}
+
+.backIcon {
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+}
+
+.muted { color: var(--text-secondary); font-size: var(--fs-sm); }
+
+/* --- Header card --- */
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+}
+
+.headerTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+
+.headerBadges {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+
+.label {
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: var(--fw-semibold);
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.idValue {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-bold);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--tracking-tight);
+  line-height: 1.1;
+}
+
+.routeBlock {
+  display: grid;
+  grid-template-columns: 48px 1fr auto auto;
+  gap: var(--s-4);
+  align-items: center;
+  padding: var(--s-4);
+  background: var(--bg-subtle);
+  border-radius: var(--r-md);
+}
+
+@media (max-width: 800px) {
+  .routeBlock { grid-template-columns: 48px 1fr; }
+  .routeBlock > .routeMeta { grid-column: 1 / -1; }
+}
+
+.routePin {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--primary-soft);
+  color: var(--primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.routeText {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.routeFrom,
+.routeTo {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
+  text-wrap: balance;
+}
+
+.routeDivider {
+  width: 24px;
+  height: 2px;
+  background: var(--border);
+  border-radius: 1px;
+  margin: 2px 0;
+}
+
+.routeMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.rewardValue {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--tracking-tight);
+}
+
+.milestoneBlock {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.milestoneLabel {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Detail grid (Deadline + Created) --- */
+.detailGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-4);
+}
+@media (max-width: 700px) {
+  .detailGrid { grid-template-columns: 1fr; }
+}
+
+.detailCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.detailHead {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+}
+
+.detailIcon {
+  width: 22px;
+  height: 22px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
+  text-wrap: balance;
+}
+
+.cardSub {
+  margin: 2px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  text-wrap: pretty;
+}
+
+.detailBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bigValue {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  text-wrap: balance;
+}
+
+/* --- Items card --- */
+.itemsCard { padding: 0; }
+
+.itemsHead {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  padding: var(--s-4) var(--s-5);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.itemsList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.itemRow {
+  padding: var(--s-3) var(--s-5);
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.itemRow:first-child { border-top: 0; }
+
+.itemMain { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.itemName {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--text-primary);
+}
+
+.itemQty {
+  color: var(--text-secondary);
+  font-weight: var(--fw-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.itemDesc {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+/* --- Instructions card --- */
+.instrCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.instrBody {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  line-height: 1.5;
+  text-wrap: pretty;
+  background: var(--primary-soft);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--r-sm);
+  padding: var(--s-3) var(--s-4);
+}
+
+/* --- Footer actions --- */
+.footerRow {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s-3);
+  padding-top: var(--s-3);
+}

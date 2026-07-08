@@ -1,0 +1,115 @@
+/* src/pages/MyShipments.module.css — CargoChain */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding-bottom: var(--s-8);
+}
+
+.filterBar {
+  padding: var(--s-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.filterRow {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+
+.filterRow > :global(.SearchInput) {
+  flex: 1;
+  min-width: 240px;
+}
+
+.tabsRow {
+  border-top: 1px solid var(--border-soft);
+  padding-top: var(--s-2);
+}
+
+.notice {
+  font-size: var(--fs-sm);
+  padding: var(--s-3) var(--s-4);
+  background: var(--warning-soft);
+  border-color: var(--warning);
+  color: var(--text-primary);
+}
+
+.muted { color: var(--text-secondary); }
+
+.tableCard {
+  padding: 0;
+}
+
+.idLink {
+  background: transparent;
+  border: 0;
+  padding: 0 4px;
+  min-height: 40px;
+  font: inherit;
+  color: var(--primary);
+  font-weight: var(--fw-semibold);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.idLink:hover { text-decoration: underline; }
+
+.arrow {
+  margin: 0 4px;
+  color: var(--text-muted);
+}
+
+.numCell {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--fw-medium);
+}
+
+.milestoneCell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.milestoneLabel {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Deadline cell --- */
+.deadlineCell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.2;
+  min-width: 0;
+}
+
+.deadlineMain {
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  font-weight: var(--fw-medium);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.deadlineSub {
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* --- Action cell --- */
+.actionCell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}

@@ -1,0 +1,106 @@
+/* src/components/Layout.module.css — CargoChain */
+
+.root {
+  display: flex;
+  align-items: stretch;
+  min-height: 100vh;
+  background: var(--bg-page);
+}
+
+/* Skip-to-content link for keyboard / screen-reader users. */
+.skipLink {
+  position: absolute;
+  top: -100px;
+  left: var(--s-3);
+  z-index: 100;
+  background: var(--primary);
+  color: var(--text-inverse);
+  padding: 10px 16px;
+  border-radius: var(--r-md);
+  font-weight: var(--fw-semibold);
+  text-decoration: none;
+  transition: top var(--dur-1) var(--ease);
+}
+.skipLink:focus { top: var(--s-3); }
+
+.sidebarSlot {
+  flex-shrink: 0;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  padding: 0 var(--s-6);
+  max-width: var(--content-max);
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* --- Mobile drawer (hidden on desktop) --- */
+.scrim {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+  z-index: 19;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-3) var(--ease);
+  will-change: opacity;
+}
+.scrimOpen { will-change: auto; } /* drop the hint when fully visible */
+
+.hamburger {
+  display: none;
+  position: sticky;
+  top: var(--s-4);
+  left: 0;
+  width: 40px;
+  height: 40px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0;
+  margin-bottom: var(--s-3);
+  z-index: 10;
+}
+.hamburger span {
+  display: block;
+  width: 18px;
+  height: 2px;
+  background: var(--text-primary);
+  border-radius: 1px;
+}
+
+@media (max-width: 900px) {
+  .main { padding: 0 var(--s-4); }
+
+  .hamburger { display: flex; }
+
+  .sidebarSlot {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    z-index: 21;
+    transform: translateX(-100%);
+    transition: transform var(--dur-3) var(--ease);
+    box-shadow: var(--shadow-lg);
+  }
+  .sidebarOpen {
+    transform: translateX(0);
+    will-change: transform;
+  }
+  .sidebarSlot:not(.sidebarOpen) { will-change: auto; }
+
+  .scrim { display: block; }
+  .scrimOpen {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
