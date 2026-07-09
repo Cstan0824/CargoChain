@@ -19,36 +19,40 @@
 
 ## DeliveryEscrow.sol
 
-### `createRequest(string goodsInfo, Milestone[] milestones, uint256 acceptDeadline) payable returns (uint256 requestId)`
+### `createRequest(string pickupLocation, string deliveryLocation, string specialInstruction, uint256 deadline, uint256 proposedAmount, ItemInput[] items) returns (uint256 requestId)`
 
-- **Purpose:** Shipper creates a delivery request and locks ETH in escrow.
-- **Caller:** Any registered shipper (msg.sender becomes `request.shipper`).
-- **Parameters:**
-  - `goodsInfo` — free-text description of goods
-  - `milestones` — array of `Milestone` structs (name + deadline + requiresProof)
-  - `acceptDeadline` — unix timestamp; carriers can no longer `acceptRequest` after this
-- **Payable:** YES — `msg.value` is the total reward (must equal `reward` parameter if explicit, otherwise implicit)
-- **Returns:** newly created `requestId`
-- **Events:** `RequestCreated(requestId, shipper, reward)`
-- **Reverts:**
-  - `NotRegistered()` if shipper hasn't called `UserRegistry.register`
-  - `ZeroReward()` if `msg.value == 0`
-  - `NoMilestones()` if `milestones.length == 0`
-  - `DeadlineInPast()` if `acceptDeadline <= block.timestamp`
-- **Frontend page:** `shipper.html` (Create Request form)
+- **Purpose:** Publish an open delivery request and advertise its intended ETH payment.
+- **Caller:** Any wallet; `msg.sender` becomes the shipper.
+- **Payable:** No. No ETH is locked during this transaction.
+- **Effects:** Stores the route, items, deadline, instructions, and `proposedAmount`; status becomes `Open`.
+- **Events:** `RequestCreated(requestId, shipper, proposedAmount)`.
+- **Frontend:** Marketplace create-request modal.
 
-### `acceptRequest(uint256 requestId)`
+### `proposeMilestones(uint256 requestId, MilestoneInput[] milestones)`
 
-- **Purpose:** Carrier accepts an open request (FCFS).
-- **Caller:** Any registered carrier.
-- **Parameters:** `requestId`
-- **Reverts:**
-  - `NotOpen()` if `request.status != Open`
-  - `DeadlinePassed()` if `block.timestamp > request.acceptDeadline`
-  - `AlreadyAccepted()` if `request.carrier != address(0)`
-- **Effects:** `request.carrier = msg.sender`, `request.status = Accepted`
-- **Events:** `RequestAccepted(requestId, carrier)`
-- **Frontend page:** `index.html` (marketplace Accept button)
+- **Purpose:** A carrier claims an open request by proposing milestone names and payout percentages.
+- **Caller:** Any wallet except the request shipper.
+- **Validation:** Request must be `Open`; at least one milestone; percentages must be positive and total exactly 100.
+- **Effects:** Sets the caller as carrier, stores milestones, changes status to `PendingApproval`, and removes the request from the open marketplace.
+- **Events:** `MilestonePlanProposed(requestId, carrier)`.
+- **Frontend:** Marketplace request details and `/shipments/:id/propose`.
+
+### `approveAndFund(uint256 requestId) payable`
+
+- **Purpose:** The shipper approves the selected carrier's milestone plan and locks the advertised ETH payment.
+- **Caller:** Request shipper only.
+- **Payable:** Yes. `msg.value` must equal the stored `proposedAmount`.
+- **Effects:** Stores `totalAmount`, calculates each milestone payout, and changes status to `Funded`.
+- **Events:** `EscrowFunded(requestId, amount)`.
+- **Frontend:** `/track/:id`.
+
+### `rejectMilestoneProposal(uint256 requestId)`
+
+- **Purpose:** Reject the assigned carrier's milestone plan before escrow funding.
+- **Caller:** Request shipper only.
+- **Effects:** Clears the carrier and proposed milestones, changes status back to `Open`, and republishes the request in the marketplace.
+- **Events:** `MilestonePlanRejected(requestId, carrier)`.
+- **Frontend:** `/track/:id`.
 
 ### `cancelRequest(uint256 requestId)`
 

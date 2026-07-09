@@ -15,6 +15,7 @@ contract('DeliveryEscrow', (accounts) => {
       'Penang',
       'Fragile, handle with care',
       await futureDeadline(),
+      oneEth,
       [['Laptop', 'Fragile electronics', 2]],
       { from },
     );
@@ -49,7 +50,7 @@ contract('DeliveryEscrow', (accounts) => {
     }
   }
 
-  it('shipper creates request without ETH', async () => {
+  it('shipper creates request with an advertised payment but without locking ETH', async () => {
     const escrow = await DeliveryEscrow.new();
     const tx = await createRequest(escrow);
 
@@ -60,6 +61,8 @@ contract('DeliveryEscrow', (accounts) => {
     assert.equal(request.shipper, shipper);
     assert.equal(request.carrier, '0x0000000000000000000000000000000000000000');
     assert.equal(request.totalAmount.toString(), '0');
+    assert.equal(request.proposedAmount.toString(), oneEth);
+    assert.equal((await web3.eth.getBalance(escrow.address)).toString(), '0');
     assert.equal(Number(request.status), 0); // Open
   });
 
@@ -87,6 +90,57 @@ contract('DeliveryEscrow', (accounts) => {
     assert.equal(openIds.length, 0);
   });
 
+  it('shipper cannot propose milestones for their own request', async () => {
+    const escrow = await DeliveryEscrow.new();
+    await createRequest(escrow);
+
+    await expectRevert(
+      escrow.proposeMilestones(1, [['Delivery', 100]], { from: shipper }),
+      'shipper cannot be carrier',
+    );
+  });
+
+  it('second carrier cannot replace the first carrier proposal', async () => {
+    const escrow = await DeliveryEscrow.new();
+    await createRequest(escrow);
+    await escrow.proposeMilestones(1, [['Delivery', 100]], { from: carrier });
+
+    await expectRevert(
+      escrow.proposeMilestones(1, [['Alternative delivery', 100]], { from: otherCarrier }),
+      'request is not open',
+    );
+
+    const request = await escrow.getRequest(1);
+    assert.equal(request.carrier, carrier);
+  });
+
+  it('shipper can reject a proposal and reopen the request', async () => {
+    const escrow = await DeliveryEscrow.new();
+    await createProposedRequest(escrow);
+
+    const tx = await escrow.rejectMilestoneProposal(1, { from: shipper });
+    const request = await escrow.getRequest(1);
+    const milestones = await escrow.getMilestones(1);
+    const openIds = await escrow.getOpenRequests(0, 10);
+
+    assert.equal(tx.logs[0].event, 'MilestonePlanRejected');
+    assert.equal(request.carrier, '0x0000000000000000000000000000000000000000');
+    assert.equal(Number(request.status), 0); // Open
+    assert.equal(milestones.length, 0);
+    assert.equal(openIds.length, 1);
+    assert.equal(openIds[0].toString(), '1');
+  });
+
+  it('non-shipper cannot reject a milestone proposal', async () => {
+    const escrow = await DeliveryEscrow.new();
+    await createProposedRequest(escrow);
+
+    await expectRevert(
+      escrow.rejectMilestoneProposal(1, { from: carrier }),
+      'caller is not shipper',
+    );
+  });
+
   it('shipper approves and funds exact total amount', async () => {
     const escrow = await DeliveryEscrow.new();
     await createProposedRequest(escrow);
@@ -110,6 +164,16 @@ contract('DeliveryEscrow', (accounts) => {
     await expectRevert(
       escrow.approveAndFund(1, { from: stranger, value: oneEth }),
       'caller is not shipper',
+    );
+  });
+
+  it('shipper must fund the advertised payment amount exactly', async () => {
+    const escrow = await DeliveryEscrow.new();
+    await createProposedRequest(escrow);
+
+    await expectRevert(
+      escrow.approveAndFund(1, { from: shipper, value: web3.utils.toWei('0.5', 'ether') }),
+      'funding must match proposed amount',
     );
   });
 

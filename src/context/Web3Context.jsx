@@ -29,11 +29,30 @@ export function Web3Provider({ children }) {
     const p = new BrowserProvider(window.ethereum);
     setProvider(p);
 
-    const onAccountsChanged = (accs) => setAccount(accs[0] || null);
+    const refreshNetwork = async () => {
+      const net = await p.getNetwork();
+      setChainId(Number(net.chainId));
+    };
+
+    const onAccountsChanged = async (accs) => {
+      const nextAccount = accs[0] || null;
+      setAccount(nextAccount);
+      setSigner(nextAccount ? await p.getSigner() : null);
+      await refreshNetwork();
+    };
     const onChainChanged    = () => window.location.reload();
 
     window.ethereum.on('accountsChanged', onAccountsChanged);
     window.ethereum.on('chainChanged',    onChainChanged);
+
+    refreshNetwork().catch(() => {
+      setError('Could not read the current wallet network.');
+    });
+    window.ethereum.request({ method: 'eth_accounts' })
+      .then(onAccountsChanged)
+      .catch(() => {
+        // No prior authorization; the user can still connect with the button.
+      });
 
     return () => {
       window.ethereum.removeListener('accountsChanged', onAccountsChanged);

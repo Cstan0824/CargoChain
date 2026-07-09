@@ -6,6 +6,7 @@
 import { useWallet } from '../hooks/useWallet.js';
 import { useToast } from '../hooks/useToast.js';
 import { Avatar } from './Avatar.jsx';
+import { ConnectButton } from './ConnectButton.jsx';
 import { pickAvatar } from '../utils/avatar.js';
 import { HiOutlineBellAlert } from 'react-icons/hi2';
 import styles from './Topbar.module.css';
@@ -31,6 +32,7 @@ export function Topbar({ title, subtitle, actions }) {
 
       <div className={styles.right}>
         {actions && <div className={styles.actions}>{actions}</div>}
+        <ConnectButton />
         <button type="button" className={styles.bellBtn} onClick={onBell} aria-label="Notifications">
           <HiOutlineBellAlert className={styles.bellIcon} aria-hidden="true" />
         </button>
