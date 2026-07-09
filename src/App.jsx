@@ -13,9 +13,9 @@ import { Marketplace } from './pages/Marketplace.jsx';
 import { Shipper } from './pages/Shipper.jsx';
 import { Carrier } from './pages/Carrier.jsx';
 import { Track } from './pages/Track.jsx';
-import { CreateRequest } from './pages/CreateRequest.jsx';
 import { MyShipments } from './pages/MyShipments.jsx';
 import { Profile } from './pages/Profile.jsx';
+import { ProposeMilestones } from './pages/ProposeMilestones.jsx';
 import { RequestDetail } from './pages/RequestDetail.jsx';
 
 export function App() {
@@ -29,8 +29,8 @@ export function App() {
           <Route path="/profile" element={<Profile />} />
 
           {/* Off-sidebar routes — reachable via list-page actions */}
-          <Route path="/create-request" element={<CreateRequest />} />
           <Route path="/requests/:id" element={<RequestDetail />} />
+          <Route path="/shipments/:id/propose" element={<ProposeMilestones />} />
           <Route path="/track" element={<Track />} />
           <Route path="/track/:id" element={<Track />} />
 

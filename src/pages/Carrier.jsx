@@ -25,7 +25,7 @@ import { Tabs } from '../components/Tabs.jsx';
 import { ProgressLine } from '../components/ProgressLine.jsx';
 import { LineChart } from '../components/LineChart.jsx';
 import { useToast } from '../hooks/useToast.js';
-import { formatEth, formatMyr } from '../utils/format.js';
+import { formatEth } from '../utils/format.js';
 import { hashFile, uploadPhoto } from '../utils/upload.js';
 import styles from './Carrier.module.css';
 
@@ -232,7 +232,6 @@ export function Carrier() {
           <Card className={styles.earnings}>
             <h2 className={styles.cardTitle}>Earnings (this month)</h2>
             <div className={styles.earningsValue}>2.85 ETH</div>
-            <div className={styles.earningsSub}>≈ {formatMyr(2850000000000000000n)}</div>
             <div className={styles.chartWrap}>
               <LineChart points={9} color="var(--chart-5)" />
             </div>

@@ -1,97 +1,90 @@
 // src/pages/Marketplace.jsx — CargoChain
 // Browse `Open` delivery requests (BusinessFlow §7). Row layout (left→right):
 //   Milestones (inline progress line) · Route · Reward · Deadline · Action
-// Items live on the RequestDetail page (not in the row).
-// "View" opens the RequestDetail page; "Accept Job" is the carrier's entry
-// point into the request.
+// Every row opens the marketplace request preview. Shipment timelines remain
+// under My Shipments.
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  HiOutlineMapPin,
-  HiOutlineEye,
-  HiOutlineLockClosed,
+  HiOutlineBars3,
+  HiOutlineSquares2X2,
 } from 'react-icons/hi2';
 import { useContracts } from '../hooks/useContracts.js';
+import { useWallet } from '../hooks/useWallet.js';
 import { useToast } from '../hooks/useToast.js';
 import { Topbar } from '../components/Topbar.jsx';
 import { SearchInput } from '../components/SearchInput.jsx';
-import { FilterPill } from '../components/FilterPill.jsx';
 import { Button } from '../components/Button.jsx';
 import { Table } from '../components/Table.jsx';
 import { EmptyState } from '../components/EmptyState.jsx';
 import { Card } from '../components/Card.jsx';
-import { ProgressLine } from '../components/ProgressLine.jsx';
-import { formatEth, formatRelative, formatDate, formatDaysLeft } from '../utils/format.js';
+import { formatEth, formatDate, formatDaysLeft, formatRelative } from '../utils/format.js';
+import { CreateRequestModal } from '../components/CreateRequestModal.jsx';
 import { deliveryTruckCity } from '../assets';
 import styles from './Marketplace.module.css';
-
-// Demo rows. `createdAt` is the request's creation timestamp; `deadlineMs`
-// is the request's deadline. status is implicit `Open` for marketplace rows.
-const DEMO_ROWS = [
-  { id: 1001, from: 'Kuala Lumpur',  to: 'Penang',      milestones: 4, current: 0, rewardWei: 2500000000000000000n, deadlineMs: Date.now() + 5 * 86400000,  createdAt: Math.floor(Date.now() / 1000) - 7200 },
-  { id: 1002, from: 'Johor Bahru',  to: 'Singapore',   milestones: 3, current: 0, rewardWei: 350000000000000000n,  deadlineMs: Date.now() + 8 * 3600000,   createdAt: Math.floor(Date.now() / 1000) - 3600 },
-  { id: 1003, from: 'Shah Alam',    to: 'Kuala Lumpur', milestones: 3, current: 0, rewardWei: 1800000000000000000n, deadlineMs: Date.now() + 86400000,      createdAt: Math.floor(Date.now() / 1000) - 18000 },
-  { id: 1004, from: 'Kuala Lumpur', to: 'Ipoh',        milestones: 5, current: 0, rewardWei: 3200000000000000000n, deadlineMs: Date.now() + 6 * 86400000,  createdAt: Math.floor(Date.now() / 1000) - 86400 },
-  { id: 1005, from: 'Malacca',      to: 'Kuala Lumpur', milestones: 4, current: 0, rewardWei: 1250000000000000000n, deadlineMs: Date.now() + 5 * 86400000,  createdAt: Math.floor(Date.now() / 1000) - 259200 },
-];
 
 export function Marketplace() {
   const navigate = useNavigate();
   const { contracts, deployError } = useContracts();
+  const { account } = useWallet();
   const { show } = useToast();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState('');
-  const [route, setRoute] = useState('All Routes');
+  const [view, setView] = useState('list');
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!contracts?.deliveryEscrow) {
-      setRows(DEMO_ROWS);
+      setRows([]);
       return;
     }
+    let cancelled = false;
+
     setLoading(true);
     setError(null);
-    contracts.deliveryEscrow.getOpenRequests(0n, 50n)
-      .then(() => {
-        // Until module b wires the per-id fetch, fall back to demo rows.
-        setRows(DEMO_ROWS);
+
+    loadOpenRequests(contracts.deliveryEscrow)
+      .then((nextRows) => {
+        if (!cancelled) setRows(nextRows);
       })
       .catch((e) => {
-        setError(e.shortMessage || e.message);
-        setRows(DEMO_ROWS);
+        if (!cancelled) {
+          setError(e.shortMessage || e.message);
+          setRows([]);
+        }
       })
-      .finally(() => setLoading(false));
-  }, [contracts]);
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [contracts, refreshKey]);
 
   const filtered = useMemo(() => {
     return rows.filter((r) => {
       if (search) {
         const q = search.toLowerCase();
-        const hay = `${r.id} ${r.from} ${r.to}`.toLowerCase();
+        const hay = `${r.id} ${r.from} ${r.to} ${r.itemsLabel}`.toLowerCase();
         if (!hay.includes(q)) return false;
-      }
-      if (route !== 'All Routes') {
-        if (!`${r.from} → ${r.to}`.toLowerCase().includes(route.toLowerCase())) return false;
       }
       return true;
     });
-  }, [rows, search, route]);
+  }, [rows, search]);
 
   const openDetails = (id) => navigate(`/requests/${id}`);
-  const acceptJob = (id) => {
-    show(
-      `Accept Job — module d (Melissa). Request #${id} would transition Open → PendingApproval.`,
-      'info',
-    );
-  };
 
   return (
     <div className={styles.page}>
       <Topbar
         title="Marketplace"
-        subtitle="Find open delivery jobs posted by shippers. Accept and start earning."
+        subtitle="Find open delivery jobs posted by shippers and propose a milestone plan."
+        actions={<Button onClick={() => setIsCreateModalOpen(true)}>Create request</Button>}
       />
 
       <Card className={styles.filterBar} padded={false}>
@@ -103,85 +96,169 @@ export function Marketplace() {
             placeholder="Search routes or keyword…"
             actionLabel="Search"
           />
-          <FilterPill
-            label="Route"
-            value={route}
-            options={['All Routes', 'Kuala Lumpur', 'Penang', 'Johor Bahru', 'Singapore', 'Shah Alam', 'Ipoh', 'Malacca']}
-            onChange={setRoute}
-          />
+          <div className={styles.viewToggle} aria-label="Marketplace view">
+            <button
+              type="button"
+              className={`${styles.viewToggleBtn} ${view === 'list' ? styles.viewToggleActive : ''}`}
+              onClick={() => setView('list')}
+              aria-pressed={view === 'list'}
+              title="List view"
+            >
+              <HiOutlineBars3 aria-hidden="true" />
+              <span>List</span>
+            </button>
+            <button
+              type="button"
+              className={`${styles.viewToggleBtn} ${view === 'cards' ? styles.viewToggleActive : ''}`}
+              onClick={() => setView('cards')}
+              aria-pressed={view === 'cards'}
+              title="Card view"
+            >
+              <HiOutlineSquares2X2 aria-hidden="true" />
+              <span>Cards</span>
+            </button>
+          </div>
         </div>
       </Card>
+
+      {loading && (
+        <Card className={styles.notice}>
+          <span className={styles.muted}>Loading open requests from DeliveryEscrow…</span>
+        </Card>
+      )}
 
       {deployError && (
         <Card className={styles.notice}>
           <strong>Contracts not deployed.</strong>{' '}
           <span className={styles.muted}>
-            Showing demo data. Run <code>npm run migrate</code> to populate the table.
+            Run <code>npm run migrate</code> to populate the marketplace.
           </span>
         </Card>
       )}
 
       {error && !deployError && (
-        <Card className={styles.notice}><span className={styles.muted}>Couldn't load on-chain data: {error}. Showing demo data.</span></Card>
+        <Card className={styles.notice}><span className={styles.muted}>Couldn't load on-chain data: {error}.</span></Card>
       )}
 
       <div className={styles.tableCard}>
-        {filtered.length === 0 ? (
+        {loading ? null : filtered.length === 0 ? (
           <Card padded={false} className={styles.emptyCard}>
             <EmptyState
               illustration={deliveryTruckCity}
-              title={deployError ? 'No requests yet' : 'No matches'}
+              title={emptyTitle({ deployError, error, rows, search })}
               description={
                 deployError
                   ? 'Run npm run migrate to deploy contracts and populate the marketplace.'
-                  : 'No open requests match your current filters. Try clearing the search or picking a different route.'
+                  : rows.length === 0
+                    ? 'Published delivery requests will appear here after shipper wallets submit createRequest().'
+                    : 'No open requests match your current filters. Try clearing the search or picking a different route.'
               }
               action={
-                !deployError && (
-                  <Button variant="secondary" onClick={() => { setSearch(''); setRoute('All Routes'); }}>
+                !deployError && rows.length === 0 ? (
+                  <Button variant="secondary" onClick={() => setIsCreateModalOpen(true)}>
+                    Create request
+                  </Button>
+                ) : !deployError && (
+                  <Button variant="secondary" onClick={() => setSearch('')}>
                     Clear filters
                   </Button>
                 )
               }
             />
           </Card>
+        ) : view === 'cards' ? (
+          <div className={styles.cardGrid}>
+            {filtered.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                className={styles.jobCard}
+                onClick={() => openDetails(r.id)}
+              >
+                <div className={styles.cardTop}>
+                  <span className={styles.cardId}>#{String(r.id).padStart(4, '0')}</span>
+                  <span className={styles.cardTime}>{formatRelative(r.createdAt)}</span>
+                </div>
+
+                <div className={styles.cardRoute}>
+                  <span className={styles.routeFrom} title={r.from}>{r.from}</span>
+                  <span className={styles.routeArrow}>→</span>
+                  <span className={styles.routeTo} title={r.to}>{r.to}</span>
+                </div>
+
+                {r.items && r.items.length > 0 && (
+                  <div className={styles.cardCargo}>
+                    <span className={styles.cargoIcon}>📦</span>
+                    <span className={styles.cargoText} title={r.itemsLabel}>
+                      {r.itemsLabel}
+                    </span>
+                  </div>
+                )}
+
+                {r.specialInstruction && (
+                  <div className={styles.specialBadge} title={r.specialInstruction}>
+                    <span className={styles.warningIcon}>⚠️</span>
+                    <span className={styles.specialText}>{r.specialInstruction}</span>
+                  </div>
+                )}
+
+                <div className={styles.cardDivider} />
+
+                <div className={styles.cardFooter}>
+                  <div className={styles.cardPaymentBox}>
+                  <span className={styles.footerLabel}>PLANNED PAYMENT</span>
+                  <strong className={styles.footerVal}>{formatEth(r.proposedAmountWei)}</strong>
+                  </div>
+                  <div className={styles.cardDeadlineBox}>
+                    <span className={styles.footerLabel}>DEADLINE</span>
+                    <strong className={styles.footerVal}>{formatDaysLeft(r.deadlineMs)}</strong>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
         ) : (
           <Table
+            onRowClick={(row) => openDetails(row.id)}
             columns={[
               {
-                key: 'route',
-                header: 'Route',
-                width: '20%',
+                key: 'id',
+                header: 'ID',
+                width: '8%',
                 render: (r) => (
-                  <button type="button" className={styles.routeCell} onClick={() => openDetails(r.id)}>
-                    <span className={styles.pin} aria-hidden="true">
-                      <HiOutlineMapPin size={14} />
-                    </span>
-                    <div className={styles.routeText}>
-                      <div className={styles.routeFrom} title={r.from}>{r.from}</div>
-                      <div className={styles.routeTo}>→ {r.to}</div>
-                    </div>
-                  </button>
+                  <span className={styles.tableId}>#{String(r.id).padStart(4, '0')}</span>
                 ),
               },
               {
-                key: 'milestones',
-                header: 'Milestones',
-                width: '14%',
+                key: 'route',
+                header: 'Route',
+                width: '25%',
                 render: (r) => (
-                  <div className={styles.milestoneCell}>
-                    <ProgressLine count={r.milestones} current={r.current} label={false} />
-                    <span className={styles.milestoneLabel}>{r.current} / {r.milestones}</span>
+                  <div className={styles.tableRouteRow}>
+                    <span className={styles.tableRouteLabel} title={r.from}>{r.from}</span>
+                    <span className={styles.tableRouteArrow}>→</span>
+                    <span className={styles.tableRouteLabel} title={r.to}>{r.to}</span>
                   </div>
                 ),
               },
               {
-                key: 'reward',
-                header: 'Reward',
-                width: '12%',
+                key: 'cargo',
+                header: 'Cargo',
+                width: '20%',
+                render: (r) => (
+                  <span className={styles.tableCargoLabel} title={r.itemsLabel}>
+                    {r.itemsLabel}
+                  </span>
+                ),
+              },
+              {
+                key: 'payment',
+                header: 'Planned payment',
+                width: '18%',
                 render: (r) => (
                   <div className={styles.rewardCell}>
-                    <div className={styles.rewardMain}>{formatEth(r.rewardWei)}</div>
+                    <div className={styles.rewardMain}>{formatEth(r.proposedAmountWei)}</div>
+                    <div className={styles.rewardSub}>Awaiting escrow</div>
                   </div>
                 ),
               },
@@ -191,40 +268,8 @@ export function Marketplace() {
                 width: '16%',
                 render: (r) => (
                   <div className={styles.deadlineCell}>
-                    <div className={styles.deadlineMain}>{formatDate(Math.floor(r.deadlineMs / 1000))}</div>
-                    <div className={styles.deadlineSub}>{formatDaysLeft(r.deadlineMs)}</div>
-                  </div>
-                ),
-              },
-              {
-                key: 'publishDate',
-                header: 'Publish date',
-                width: '14%',
-                render: (r) => (
-                  <div className={styles.publishCell}>
-                    <div className={styles.publishMain}>{formatDate(r.createdAt)}</div>
-                    <div className={styles.publishSub}>{formatRelative(r.createdAt)}</div>
-                  </div>
-                ),
-              },
-              {
-                key: 'action',
-                header: '',
-                width: '24%',
-                align: 'right',
-                render: (r) => (
-                  <div className={styles.actionCell}>
-                    <button
-                      type="button"
-                      className={styles.viewBtn}
-                      onClick={() => openDetails(r.id)}
-                      title="View request details"
-                    >
-                      <HiOutlineEye className={styles.viewIcon} aria-hidden="true" /> View
-                    </button>
-                    <Button size="sm" onClick={() => acceptJob(r.id)}>
-                      Accept Job
-                    </Button>
+                    <div className={styles.deadlineMain}>{formatDaysLeft(r.deadlineMs)}</div>
+                    <div className={styles.deadlineSub}>{formatDate(Math.floor(r.deadlineMs / 1000))}</div>
                   </div>
                 ),
               },
@@ -235,15 +280,76 @@ export function Marketplace() {
         )}
       </div>
 
-      <Card className={styles.privacy}>
-        <span className={styles.privacyIcon} aria-hidden="true">
-          <HiOutlineLockClosed size={18} />
-        </span>
-        <span>
-          <strong>For your privacy and safety,</strong> shipper and carrier addresses are only visible after a job is accepted.{' '}
-          <a href="#">Learn more</a>
-        </span>
-      </Card>
+      <CreateRequestModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onSuccess={() => setRefreshKey((value) => value + 1)}
+      />
     </div>
   );
+}
+
+async function loadOpenRequests(deliveryEscrow) {
+  const ids = await deliveryEscrow.getOpenRequests(0n, 50n);
+  const rows = await Promise.all(
+    ids.map(async (idValue) => {
+      const id = BigInt(idValue);
+      const [request, items, milestones] = await Promise.all([
+        deliveryEscrow.getRequest(id),
+        deliveryEscrow.getItems(id),
+        deliveryEscrow.getMilestones(id),
+      ]);
+      return mapMarketplaceRow(request, items, milestones);
+    }),
+  );
+
+  return rows.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+function mapMarketplaceRow(request, items, milestones) {
+  const id = Number(request.requestId ?? request[0]);
+  const shipper = request.shipper ?? request[1];
+  const from = request.pickupLocation ?? request[3];
+  const to = request.deliveryLocation ?? request[4];
+  const rewardWei = BigInt(request.totalAmount ?? request[5] ?? 0n);
+  const proposedAmountWei = BigInt(request.proposedAmount ?? request[11] ?? 0n);
+  const deadline = Number(request.deadline ?? request[7] ?? 0n);
+  const specialInstruction = request.specialInstruction ?? request[8];
+  const createdAt = Number(request.createdAt ?? request[10] ?? 0n);
+  const milestoneCount = milestones.length;
+  const paidCount = milestones.filter((m) => Number(m.status ?? m[6]) === 5).length;
+  const itemRows = Array.from(items || []);
+  const itemsLabel = itemRows.length
+    ? itemRows.map((it) => `${it.itemName ?? it[0]} x ${Number(it.quantity ?? it[2])}`).join(', ')
+    : 'No items listed';
+
+  const itemsList = itemRows.map((it) => ({
+    itemName: it.itemName ?? it[0],
+    itemDescription: it.itemDescription ?? it[1],
+    quantity: Number(it.quantity ?? it[2]),
+  }));
+
+  return {
+    id,
+    shipper,
+    from,
+    to,
+    itemsLabel,
+    items: itemsList,
+    specialInstruction,
+    milestones: milestoneCount,
+    current: paidCount,
+    rewardWei,
+    proposedAmountWei,
+    deadlineMs: deadline * 1000,
+    createdAt,
+  };
+}
+
+function emptyTitle({ deployError, error, rows, search }) {
+  if (deployError) return 'Contracts not deployed';
+  if (error) return 'Marketplace unavailable';
+  if (rows.length === 0) return 'No open requests yet';
+  if (search) return 'No matches';
+  return 'No open requests yet';
 }

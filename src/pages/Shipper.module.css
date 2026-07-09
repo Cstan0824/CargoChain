@@ -1,10 +1,13 @@
-/* src/pages/Shipper.module.css — CargoChain */
+/* src/pages/Shipper.module.css — CargoChain
+ * Redesigned: richer KPI row, improved pending card,
+ * polished table+escrow layout, premium notice banner.
+ */
 
 .page {
   display: flex;
   flex-direction: column;
-  gap: var(--s-4);
-  padding-bottom: var(--s-8);
+  gap: var(--s-5);
+  padding-bottom: var(--s-10);
 }
 
 .btnIcon {
@@ -12,9 +15,19 @@
   height: 16px;
 }
 
-/* --- Pending verifications card --- */
+/* ─── KPI row ──────────────────────────────────────────────────── */
+.kpiRow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--s-4);
+}
+@media (max-width: 960px) { .kpiRow { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 480px)  { .kpiRow { grid-template-columns: 1fr; } }
+
+/* ─── Pending verifications card ──────────────────────────────── */
 .pending {
   padding: 0;
+  overflow: hidden;
 }
 
 .pendingHeader {
@@ -22,8 +35,13 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--s-3);
-  padding: var(--s-4) var(--s-5);
+  padding: var(--s-5) var(--s-6);
   border-bottom: 1px solid var(--border-soft);
+  background: linear-gradient(
+    135deg,
+    rgba(217, 119, 6, 0.04) 0%,
+    transparent 60%
+  );
 }
 
 .pendingSub {
@@ -32,6 +50,7 @@
   color: var(--text-secondary);
   max-width: 540px;
   line-height: 1.5;
+  text-wrap: pretty;
 }
 
 .pendingList {
@@ -45,9 +64,9 @@
 .pendingRow {
   display: grid;
   grid-template-columns: 48px 1fr auto;
-  gap: var(--s-3);
+  gap: var(--s-4);
   align-items: center;
-  padding: var(--s-3) var(--s-5);
+  padding: var(--s-4) var(--s-6);
   border-top: 1px solid var(--border-soft);
   transition: background var(--dur-1) var(--ease);
 }
@@ -57,12 +76,14 @@
 .pendingThumb {
   width: 48px;
   height: 48px;
-  background: var(--primary-soft);
-  color: var(--primary);
-  border-radius: var(--r-md);
+  background: var(--warning-soft);
+  color: var(--warning);
+  border-radius: 12px;
+  border: 1px solid rgba(217, 119, 6, 0.12);
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 .pendingThumbIcon { width: 22px; height: 22px; }
 
@@ -83,11 +104,13 @@
   padding: 2px 6px;
   border-radius: var(--r-sm);
   font-variant-numeric: tabular-nums;
+  border: 1px solid var(--border-soft);
 }
 
 .pendingRoute {
   font-size: var(--fs-sm);
   color: var(--text-primary);
+  font-weight: var(--fw-medium);
 }
 
 .pendingBottomLine {
@@ -110,29 +133,16 @@
 }
 
 .pendingChev {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   color: var(--text-muted);
   flex-shrink: 0;
 }
 
-/* --- KPI row --- */
-.kpiRow {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--s-3);
-}
-@media (max-width: 900px) {
-  .kpiRow { grid-template-columns: repeat(2, 1fr); }
-}
-@media (max-width: 480px) {
-  .kpiRow { grid-template-columns: 1fr; }
-}
-
-/* --- Body two-column --- */
+/* ─── Body two-column ──────────────────────────────────────────── */
 .body {
   display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.75fr) minmax(0, 1fr);
   gap: var(--s-4);
   align-items: start;
 }
@@ -140,21 +150,26 @@
   .body { grid-template-columns: 1fr; }
 }
 
-.recent { padding: 0; }
+/* ─── Recent shipments card ────────────────────────────────────── */
+.recent {
+  padding: 0;
+  overflow: hidden;
+}
 
 .cardHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--s-4) var(--s-5) 0;
+  padding: var(--s-5) var(--s-6) var(--s-4);
 }
 
 .cardTitle {
-  margin: 0 0 var(--s-3);
+  margin: 0;
   font-size: var(--fs-md);
   font-weight: var(--fw-semibold);
   color: var(--text-primary);
   text-wrap: balance;
+  letter-spacing: -0.01em;
 }
 
 .viewAll {
@@ -162,6 +177,7 @@
   color: var(--primary);
   font-weight: var(--fw-medium);
   text-decoration: none;
+  cursor: pointer;
 }
 .viewAll:hover { text-decoration: underline; }
 
@@ -180,33 +196,33 @@
 .numCell {
   font-variant-numeric: tabular-nums;
   font-weight: var(--fw-medium);
+  font-size: var(--fs-sm);
 }
 
 .muted { color: var(--text-secondary); font-size: var(--fs-xs); }
 
-/* --- Escrow Overview card --- */
+/* ─── Escrow overview card ─────────────────────────────────────── */
 .escrow {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--s-3);
+  gap: var(--s-4);
 }
 
 .legend {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: var(--s-4) 0 0;
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   border-top: 1px solid var(--border-soft);
-  padding-top: var(--s-3);
 }
 
 .legend li {
   display: grid;
-  grid-template-columns: 12px 1fr auto;
+  grid-template-columns: 10px 1fr auto;
   align-items: center;
   gap: var(--s-2);
   font-size: var(--fs-sm);
@@ -218,6 +234,7 @@
   height: 10px;
   border-radius: 50%;
   display: inline-block;
+  flex-shrink: 0;
 }
 
 .legendVal {
@@ -226,15 +243,21 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* --- Bottom notice --- */
+/* ─── Bottom notice ────────────────────────────────────────────── */
 .notice {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--s-4);
-  background: var(--primary-soft);
-  border-color: transparent;
+  gap: var(--s-5);
+  background: linear-gradient(
+    135deg,
+    var(--primary-soft) 0%,
+    rgba(37, 99, 235, 0.06) 100%
+  );
+  border: 1px solid rgba(37, 99, 235, 0.12);
+  border-radius: var(--r-xl);
   padding: var(--s-5) var(--s-6);
+  box-shadow: none;
 }
 
 .noticeLeft {
@@ -247,27 +270,29 @@
   width: 28px;
   height: 28px;
   flex-shrink: 0;
+  color: var(--primary);
 }
 
 .noticeTitle {
   font-weight: var(--fw-semibold);
   color: var(--primary-text);
   font-size: var(--fs-md);
-  margin-bottom: 2px;
+  margin-bottom: 4px;
   text-wrap: balance;
 }
 
 .noticeBody {
   font-size: var(--fs-sm);
-  color: var(--text-primary);
-  line-height: 1.5;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  text-wrap: pretty;
 }
 
 .noticeArt {
   width: 180px;
   height: auto;
   flex-shrink: 0;
-  border-radius: var(--r-md);
+  border-radius: var(--r-lg);
 }
 
 @media (max-width: 720px) {

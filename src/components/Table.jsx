@@ -4,7 +4,7 @@
 
 import styles from './Table.module.css';
 
-export function Table({ columns, rows, emptyMessage = 'No rows yet.' }) {
+export function Table({ columns, rows, emptyMessage = 'No rows yet.', onRowClick }) {
   return (
     <div className={styles.wrap}>
       <table className={styles.table}>
@@ -30,7 +30,11 @@ export function Table({ columns, rows, emptyMessage = 'No rows yet.' }) {
             </tr>
           ) : (
             rows.map((row, i) => (
-              <tr key={i}>
+              <tr
+                key={i}
+                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                className={onRowClick ? styles.clickableRow : ''}
+              >
                 {columns.map((col) => (
                   <td
                     key={col.key}

@@ -3,9 +3,6 @@
 .wrap {
   width: 100%;
   overflow-x: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  background: var(--bg-surface);
 }
 
 .table {
@@ -27,8 +24,8 @@
   font-size: var(--fs-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  background: var(--bg-subtle);
-  border-bottom: 1px solid var(--border);
+  background: transparent;
+  border-bottom: 1px solid var(--border-soft);
   position: sticky;
   top: 0;
   z-index: 1;
@@ -43,6 +40,10 @@
 
 .align_center { text-align: center; }
 .align_right  { text-align: right; }
+
+.clickableRow {
+  cursor: pointer;
+}
 
 .empty {
   text-align: center;

@@ -1,432 +1,705 @@
-// src/pages/Track.jsx — CargoChain
-// Public tracker (no wallet required). Enter a Request ID to view the
-// delivery timeline, request details, photo proof, and payment history
-// on-chain.
+// src/pages/Track.jsx - Single shipment view backed by DeliveryEscrow.
 
-import { useState, useEffect, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   HiOutlineCheck,
-  HiOutlineTruck,
   HiOutlineCheckBadge,
-  HiOutlineExclamationCircle,
-  HiOutlinePhoto,
   HiOutlineCreditCard,
+  HiOutlineExclamationCircle,
   HiOutlineInformationCircle,
+  HiOutlineLockClosed,
+  HiOutlinePhoto,
 } from 'react-icons/hi2';
 import { Topbar } from '../components/Topbar.jsx';
 import { Card } from '../components/Card.jsx';
 import { Badge } from '../components/Badge.jsx';
 import { Tabs } from '../components/Tabs.jsx';
-import { SearchInput } from '../components/SearchInput.jsx';
 import { Button } from '../components/Button.jsx';
-import { EmptyState } from '../components/EmptyState.jsx';
 import { useContracts } from '../hooks/useContracts.js';
 import { useToast } from '../hooks/useToast.js';
+import { useWallet } from '../hooks/useWallet.js';
 import {
   formatDate,
   formatEth,
-  shortAddress,
   requestStatus,
-  REQUEST_TONE,
-  milestoneStatus,
-  MILESTONE_TONE,
+  shortAddress,
 } from '../utils/format.js';
-import { clipboardRouteMap } from '../assets';
 import styles from './Track.module.css';
 
-// Demo data used while contracts are not yet deployed.
-const DEMO_TIMELINE = [
-  { timestamp: Math.floor(Date.now() / 1000) - 60 * 60 * 2,  eventType: 'RequestCreated',     actor: '0xA1B2…C3D4', details: 'for 0x9F8E…7D6C' },
-  { timestamp: Math.floor(Date.now() / 1000) - 60 * 55,   eventType: 'AcceptedByCarrier', actor: '0x5566…7788', details: '' },
-  { timestamp: Math.floor(Date.now() / 1000) - 60 * 30,   eventType: 'PickupFromShipper', actor: '0x5566…7788', details: 'Photo proof uploaded' },
-  { timestamp: Math.floor(Date.now() / 1000) - 60 * 5,    eventType: 'AwaitingVerification', actor: '', details: 'Please review the proof and approve or reject.' },
-  { timestamp: Math.floor(Date.now() / 1000) - 60 * 2,    eventType: 'DeliveredToRecipient', actor: '0x5566…7788', details: 'Pending' },
-];
-
-const DEMO_SUMMARY = {
-  id: 1001,
-  category: 'Electronics',
-  from: 'Kuala Lumpur',
-  to: 'Penang',
-  specialInstruction: 'Handle with care. Recipient is at the loading bay on Level 2.',
-  createdAt: Math.floor(Date.now() / 1000) - 60 * 60 * 2,
-  status: 'InProgress',
-  escrow: 2500000000000000000n,
-  released: 750000000000000000n,    // 30% (1 milestone paid)
-  remaining: 1750000000000000000n,  // 70%
-};
-
-const TONE_BY_TYPE = {
-  RequestCreated: 'success',
-  AcceptedByCarrier: 'info',
-  PickupFromShipper: 'info',
-  AwaitingVerification: 'warning',
-  VerifiedByShipper: 'success',
-  DeliveredToRecipient: 'info',
-  PaymentReleased: 'success',
-  MilestoneRejected: 'danger',
-  RequestCancelled: 'danger',
-  RefundIssued: 'warning',
-  RequestRepublished: 'warning',
-};
-
 const TAB_ITEMS = [
-  { value: 'timeline', label: 'Timeline' },
-  { value: 'details',  label: 'Details' },
-  { value: 'proof',    label: 'Proof' },
+  { value: 'timeline', label: 'Timeline & Checkpoints' },
+  { value: 'proof', label: 'Photo Proof' },
   { value: 'payments', label: 'Payments' },
 ];
 
-// Statuses where the Shipper CTA "Refund remaining" is allowed
-// (BusinessFlow §5 Scenario C).
-const REFUNDABLE_STATUSES = new Set(['Cancelled', 'Expired']);
+const MILESTONE_STATUS = ['Proposed', 'PendingProof', 'Submitted', 'Verified', 'Rejected', 'Paid'];
 
 export function Track() {
   const { id: idParam } = useParams();
   const navigate = useNavigate();
   const { contracts, deployError } = useContracts();
+  const { account, signer } = useWallet();
   const { show } = useToast();
-  const [draft, setDraft] = useState(idParam || '');
-  const [committed, setCommitted] = useState(idParam || '');
   const [tab, setTab] = useState('timeline');
-  const [events, setEvents] = useState([]);
+  const [shipment, setShipment] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [actionStage, setActionStage] = useState('idle');
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
-    if (!committed) {
-      setEvents([]);
+    if (!idParam || !contracts?.deliveryEscrow) {
+      setShipment(null);
       return;
     }
-    if (!contracts?.lifecycleManager) {
-      setEvents(DEMO_TIMELINE);
-      return;
-    }
+
+    let cancelled = false;
     setLoading(true);
     setError(null);
+
+    loadShipment(contracts.deliveryEscrow, idParam)
+      .then((nextShipment) => {
+        if (!cancelled) {
+          setShipment(nextShipment);
+          setSelectedIndex(0);
+        }
+      })
+      .catch((loadError) => {
+        if (!cancelled) {
+          setShipment(null);
+          setError(loadError.shortMessage || loadError.reason || loadError.message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [contracts, idParam, refreshKey]);
+
+  const isShipper = Boolean(
+    account && shipment && account.toLowerCase() === shipment.shipper.toLowerCase(),
+  );
+  const proposalPending = shipment?.status === 'PendingApproval';
+  const milestonesApproved = !['Open', 'PendingApproval'].includes(shipment?.status);
+  const busy = actionStage !== 'idle';
+
+  const acceptProposal = async () => {
+    if (busy || !shipment || !signer || !contracts?.deliveryEscrow) return;
+    setActionStage('accepting');
+
     try {
-      contracts.lifecycleManager.getRequestTimeline(BigInt(committed))
-        .then((result) => {
-          setEvents(Array.isArray(result) && result.length > 0 ? result : DEMO_TIMELINE);
-        })
-        .catch((e) => {
-          setError(e.shortMessage || e.message);
-          setEvents(DEMO_TIMELINE);
-        })
-        .finally(() => setLoading(false));
-    } catch (e) {
-      setError(e.shortMessage || e.message);
-      setEvents(DEMO_TIMELINE);
-      setLoading(false);
+      const activeAddress = await signer.getAddress();
+      const latest = await contracts.deliveryEscrow.getRequest(BigInt(shipment.id));
+      const latestStatus = requestStatus(latest.status ?? latest[9]);
+      const latestShipper = latest.shipper ?? latest[1];
+      const proposedAmount = BigInt(latest.proposedAmount ?? latest[11] ?? 0n);
+
+      if (activeAddress.toLowerCase() !== latestShipper.toLowerCase()) {
+        throw new Error('Only the request shipper can accept this proposal.');
+      }
+      if (latestStatus !== 'PendingApproval') {
+        throw new Error('This proposal is no longer awaiting approval.');
+      }
+
+      const tx = await contracts.deliveryEscrow.connect(signer).approveAndFund(
+        BigInt(shipment.id),
+        { value: proposedAmount },
+      );
+      show(`Locking ${formatEth(proposedAmount)} in escrow...`, 'info');
+      const receipt = await tx.wait();
+      if (!receipt || receipt.status !== 1) throw new Error('Approval was not confirmed.');
+
+      show(`Proposal accepted in block ${receipt.blockNumber}.`, 'success');
+      setRefreshKey((value) => value + 1);
+    } catch (actionError) {
+      show(formatActionError(actionError), 'error');
+    } finally {
+      setActionStage('idle');
     }
-  }, [contracts, committed]);
-
-  const submit = (val) => {
-    const v = (val ?? draft).toString().trim();
-    if (!v) return;
-    setCommitted(v);
-    navigate(`/track/${v}`);
   };
 
-  const handleRefund = () => {
-    show(`Refund flow — module c (Jeremy). Request #${committed} would call refundRemaining(${committed}).`, 'info');
+  const rejectProposal = async () => {
+    if (busy || !shipment || !signer || !contracts?.deliveryEscrow) return;
+    setActionStage('rejecting');
+
+    try {
+      const tx = await contracts.deliveryEscrow.connect(signer).rejectMilestoneProposal(
+        BigInt(shipment.id),
+      );
+      show('Rejecting proposal and reopening the request...', 'info');
+      const receipt = await tx.wait();
+      if (!receipt || receipt.status !== 1) throw new Error('Rejection was not confirmed.');
+
+      show(`Proposal rejected in block ${receipt.blockNumber}.`, 'success');
+      setRefreshKey((value) => value + 1);
+    } catch (actionError) {
+      show(formatActionError(actionError), 'error');
+    } finally {
+      setActionStage('idle');
+    }
   };
 
-  const showSummary = !!committed;
-  const summary = DEMO_SUMMARY;
-  const isRefundable = REFUNDABLE_STATUSES.has(summary.status);
-  const hasUnreleased = summary.remaining > 0n;
+  const verifyMilestone = async (milestoneId, approve) => {
+    if (busy || !shipment || !signer || !contracts?.deliveryEscrow) return;
+    setActionStage(approve ? 'verifying' : 'rejecting-proof');
+
+    try {
+      const tx = await contracts.deliveryEscrow.connect(signer).verifyMilestone(
+        BigInt(shipment.id),
+        BigInt(milestoneId),
+        approve,
+        approve ? '' : 'Proof rejected by shipper',
+      );
+      show(approve ? 'Verifying proof and releasing payment...' : 'Rejecting milestone proof...', 'info');
+      const receipt = await tx.wait();
+      if (!receipt || receipt.status !== 1) throw new Error('Verification was not confirmed.');
+
+      show(approve ? 'Milestone verified and payment released.' : 'Milestone proof rejected.', 'success');
+      setRefreshKey((value) => value + 1);
+    } catch (actionError) {
+      show(formatActionError(actionError), 'error');
+    } finally {
+      setActionStage('idle');
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className={styles.page}>
+        <Topbar title={`Shipment #${String(idParam || '').padStart(4, '0')}`} />
+        <Card><div className={styles.tabEmpty}>Loading shipment from DeliveryEscrow...</div></Card>
+      </div>
+    );
+  }
+
+  if (deployError || error || !shipment) {
+    return (
+      <div className={styles.page}>
+        <Topbar title={`Shipment #${String(idParam || '').padStart(4, '0')}`} />
+        <Card>
+          <div className={styles.tabEmpty}>
+            {deployError || error || 'Shipment not found.'}
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  const displayedValue = shipment.escrow > 0n ? shipment.escrow : shipment.proposedAmount;
+  const displayedRemaining = shipment.escrow > 0n ? shipment.remaining : shipment.proposedAmount;
+  const releasedPct = shipment.escrow > 0n
+    ? Number((shipment.released * 100n) / shipment.escrow)
+    : 0;
 
   return (
     <div className={styles.page}>
       <Topbar
-        title="Track Shipment"
-        subtitle="Enter a Request ID to view its delivery timeline."
-        actions={
-          showSummary ? (
-            <Button variant="secondary" onClick={() => { setDraft(''); setCommitted(''); navigate('/track'); }}>
-              New search
-            </Button>
-          ) : null
-        }
+        title={`Shipment #${String(shipment.id).padStart(4, '0')}`}
+        subtitle="Proposal, delivery checkpoints, proofs, and payments in one timeline."
       />
 
-      <Card className={styles.searchCard} padded={false}>
-        <div className={styles.searchInner}>
-          <SearchInput
-            value={draft}
-            onChange={setDraft}
-            onSubmit={submit}
-            placeholder="Enter Request ID…"
-            actionLabel="Trace"
-          />
+      <Card className={styles.summary}>
+        <div className={styles.statusPanel}>
+          <div className={styles.statusMain}>
+            <div className={styles.statusKicker}>Current status</div>
+            <div className={styles.statusTitleRow}>
+              <h2 className={styles.statusTitle}>{requestStatus(shipment.status)}</h2>
+            </div>
+            <div className={styles.statusRoute}>
+              <span>{shipment.from}</span>
+              <span className={styles.routeArrow}>-&gt;</span>
+              <span>{shipment.to}</span>
+            </div>
+          </div>
+
+          <div className={styles.statusProgress} aria-label={`${releasedPct}% escrow released`}>
+            <div className={styles.progressHead}>
+              <span>{shipment.escrow > 0n ? 'Escrow released' : 'Escrow awaiting approval'}</span>
+              <strong>{releasedPct}%</strong>
+            </div>
+            <div className={styles.progressTrack}>
+              <span className={styles.progressFill} style={{ width: `${releasedPct}%` }} />
+            </div>
+            <div className={styles.progressMeta}>
+              <span>{formatEth(shipment.released)} paid</span>
+              <span>{formatEth(displayedRemaining)} remaining</span>
+            </div>
+          </div>
         </div>
+
+        <div className={styles.summaryGrid}>
+          <SummaryField label="Created" value={formatDate(shipment.createdAt)} />
+          <div className={styles.summaryField}>
+            <div className={styles.summaryFieldLabel}>
+              {shipment.escrow > 0n ? 'Escrow value' : 'Planned payment'}
+            </div>
+            <div className={styles.summaryFieldVal}>
+              <strong>{formatEth(displayedValue)}</strong>
+              <Badge tone={shipment.escrow > 0n ? 'success' : 'warning'} icon={HiOutlineCheckBadge}>
+                {shipment.escrow > 0n ? 'Funded' : 'Awaiting funding'}
+              </Badge>
+            </div>
+          </div>
+          <div className={styles.summaryField}>
+            <div className={styles.summaryFieldLabel}>Carrier address</div>
+            <div className={styles.summaryFieldVal}>
+              {shipment.carrier ? (
+                <span className={styles.addressVal} title={shipment.carrier}>
+                  {shortAddress(shipment.carrier)}
+                </span>
+              ) : (
+                <span className={styles.muted}>Awaiting proposal</span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {shipment.specialInstruction && (
+          <div className={styles.specialNote}>
+            <HiOutlineInformationCircle className={styles.specialNoteIcon} aria-hidden="true" />
+            <div>
+              <div className={styles.specialNoteTitle}>Special instructions</div>
+              <div className={styles.specialNoteBody}>{shipment.specialInstruction}</div>
+            </div>
+          </div>
+        )}
       </Card>
 
-      {!showSummary && (
-        <Card padded={false} className={styles.emptyCard}>
-          <EmptyState
-            illustration={clipboardRouteMap}
-            title="Track any shipment"
-            description="Enter a Request ID above to see the route, milestones, proof of delivery, and payment history on-chain. Public — no wallet needed."
-          />
+      {shipment.status === 'Open' && (
+        <Card className={styles.proposalCard}>
+          <div className={styles.proposalHeader}>
+            <div>
+              <div className={styles.proposalKicker}>Open shipment</div>
+              <h2>No carrier proposal yet</h2>
+              <p>A carrier must propose milestone names and payout percentages before escrow can be funded.</p>
+            </div>
+            {account && !isShipper && (
+              <Button onClick={() => navigate(`/shipments/${shipment.id}/propose`)}>
+                Propose milestones
+              </Button>
+            )}
+          </div>
+          <span className={styles.proposalHint}>
+            {!account
+              ? 'Connect a carrier wallet to propose milestones.'
+              : isShipper
+                ? 'Your request remains visible in the marketplace while waiting for a carrier.'
+                : 'Submitting a proposal assigns this shipment to your carrier wallet for shipper review.'}
+          </span>
         </Card>
       )}
 
-      {showSummary && (
-        <Card className={styles.summary}>
-          <div className={styles.summaryHead}>
-            <div className={styles.summaryId}>
-              <span className={styles.summaryIdLabel}>Request</span>
-              <span className={styles.summaryIdVal}>#{String(summary.id).padStart(4, '0')}</span>
-            </div>
-            <Badge tone={REQUEST_TONE[summary.status] || 'neutral'} icon={HiOutlineTruck}>
-              {requestStatus(summary.status)}
-            </Badge>
-          </div>
-
-          <div className={styles.summaryGrid}>
-            <div>
-              <div className={styles.summaryFieldLabel}>Category</div>
-              <div className={styles.summaryFieldVal}>{summary.category}</div>
-            </div>
-            <div>
-              <div className={styles.summaryFieldLabel}>Route</div>
-              <div className={styles.summaryFieldVal}>
-                {summary.from}
-                <span className={styles.routeArrow}>→</span>
-                {summary.to}
-              </div>
-            </div>
-            <div>
-              <div className={styles.summaryFieldLabel}>Created</div>
-              <div className={styles.summaryFieldVal}>{formatDate(summary.createdAt)}</div>
-            </div>
-            <div>
-              <div className={styles.summaryFieldLabel}>Escrow</div>
-              <div className={styles.summaryFieldVal}>
-                {formatEth(summary.escrow)}
-                <Badge tone="success" icon={HiOutlineCheckBadge}>Funded</Badge>
-              </div>
-            </div>
-          </div>
-
-          {summary.specialInstruction && (
-            <div className={styles.specialNote}>
-              <HiOutlineInformationCircle className={styles.specialNoteIcon} aria-hidden="true" />
-              <div>
-                <div className={styles.specialNoteTitle}>Special instructions</div>
-                <div className={styles.specialNoteBody}>{summary.specialInstruction}</div>
-              </div>
-            </div>
-          )}
-        </Card>
+      {proposalPending && (
+        <ProposalReview
+          milestones={shipment.milestones}
+          proposedAmount={shipment.proposedAmount}
+          isShipper={isShipper}
+          account={account}
+          busy={busy}
+          actionStage={actionStage}
+          onAccept={acceptProposal}
+          onReject={rejectProposal}
+        />
       )}
 
-      {showSummary && (
+      {milestonesApproved && (
         <Card padded={false} className={styles.tabsCard}>
           <div className={styles.tabsWrap}>
             <Tabs items={TAB_ITEMS} value={tab} onChange={setTab} />
           </div>
           <div className={styles.tabBody}>
             {tab === 'timeline' && (
-              <TimelinePanel events={events} loading={loading} error={error} deployError={deployError} />
-            )}
-            {tab === 'details' && (
-              <DetailsPanel summary={summary} />
-            )}
-            {tab === 'proof' && (
-              <ProofPanel showToast={show} />
-            )}
-            {tab === 'payments' && (
-              <PaymentsPanel
-                summary={summary}
-                showToast={show}
-                onRefund={handleRefund}
-                canRefund={isRefundable && hasUnreleased}
+              <TimelinePanel
+                events={shipment.events}
+                selectedIndex={selectedIndex}
+                onSelect={setSelectedIndex}
+                canVerify={isShipper}
+                busy={busy}
+                onVerify={verifyMilestone}
               />
             )}
+            {tab === 'proof' && <ProofPanel milestones={shipment.milestones} />}
+            {tab === 'payments' && <PaymentsPanel shipment={shipment} />}
           </div>
         </Card>
       )}
-
-      {!showSummary && !loading && (
-        <Card className={styles.intro}>
-          <div className={styles.introTitle}>No request selected</div>
-          <p className={styles.introBody}>
-            Enter a Request ID above to view its delivery timeline. Tracking is public — no wallet required.
-          </p>
-          <Button onClick={() => { setDraft('1001'); submit('1001'); }}>
-            Try demo request #1001
-          </Button>
-        </Card>
-      )}
     </div>
   );
 }
 
-function TimelinePanel({ events, loading, error, deployError }) {
-  if (loading) return <div className={styles.tabEmpty}>Loading timeline…</div>;
+function SummaryField({ label, value }) {
+  return (
+    <div className={styles.summaryField}>
+      <div className={styles.summaryFieldLabel}>{label}</div>
+      <div className={styles.summaryFieldVal}>{value}</div>
+    </div>
+  );
+}
 
-  if (deployError) {
-    return (
-      <div className={styles.tabEmpty}>
-        Contracts not deployed. Showing demo timeline. Run <code>npm run migrate</code> to populate from the contract.
+function ProposalReview({
+  milestones,
+  proposedAmount,
+  isShipper,
+  account,
+  busy,
+  actionStage,
+  onAccept,
+  onReject,
+}) {
+  return (
+    <Card className={styles.proposalCard}>
+      <div className={styles.proposalHeader}>
+        <div>
+          <div className={styles.proposalKicker}>Carrier proposal</div>
+          <h2>Review milestone payout plan</h2>
+          <p>Accepting this plan locks {formatEth(proposedAmount)} in escrow.</p>
+        </div>
+        <Badge tone="warning">{milestones.length} milestones</Badge>
       </div>
-    );
-  }
-  if (error) {
-    return <div className={styles.tabEmpty}>Couldn't load timeline: {error}. Showing demo data.</div>;
-  }
-  if (!events.length) return <div className={styles.tabEmpty}>No events for this request yet.</div>;
+
+      <div className={styles.proposalTimeline}>
+        <div className={styles.proposalTrackLine} aria-hidden="true" />
+        <ol className={styles.proposalSteps}>
+          {milestones.map((milestone, index) => (
+            <li key={`${milestone.name}-${index}`} className={styles.proposalStep}>
+              <span className={styles.proposalIndex}>{index + 1}</span>
+              <div className={styles.proposalStepBody}>
+                <div className={styles.proposalStepHeader}>
+                  <strong>{milestone.name}</strong>
+                  <Badge tone="warning">Proposed</Badge>
+                </div>
+                <div className={styles.proposalStepMeta}>
+                  <span>{milestone.payoutPercentage}% of payment</span>
+                  <strong>
+                    {formatEth(calculateProposedPayout(
+                      proposedAmount,
+                      milestone.payoutPercentage,
+                      index,
+                      milestones,
+                    ))}
+                  </strong>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </div>
+
+      <div className={styles.proposalFooter}>
+        <span className={styles.proposalHint}>
+          {!account
+            ? 'Connect the shipper wallet to respond.'
+            : isShipper
+              ? 'Accepting activates this carrier plan and funds its milestone payouts.'
+              : 'Waiting for the shipper to accept or reject this proposal.'}
+        </span>
+        {isShipper && (
+          <div className={styles.proposalActions}>
+            <Button variant="danger" onClick={onReject} disabled={busy}>
+              {actionStage === 'rejecting' ? 'Rejecting...' : 'Reject proposal'}
+            </Button>
+            <Button onClick={onAccept} disabled={busy}>
+              {actionStage === 'accepting' ? 'Confirming...' : 'Accept & fund escrow'}
+            </Button>
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function TimelinePanel({ events, selectedIndex, onSelect, canVerify, busy, onVerify }) {
+  if (!events.length) return <div className={styles.tabEmpty}>No timeline entries yet.</div>;
+  const selectedEvent = events[selectedIndex] || events[0];
 
   return (
-    <ol className={styles.timeline}>
-      {events.map((ev, i) => {
-        const tone = TONE_BY_TYPE[ev.eventType] || 'neutral';
-        const isRejection = ev.eventType === 'MilestoneRejected';
-        return (
-          <li key={i} className={`${styles.tlItem} ${styles[`tl_${tone}`]}`}>
-            <span className={styles.tlDot} aria-hidden="true">
-              {tone === 'success' ? <HiOutlineCheck aria-hidden="true" /> : null}
-            </span>
-            <div className={styles.tlBody}>
-              <div className={styles.tlTime}>{formatDate(ev.timestamp)}</div>
-              <div className={styles.tlTitle}>{ev.eventType}</div>
-              {ev.actor && <div className={styles.tlActor}>by {shortAddress(ev.actor)}</div>}
-              {ev.details && <div className={styles.tlDetails}>{ev.details}</div>}
-              {isRejection && ev.details && (
-                <div className={styles.rejectionBox}>
-                  <HiOutlineExclamationCircle className={styles.rejectionIcon} aria-hidden="true" />
-                  <div>
-                    <div className={styles.rejectionTitle}>Rejection reason</div>
-                    <div className={styles.rejectionBody}>{ev.details}</div>
-                  </div>
-                </div>
-              )}
-              {ev.eventType === 'PickupFromShipper' && (
-                <div className={styles.proofRow}>
-                  <div className={styles.proofStub} title="Photo proof placeholder">Proof submitted</div>
-                  <div className={styles.proofStub} title="Photo proof placeholder">Proof submitted</div>
-                  <a href="#" className={styles.proofLink}>View Proof</a>
-                </div>
-              )}
-              {ev.eventType === 'AwaitingVerification' && (
-                <div className={styles.actionRow}>
-                  <Button size="sm" onClick={() => alert('TODO[Module c]: verifyMilestone(reqId, msId, true)')}>Approve</Button>
-                  <Button size="sm" variant="danger" onClick={() => alert('TODO[Module c]: verifyMilestone(reqId, msId, false)')}>Reject</Button>
-                </div>
-              )}
+    <div className={styles.timelineWorkspace}>
+      <div className={styles.timelineListContainer}>
+        <div className={styles.timelineRoadmap}>
+          <div className={styles.timelineTrackLine} />
+          <ol className={styles.timeline}>
+            {events.map((event, index) => {
+              const active = index === selectedIndex;
+              const dotClass = timelineDotClass(event.status);
+              const dotIcon = event.status === 'verified' || event.status === 'paid'
+                ? <HiOutlineCheck size={13} />
+                : event.status === 'rejected'
+                  ? <HiOutlineExclamationCircle size={13} />
+                  : event.status === 'locked'
+                    ? <HiOutlineLockClosed size={11} />
+                    : index + 1;
+
+              return (
+                <li key={`${event.eventType}-${index}`} className={`${styles.tlItem} ${active ? styles.tlItemActive : ''}`}>
+                  <div className={`${styles.tlDot} ${dotClass}`}>{dotIcon}</div>
+                  <button type="button" className={styles.tlContent} onClick={() => onSelect(index)}>
+                    <span className={styles.tlBrief}>
+                      <span className={styles.tlBriefTime}>
+                        {event.timestamp ? formatDate(event.timestamp) : event.statusLabel}
+                      </span>
+                      <strong className={styles.tlBriefTitle}>{event.label}</strong>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      </div>
+
+      <div className={styles.timelineSidebar}>
+        <div className={styles.sidebarContent}>
+          <div className={styles.sidebarHeader}>
+            <Badge tone={timelineTone(selectedEvent.status)}>{selectedEvent.statusLabel}</Badge>
+            <h3 className={styles.sidebarTitle}>{selectedEvent.label}</h3>
+          </div>
+          <div className={styles.sidebarBody}>
+            <div className={styles.sidebarField}>
+              <span className={styles.sidebarLabel}>Checkpoint details</span>
+              <p className={styles.sidebarDesc}>{selectedEvent.details}</p>
             </div>
-          </li>
-        );
-      })}
-    </ol>
-  );
-}
-
-function DetailsPanel({ summary }) {
-  return (
-    <div className={styles.detailsGrid}>
-      <DetailRow label="Request ID" value={`#${String(summary.id).padStart(4, '0')}`} />
-      <DetailRow label="Status" value={
-        <Badge tone={REQUEST_TONE[summary.status] || 'neutral'} icon={HiOutlineTruck}>
-          {requestStatus(summary.status)}
-        </Badge>
-      } />
-      <DetailRow label="Category" value={summary.category} />
-      <DetailRow label="From" value={summary.from} />
-      <DetailRow label="To" value={summary.to} />
-      <DetailRow label="Created" value={formatDate(summary.createdAt)} />
-      <DetailRow label="Escrow locked" value={<><strong>{formatEth(summary.escrow)}</strong>{' '}<Badge tone="success" icon={HiOutlineCheckBadge}>Funded</Badge></>} />
-      <DetailRow label="Released so far" value={formatEth(summary.released)} />
-      <DetailRow label="Remaining in escrow" value={formatEth(summary.remaining)} />
-      {summary.specialInstruction && (
-        <DetailRow label="Special instructions" value={summary.specialInstruction} />
-      )}
-      <DetailRow label="Contract" value="DeliveryEscrow.sol" />
+            {selectedEvent.actor && (
+              <div className={styles.sidebarField}>
+                <span className={styles.sidebarLabel}>Actor</span>
+                <span className={styles.sidebarValueAddress}>{selectedEvent.actor}</span>
+              </div>
+            )}
+            {selectedEvent.status === 'pending' && canVerify && (
+              <div className={styles.sidebarVerifyPanel}>
+                <span className={styles.sidebarLabel}>Shipper verification required</span>
+                <div className={styles.actionRow}>
+                  <Button
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => onVerify(selectedEvent.milestoneId, true)}
+                  >
+                    Verify & release
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    disabled={busy}
+                    onClick={() => onVerify(selectedEvent.milestoneId, false)}
+                  >
+                    Reject proof
+                  </Button>
+                </div>
+              </div>
+            )}
+            {(selectedEvent.status === 'verified' || selectedEvent.status === 'paid') && (
+              <div className={styles.onchainStamp}>
+                <HiOutlineCheckBadge className={styles.stampIcon} />
+                <span>{selectedEvent.status === 'paid' ? 'Paid on-chain' : 'Recorded on-chain'}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
 
-function DetailRow({ label, value }) {
-  return (
-    <div className={styles.detailRow}>
-      <div className={styles.detailLabel}>{label}</div>
-      <div className={styles.detailValue}>{value}</div>
-    </div>
-  );
-}
+function ProofPanel({ milestones }) {
+  const withProof = milestones.filter((milestone) => milestone.proofUris.length > 0);
+  if (!withProof.length) {
+    return <div className={styles.tabEmpty}>No photo proof has been submitted.</div>;
+  }
 
-function ProofPanel({ showToast }) {
   return (
     <div className={styles.proofPanel}>
       <div className={styles.proofHeader}>
         <HiOutlinePhoto className={styles.proofHeaderIcon} aria-hidden="true" />
         <div>
-          <div className={styles.proofHeaderTitle}>Photo proof</div>
-          <div className={styles.proofHeaderBody}>
-            Photo-proof hash is stored on-chain; the bytes themselves live on the upload server.
-          </div>
+          <div className={styles.proofHeaderTitle}>Submitted proof references</div>
+          <div className={styles.proofHeaderBody}>Proof references are loaded from the shipment milestones.</div>
         </div>
       </div>
       <div className={styles.proofList}>
-        <div className={styles.proofPlaceholder} onClick={() => showToast('Photo viewer coming soon — module d.', 'info')}>
-          <span>Proof #1</span>
-          <span className={styles.proofPlaceholderHint}>Click to open</span>
-        </div>
-        <div className={styles.proofPlaceholder} onClick={() => showToast('Photo viewer coming soon — module d.', 'info')}>
-          <span>Proof #2</span>
-          <span className={styles.proofPlaceholderHint}>Click to open</span>
-        </div>
+        {withProof.map((milestone) => (
+          <div key={milestone.index} className={styles.proofPlaceholder}>
+            <strong>{milestone.name}</strong>
+            <span className={styles.proofPlaceholderHint}>{milestone.proofUris.length} file reference(s)</span>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
 
-function PaymentsPanel({ summary, showToast, onRefund, canRefund }) {
+function PaymentsPanel({ shipment }) {
   return (
     <div className={styles.paymentsPanel}>
       <div className={styles.paymentsHeader}>
         <HiOutlineCreditCard className={styles.paymentsHeaderIcon} aria-hidden="true" />
         <div>
-          <div className={styles.paymentsHeaderTitle}>Payment history</div>
+          <div className={styles.paymentsHeaderTitle}>Payment status</div>
           <div className={styles.paymentsHeaderBody}>
-            {formatEth(summary.escrow)} total locked in escrow for this request.
+            {shipment.escrow > 0n
+              ? `${formatEth(shipment.escrow)} was locked after proposal approval.`
+              : `${formatEth(shipment.proposedAmount)} is planned but not funded yet.`}
           </div>
         </div>
       </div>
-      <div className={styles.paymentRow}>
-        <div className={styles.paymentLabel}>Locked in escrow</div>
-        <div className={styles.paymentValue}>{formatEth(summary.escrow)}</div>
-      </div>
-      <div className={styles.paymentRow}>
-        <div className={styles.paymentLabel}>Released so far</div>
-        <div className={styles.paymentValue}>{formatEth(summary.released)}</div>
-      </div>
-      <div className={styles.paymentRow}>
-        <div className={styles.paymentLabel}>Remaining (refundable)</div>
-        <div className={styles.paymentValue}>{formatEth(summary.remaining)}</div>
-      </div>
-
-      {canRefund && (
-        <div className={styles.refundBlock}>
-          <div className={styles.refundText}>
-            <strong>Request is refundable.</strong>{' '}
-            Only the remaining unpaid escrow ({formatEth(summary.remaining)}) can be refunded —
-            already-paid milestones are not reversed.
-          </div>
-          <Button variant="secondary" onClick={onRefund}>
-            Refund remaining
-          </Button>
-        </div>
-      )}
-
+      <PaymentRow label="Planned payment" value={formatEth(shipment.proposedAmount)} />
+      <PaymentRow label="Locked in escrow" value={formatEth(shipment.escrow)} />
+      <PaymentRow label="Released so far" value={formatEth(shipment.released)} />
+      <PaymentRow label="Remaining escrow" value={formatEth(shipment.remaining)} />
       <div className={styles.paymentNote}>
-        Payment events are emitted by <code>DeliveryEscrow.releaseStage()</code> after the shipper
-        approves each milestone proof. Refunds go through <code>refundRemaining(requestId)</code>.
+        Milestone payments are released by <code>verifyMilestone()</code> after the shipper approves submitted proof.
       </div>
     </div>
   );
+}
+
+function PaymentRow({ label, value }) {
+  return (
+    <div className={styles.paymentRow}>
+      <div className={styles.paymentLabel}>{label}</div>
+      <div className={styles.paymentValue}>{value}</div>
+    </div>
+  );
+}
+
+async function loadShipment(deliveryEscrow, idParam) {
+  const requestId = BigInt(idParam);
+  const [request, milestoneResult] = await Promise.all([
+    deliveryEscrow.getRequest(requestId),
+    deliveryEscrow.getMilestones(requestId),
+  ]);
+
+  const shipper = request.shipper ?? request[1];
+  const rawCarrier = request.carrier ?? request[2];
+  const carrier = isZeroAddress(rawCarrier) ? null : rawCarrier;
+  const status = requestStatus(request.status ?? request[9]);
+  const proposedAmount = BigInt(request.proposedAmount ?? request[11] ?? 0n);
+  const escrow = BigInt(request.totalAmount ?? request[5] ?? 0n);
+  const released = BigInt(request.releasedAmount ?? request[6] ?? 0n);
+  const createdAt = Number(request.createdAt ?? request[10] ?? 0n);
+  const milestones = Array.from(milestoneResult || []).map((milestone, index) => ({
+    index,
+    name: milestone.name ?? milestone[0],
+    payoutPercentage: Number(milestone.payoutPercentage ?? milestone[1]),
+    payoutAmount: BigInt(milestone.payoutAmount ?? milestone[2] ?? 0n),
+    proofUris: Array.from(milestone.proofUris ?? milestone[3] ?? []),
+    remark: milestone.remark ?? milestone[4] ?? '',
+    rejectionReason: milestone.rejectionReason ?? milestone[5] ?? '',
+    status: MILESTONE_STATUS[Number(milestone.status ?? milestone[6])] || 'Unknown',
+    submittedAt: Number(milestone.submittedAt ?? milestone[7] ?? 0n),
+    verifiedAt: Number(milestone.verifiedAt ?? milestone[8] ?? 0n),
+  }));
+
+  return {
+    id: Number(request.requestId ?? request[0]),
+    shipper,
+    carrier,
+    from: request.pickupLocation ?? request[3],
+    to: request.deliveryLocation ?? request[4],
+    status,
+    specialInstruction: request.specialInstruction ?? request[8],
+    deadline: Number(request.deadline ?? request[7] ?? 0n),
+    createdAt,
+    proposedAmount,
+    escrow,
+    released,
+    remaining: escrow - released,
+    milestones,
+    events: buildTimelineEvents({ shipper, carrier, createdAt, proposedAmount, milestones }),
+  };
+}
+
+function buildTimelineEvents({ shipper, carrier, createdAt, proposedAmount, milestones }) {
+  const events = [{
+    eventType: 'RequestCreated',
+    label: 'Shipment request published',
+    status: 'verified',
+    statusLabel: 'Published',
+    timestamp: createdAt,
+    actor: shipper,
+    details: `The shipper published this request with a planned payment of ${formatEth(proposedAmount)}.`,
+    milestoneId: null,
+  }];
+
+  for (const milestone of milestones) {
+    const payout = milestone.payoutAmount > 0n
+      ? milestone.payoutAmount
+      : (proposedAmount * BigInt(milestone.payoutPercentage)) / 100n;
+    events.push({
+      eventType: milestone.status,
+      label: milestone.name,
+      status: timelineStatus(milestone.status),
+      statusLabel: milestone.status,
+      timestamp: milestone.verifiedAt || milestone.submittedAt || null,
+      actor: carrier,
+      details: `${milestone.payoutPercentage}% payout (${formatEth(payout)}). ${milestone.remark || milestone.rejectionReason || milestoneDescription(milestone.status)}`,
+      milestoneId: milestone.index,
+    });
+  }
+
+  return events;
+}
+
+function calculateProposedPayout(total, percentage, index, milestones) {
+  if (index === milestones.length - 1) {
+    const allocated = milestones
+      .slice(0, -1)
+      .reduce((sum, milestone) => sum + ((total * BigInt(milestone.payoutPercentage)) / 100n), 0n);
+    return total - allocated;
+  }
+  return (total * BigInt(percentage)) / 100n;
+}
+
+function timelineStatus(status) {
+  if (status === 'Paid') return 'paid';
+  if (status === 'Verified') return 'verified';
+  if (status === 'Submitted') return 'pending';
+  if (status === 'Rejected') return 'rejected';
+  if (status === 'PendingProof') return 'locked';
+  return 'proposed';
+}
+
+function timelineDotClass(status) {
+  if (status === 'verified' || status === 'paid') return styles.dotVerified;
+  if (status === 'pending') return styles.dotPending;
+  if (status === 'rejected') return styles.dotRejected;
+  if (status === 'locked') return styles.dotLocked;
+  return styles.dotNeutral;
+}
+
+function timelineTone(status) {
+  if (status === 'verified' || status === 'paid') return 'success';
+  if (status === 'pending') return 'warning';
+  if (status === 'rejected') return 'danger';
+  return 'neutral';
+}
+
+function milestoneDescription(status) {
+  const descriptions = {
+    Proposed: 'Waiting for the shipper to accept the carrier proposal.',
+    PendingProof: 'Waiting for the carrier to submit proof.',
+    Submitted: 'Waiting for shipper verification.',
+    Verified: 'Proof verified.',
+    Rejected: 'Proof rejected and awaiting resubmission.',
+    Paid: 'Proof verified and milestone payment released.',
+  };
+  return descriptions[status] || '';
+}
+
+function formatActionError(error) {
+  if (error?.code === 4001 || error?.code === 'ACTION_REJECTED') {
+    return 'Transaction cancelled in MetaMask.';
+  }
+  const message = error?.shortMessage || error?.reason || error?.message || '';
+  if (message.includes('insufficient funds')) return 'The shipper wallet does not have enough ETH.';
+  if (message.includes('caller is not shipper')) return 'Only the request shipper can perform this action.';
+  if (message.includes('not awaiting approval')) return 'This proposal is no longer awaiting approval.';
+  return message || 'The shipment transaction failed.';
+}
+
+function isZeroAddress(address) {
+  return !address || /^0x0{40}$/i.test(address);
 }

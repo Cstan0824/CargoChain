@@ -22,6 +22,7 @@ import { Table } from '../components/Table.jsx';
 import { DonutChart } from '../components/DonutChart.jsx';
 import { useToast } from '../hooks/useToast.js';
 import { formatEth, formatRelative, requestStatus, REQUEST_TONE, MILESTONE_TONE } from '../utils/format.js';
+import { CreateRequestModal } from '../components/CreateRequestModal.jsx';
 import {
   escrowFundedTile,
   lockedTile,
@@ -60,6 +61,7 @@ const PENDING_VERIFICATIONS = [
 export function Shipper() {
   const navigate = useNavigate();
   const { show } = useToast();
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   return (
     <div className={styles.page}>
@@ -71,7 +73,7 @@ export function Shipper() {
             <Button variant="secondary" onClick={() => show('Export coming soon.', 'info')}>
               <HiOutlineArrowDownTray className={styles.btnIcon} aria-hidden="true" /> Export
             </Button>
-            <Button onClick={() => navigate('/create-request')}>+ Create request</Button>
+            <Button onClick={() => setIsCreateModalOpen(true)}>+ Create request</Button>
           </>
         }
       />
@@ -185,6 +187,8 @@ export function Shipper() {
         </div>
         <img src={verificationLaptopUser} alt="" className={styles.noticeArt} />
       </Card>
+      
+      <CreateRequestModal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} />
     </div>
   );
 }

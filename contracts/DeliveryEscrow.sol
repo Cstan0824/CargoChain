@@ -54,6 +54,7 @@ contract DeliveryEscrow {
         string specialInstruction;
         RequestStatus status;
         uint256 createdAt;
+        uint256 proposedAmount;
     }
 
     struct Milestone {
@@ -76,8 +77,9 @@ contract DeliveryEscrow {
     uint256[] private allRequestIds;
     uint256[] private openRequestIds;
 
-    event RequestCreated(uint256 indexed requestId, address indexed shipper);
+    event RequestCreated(uint256 indexed requestId, address indexed shipper, uint256 proposedAmount);
     event MilestonePlanProposed(uint256 indexed requestId, address indexed carrier);
+    event MilestonePlanRejected(uint256 indexed requestId, address indexed carrier);
     event EscrowFunded(uint256 indexed requestId, uint256 amount);
     event ProofSubmitted(uint256 indexed requestId, uint256 indexed milestoneId);
     event MilestoneVerified(uint256 indexed requestId, uint256 indexed milestoneId, bool approved);
@@ -111,11 +113,13 @@ contract DeliveryEscrow {
         string calldata deliveryLocation,
         string calldata specialInstruction,
         uint256 deadline,
+        uint256 proposedAmount,
         ItemInput[] calldata items
     ) external returns (uint256 requestId) {
         require(bytes(pickupLocation).length > 0, "pickup required");
         require(bytes(deliveryLocation).length > 0, "delivery required");
         require(deadline > block.timestamp, "deadline must be future");
+        require(proposedAmount > 0, "payment amount required");
         require(items.length > 0, "at least one item required");
 
         requestId = nextRequestId++;
@@ -128,6 +132,7 @@ contract DeliveryEscrow {
         delivery.specialInstruction = specialInstruction;
         delivery.status = RequestStatus.Open;
         delivery.createdAt = block.timestamp;
+        delivery.proposedAmount = proposedAmount;
 
         for (uint256 i = 0; i < items.length; i++) {
             require(items[i].quantity > 0, "item quantity must be positive");
@@ -143,7 +148,7 @@ contract DeliveryEscrow {
 
         allRequestIds.push(requestId);
         openRequestIds.push(requestId);
-        emit RequestCreated(requestId, msg.sender);
+        emit RequestCreated(requestId, msg.sender, proposedAmount);
     }
 
     function proposeMilestones(
@@ -178,6 +183,23 @@ contract DeliveryEscrow {
         emit MilestonePlanProposed(requestId, msg.sender);
     }
 
+    function rejectMilestoneProposal(uint256 requestId)
+        external
+        requestExists(requestId)
+        onlyShipper(requestId)
+    {
+        DeliveryRequest storage delivery = requests[requestId];
+        require(delivery.status == RequestStatus.PendingApproval, "request is not awaiting approval");
+
+        address rejectedCarrier = delivery.carrier;
+        delivery.carrier = address(0);
+        delivery.status = RequestStatus.Open;
+        delete requestMilestones[requestId];
+        openRequestIds.push(requestId);
+
+        emit MilestonePlanRejected(requestId, rejectedCarrier);
+    }
+
     function approveAndFund(uint256 requestId)
         external
         payable
@@ -186,7 +208,7 @@ contract DeliveryEscrow {
     {
         DeliveryRequest storage delivery = requests[requestId];
         require(delivery.status == RequestStatus.PendingApproval, "request is not awaiting approval");
-        require(msg.value > 0, "escrow amount required");
+        require(msg.value == delivery.proposedAmount, "funding must match proposed amount");
 
         Milestone[] storage milestones = requestMilestones[requestId];
         require(milestones.length > 0, "no milestones proposed");

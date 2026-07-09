@@ -51,12 +51,10 @@ export function getContract(providerOrSigner, name, networkId) {
 }
 
 // buildContractMap() — convenience used by ContractsContext.
+// V1 currently deploys the single-contract MVP only. Future module
+// contracts can be added here after their Solidity files and migrations land.
 export function buildContractMap(provider, networkId) {
   return {
-    userRegistry:      getContract(provider, 'UserRegistry',      networkId),
-    deliveryEscrow:    getContract(provider, 'DeliveryEscrow',    networkId),
-    milestoneVerifier: getContract(provider, 'MilestoneVerifier', networkId),
-    lifecycleManager:  getContract(provider, 'LifecycleManager',  networkId),
-    paymentEvents:     getContract(provider, 'PaymentEvents',     networkId),
+    deliveryEscrow: getContract(provider, 'DeliveryEscrow', networkId),
   };
 }

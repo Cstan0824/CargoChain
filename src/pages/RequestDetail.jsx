@@ -1,220 +1,275 @@
-// src/pages/RequestDetail.jsx — CargoChain
-// Read-only preview of an Open delivery request. Items live here, not in
-// the marketplace row. The carrier's "Accept Job" action lives here.
-// Once a request is accepted, the user moves to /track/:id for the
-// timeline view (per BusinessFlow §7: Track is for accepted requests).
+// src/pages/RequestDetail.jsx - Marketplace request preview.
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   HiArrowLeft,
-  HiOutlineMapPin,
-  HiOutlineCalendarDays,
   HiOutlineCube,
-  HiOutlineCheckBadge,
-  HiOutlineTruck,
+  HiOutlineMapPin,
 } from 'react-icons/hi2';
 import { Topbar } from '../components/Topbar.jsx';
 import { Card } from '../components/Card.jsx';
 import { Button } from '../components/Button.jsx';
 import { Badge } from '../components/Badge.jsx';
-import { ProgressLine } from '../components/ProgressLine.jsx';
-import { useToast } from '../hooks/useToast.js';
+import { EmptyState } from '../components/EmptyState.jsx';
+import { useContracts } from '../hooks/useContracts.js';
+import { useWallet } from '../hooks/useWallet.js';
 import {
+  formatDate,
+  formatDaysLeft,
   formatEth,
   formatRelative,
-  formatDate,
-  formatDeadlineDuration,
-  formatItems,
   requestStatus,
   REQUEST_TONE,
+  shortAddress,
 } from '../utils/format.js';
+import { deliveryTruckCity } from '../assets';
 import styles from './RequestDetail.module.css';
-
-// Demo request. status is `Open` for the marketplace flow. Items
-// follow the §6 `Item` entity: { itemName, itemDescription, quantity }.
-const DEMO_REQUEST = {
-  id: 1001,
-  from: 'Kuala Lumpur',
-  to: 'Penang',
-  status: 'Open',
-  items: [
-    { itemName: 'Server rack',  itemDescription: 'Freight class 85, original packaging', quantity: '2' },
-    { itemName: 'Cable bundle', itemDescription: 'CAT6, 50m roll',                      quantity: '1 bundle' },
-    { itemName: 'Spare parts',  itemDescription: '',                                       quantity: '4 boxes' },
-  ],
-  specialInstruction: 'Handle with care. Recipient is at the loading bay on Level 2. Call ahead 30 minutes before arrival.',
-  rewardWei: 2500000000000000000n,
-  createdAt: Math.floor(Date.now() / 1000) - 7200,
-  deadlineMs: Date.now() + 5 * 86400000,
-  milestones: 4,
-  current: 0,
-  // Carrier hasn't accepted yet — these are unset.
-  carrier: null,
-};
 
 export function RequestDetail() {
   const { id: idParam } = useParams();
   const navigate = useNavigate();
-  const { show } = useToast();
-  const [request, setRequest] = useState(DEMO_REQUEST);
+  const { account } = useWallet();
+  const { contracts, deployError } = useContracts();
+  const [request, setRequest] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
-  // When Module b wires the per-id fetch, swap this for the contract call.
   useEffect(() => {
-    if (!idParam) return;
-    setLoading(true);
-    // Simulated: pull a different `id` to prove the URL parameter drives the view.
-    setRequest((prev) => ({ ...prev, id: Number(idParam) || prev.id }));
-    setLoading(false);
-  }, [idParam]);
+    if (!idParam || !contracts?.deliveryEscrow) {
+      setRequest(null);
+      return;
+    }
 
-  const accept = () => {
-    show(
-      `Accept Job — module d (Melissa). Request #${request.id} would transition Open → PendingApproval.`,
-      'info',
-    );
-  };
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    loadRequest(contracts.deliveryEscrow, idParam)
+      .then((nextRequest) => {
+        if (!cancelled) setRequest(nextRequest);
+      })
+      .catch((loadError) => {
+        if (!cancelled) {
+          setRequest(null);
+          setError(loadError.shortMessage || loadError.reason || loadError.message);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [contracts, idParam]);
 
   const goBack = () => navigate('/');
-  const goTimeline = () => navigate(`/track/${request.id}`);
 
-  const isAccepted = !['Open', 'PendingApproval', 'Cancelled', 'Expired', 'Refunded'].includes(request.status);
+  if (loading) {
+    return (
+      <div className={styles.page}>
+        <Topbar title={`Request #${String(idParam || '').padStart(4, '0')}`} />
+        <Card><div className={styles.muted}>Loading request from DeliveryEscrow...</div></Card>
+      </div>
+    );
+  }
+
+  if (deployError || error || !request) {
+    return (
+      <div className={styles.page}>
+        <Topbar title={`Request #${String(idParam || '').padStart(4, '0')}`} />
+        <Card padded={false}>
+          <EmptyState
+            illustration={deliveryTruckCity}
+            title="Request unavailable"
+            description={deployError || error || 'This request could not be found.'}
+            action={<Button variant="secondary" onClick={goBack}>Back to marketplace</Button>}
+          />
+        </Card>
+      </div>
+    );
+  }
+
+  const isShipper = Boolean(account && account.toLowerCase() === request.shipper.toLowerCase());
+  const displayedPayment = request.escrow > 0n ? request.escrow : request.proposedAmount;
 
   return (
     <div className={styles.page}>
       <Topbar
         title={`Request #${String(request.id).padStart(4, '0')}`}
-        subtitle="Preview the full request before you accept."
+        subtitle="Review the shipment requirements before proposing milestones."
         actions={
           <Button variant="secondary" onClick={goBack}>
-            <HiArrowLeft className={styles.backIcon} aria-hidden="true" /> Back to marketplace
+            <HiArrowLeft className={styles.backIcon} aria-hidden="true" />
+            Marketplace
           </Button>
         }
       />
 
-      {loading && <Card><div className={styles.muted}>Loading request…</div></Card>}
-
-      {!loading && request && (
-        <>
-          {/* --- Header card: status + key fields --- */}
-          <Card className={styles.header}>
-            <div className={styles.headerTop}>
+      <div className={styles.dashboardGrid}>
+        <div className={styles.leftColumn}>
+          <Card padded={false} className={styles.sectionCard}>
+            <div className={styles.sectionHeader}>
+              <HiOutlineMapPin className={styles.sectionIcon} aria-hidden="true" />
               <div>
-                <div className={styles.label}>Request</div>
-                <div className={styles.idValue}>#{String(request.id).padStart(4, '0')}</div>
+                <h2>Shipping route</h2>
+                <p>Pickup and final delivery locations</p>
               </div>
-              <div className={styles.headerBadges}>
-                <Badge tone={REQUEST_TONE[request.status] || 'neutral'} icon={HiOutlineTruck}>
+            </div>
+            <div className={styles.routeTimeline}>
+              <div className={styles.routeStop}>
+                <span className={styles.routeDot}>A</span>
+                <div>
+                  <span className={styles.label}>Pickup from</span>
+                  <strong>{request.from}</strong>
+                </div>
+              </div>
+              <span className={styles.routeLine} aria-hidden="true" />
+              <div className={styles.routeStop}>
+                <span className={`${styles.routeDot} ${styles.routeDotEnd}`}>B</span>
+                <div>
+                  <span className={styles.label}>Deliver to</span>
+                  <strong>{request.to}</strong>
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          <Card padded={false} className={styles.manifest}>
+            <div className={styles.sectionHeader}>
+              <HiOutlineCube className={styles.sectionIcon} aria-hidden="true" />
+              <div>
+                <h2>Cargo manifest</h2>
+                <p>{request.items.length} item type{request.items.length === 1 ? '' : 's'}</p>
+              </div>
+            </div>
+            <div className={styles.itemList}>
+              {request.items.map((item, index) => (
+                <div key={`${item.name}-${index}`} className={styles.itemRow}>
+                  <div>
+                    <strong>{item.name}</strong>
+                    <p>{item.description || 'No description provided.'}</p>
+                  </div>
+                  <span className={styles.quantity}>Qty {item.quantity}</span>
+                </div>
+              ))}
+            </div>
+            {request.specialInstruction && (
+              <div className={styles.instructions}>
+                <span className={styles.label}>Special instructions</span>
+                <p>{request.specialInstruction}</p>
+              </div>
+            )}
+          </Card>
+        </div>
+
+        <div className={styles.rightColumn}>
+          <Card className={styles.escrowCard}>
+            <span className={styles.label}>
+              {request.escrow > 0n ? 'Total locked in escrow' : 'Planned payment'}
+            </span>
+            <strong className={styles.escrowValue}>{formatEth(displayedPayment)}</strong>
+            <span className={styles.muted}>
+              {request.escrow > 0n ? 'Escrow funded' : 'Funded after the shipper accepts a proposal'}
+            </span>
+          </Card>
+
+          <Card className={styles.metaCard}>
+            <MetaRow
+              label="Request status"
+              value={
+                <Badge tone={REQUEST_TONE[request.status] || 'neutral'}>
                   {requestStatus(request.status)}
                 </Badge>
-                {isAccepted
-                  ? <Badge tone="success" icon={HiOutlineCheckBadge}>Accepted</Badge>
-                  : <Badge tone="info">Awaiting carrier</Badge>}
-              </div>
-            </div>
-
-            <div className={styles.routeBlock}>
-              <div className={styles.routePin} aria-hidden="true">
-                <HiOutlineMapPin size={20} />
-              </div>
-              <div className={styles.routeText}>
-                <div className={styles.routeFrom}>{request.from}</div>
-                <div className={styles.routeDivider} aria-hidden="true" />
-                <div className={styles.routeTo}>{request.to}</div>
-              </div>
-              <div className={styles.routeMeta}>
-                <div className={styles.label}>Reward</div>
-                <div className={styles.rewardValue}>{formatEth(request.rewardWei)}</div>
-              </div>
-              <div className={styles.routeMeta}>
-                <div className={styles.label}>Milestones</div>
-                <div className={styles.milestoneBlock}>
-                  <ProgressLine count={request.milestones} current={request.current} label={false} />
-                  <span className={styles.milestoneLabel}>{request.current} / {request.milestones}</span>
-                </div>
-              </div>
-            </div>
+              }
+            />
+            <MetaRow label="Shipper" value={<span title={request.shipper}>{shortAddress(request.shipper)}</span>} />
+            <MetaRow
+              label="Delivery deadline"
+              value={
+                <span>
+                  {formatDate(Math.floor(request.deadlineMs / 1000))}
+                  <small>{formatDaysLeft(request.deadlineMs)}</small>
+                </span>
+              }
+            />
+            <MetaRow
+              label="Published"
+              value={
+                <span>
+                  {formatRelative(request.createdAt)}
+                  <small>{formatDate(request.createdAt)}</small>
+                </span>
+              }
+            />
+            <MetaRow
+              label="Milestone plan"
+              value={request.milestones.length ? `${request.milestones.length} proposed` : 'Awaiting carrier'}
+            />
           </Card>
+        </div>
+      </div>
 
-          {/* --- Details card: deadline + creation --- */}
-          <div className={styles.detailGrid}>
-            <Card className={styles.detailCard}>
-              <div className={styles.detailHead}>
-                <HiOutlineCalendarDays className={styles.detailIcon} aria-hidden="true" />
-                <div>
-                  <div className={styles.cardTitle}>Deadline</div>
-                  <div className={styles.cardSub}>When this delivery must be completed.</div>
-                </div>
-              </div>
-              <div className={styles.detailBody}>
-                <div className={styles.bigValue}>{formatDeadlineDuration(request.deadlineMs)}</div>
-                <div className={styles.muted}>{formatDate(Math.floor(request.deadlineMs / 1000))}</div>
-              </div>
-            </Card>
+      <div className={styles.footer}>
+        <Button variant="secondary" onClick={goBack}>Back</Button>
+        {request.status === 'Open' && !isShipper && (
+          <Button onClick={() => navigate(`/shipments/${request.id}/propose`)}>
+            Propose milestones
+          </Button>
+        )}
+        {request.status === 'Open' && isShipper && (
+          <Button onClick={() => navigate(`/track/${request.id}`)}>View shipment status</Button>
+        )}
+        {request.status !== 'Open' && (
+          <Button onClick={() => navigate(`/track/${request.id}`)}>
+            {request.status === 'PendingApproval' ? 'Review proposal' : 'Open shipment timeline'}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
 
-            <Card className={styles.detailCard}>
-              <div className={styles.detailHead}>
-                <HiOutlineCalendarDays className={styles.detailIcon} aria-hidden="true" />
-                <div>
-                  <div className={styles.cardTitle}>Created</div>
-                  <div className={styles.cardSub}>When the shipper posted the request.</div>
-                </div>
-              </div>
-              <div className={styles.detailBody}>
-                <div className={styles.bigValue}>{formatRelative(request.createdAt)}</div>
-                <div className={styles.muted}>{formatDate(request.createdAt)}</div>
-              </div>
-            </Card>
-          </div>
+async function loadRequest(deliveryEscrow, idParam) {
+  const requestId = BigInt(idParam);
+  const [rawRequest, rawItems, rawMilestones] = await Promise.all([
+    deliveryEscrow.getRequest(requestId),
+    deliveryEscrow.getItems(requestId),
+    deliveryEscrow.getMilestones(requestId),
+  ]);
 
-          {/* --- Items card --- */}
-          <Card className={styles.itemsCard} padded={false}>
-            <div className={styles.itemsHead}>
-              <HiOutlineCube className={styles.detailIcon} aria-hidden="true" />
-              <div>
-                <div className={styles.cardTitle}>Items</div>
-                <div className={styles.cardSub}>{formatItems(request.items)}</div>
-              </div>
-            </div>
-            <ul className={styles.itemsList}>
-              {request.items.map((it, i) => (
-                <li key={i} className={styles.itemRow}>
-                  <div className={styles.itemMain}>
-                    <div className={styles.itemName}>
-                      {it.itemName}
-                      {it.quantity && <span className={styles.itemQty}> × {it.quantity}</span>}
-                    </div>
-                    {it.itemDescription && (
-                      <div className={styles.itemDesc}>{it.itemDescription}</div>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </Card>
+  const carrier = rawRequest.carrier ?? rawRequest[2];
+  return {
+    id: Number(rawRequest.requestId ?? rawRequest[0]),
+    shipper: rawRequest.shipper ?? rawRequest[1],
+    carrier: isZeroAddress(carrier) ? null : carrier,
+    from: rawRequest.pickupLocation ?? rawRequest[3],
+    to: rawRequest.deliveryLocation ?? rawRequest[4],
+    escrow: BigInt(rawRequest.totalAmount ?? rawRequest[5] ?? 0n),
+    deadlineMs: Number(rawRequest.deadline ?? rawRequest[7] ?? 0n) * 1000,
+    specialInstruction: rawRequest.specialInstruction ?? rawRequest[8],
+    status: requestStatus(rawRequest.status ?? rawRequest[9]),
+    createdAt: Number(rawRequest.createdAt ?? rawRequest[10] ?? 0n),
+    proposedAmount: BigInt(rawRequest.proposedAmount ?? rawRequest[11] ?? 0n),
+    items: Array.from(rawItems || []).map((item) => ({
+      name: item.itemName ?? item[0],
+      description: item.itemDescription ?? item[1],
+      quantity: Number(item.quantity ?? item[2]),
+    })),
+    milestones: Array.from(rawMilestones || []),
+  };
+}
 
-          {/* --- Special instructions card --- */}
-          {request.specialInstruction && (
-            <Card className={styles.instrCard}>
-              <div className={styles.cardTitle}>Special instructions</div>
-              <p className={styles.instrBody}>{request.specialInstruction}</p>
-            </Card>
-          )}
+function isZeroAddress(address) {
+  return !address || /^0x0{40}$/i.test(address);
+}
 
-          {/* --- Footer actions --- */}
-          <div className={styles.footerRow}>
-            {isAccepted ? (
-              <Button onClick={goTimeline}>Open timeline</Button>
-            ) : (
-              <>
-                <Button variant="secondary" onClick={goBack}>Back</Button>
-                <Button onClick={accept}>Accept Job</Button>
-              </>
-            )}
-          </div>
-        </>
-      )}
+function MetaRow({ label, value }) {
+  return (
+    <div className={styles.metaRow}>
+      <span className={styles.label}>{label}</span>
+      <strong>{value}</strong>
     </div>
   );
 }
