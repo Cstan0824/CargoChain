@@ -36,8 +36,9 @@ export async function hashFile(file) {
  */
 export async function uploadPhoto(file, hash) {
   const fd = new FormData();
-  fd.append('photo', file);
   fd.append('hash',  hash);
+  fd.append('photo', file);
+
 
   const res = await fetch('/uploads', { method: 'POST', body: fd });
   if (!res.ok) {
