@@ -243,8 +243,9 @@ contract DeliveryEscrow {
             "request is not active"
         );
         require(proofUris.length > 0, "at least one proof uri required");
-        require(milestoneId < requestMilestones[requestId].length, "milestone does not exist");
-
+        if(milestoneId > 0){
+            require(requestMilestones[requestId][milestoneId -1].status == MilestoneStatus.Paid, "previous milestone is not completed");
+        }
         Milestone storage milestone = requestMilestones[requestId][milestoneId];
         require(
             milestone.status == MilestoneStatus.PendingProof || milestone.status == MilestoneStatus.Rejected,

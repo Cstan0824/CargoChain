@@ -26,6 +26,7 @@ import {
   shortAddress,
 } from '../utils/format.js';
 import styles from './Track.module.css';
+import {hashFile, uploadPhoto} from '../utils/upload.js';
 
 const TAB_ITEMS = [
   { value: 'timeline', label: 'Timeline & Checkpoints' },
@@ -63,7 +64,10 @@ export function Track() {
       .then((nextShipment) => {
         if (!cancelled) {
           setShipment(nextShipment);
-          setSelectedIndex(0);
+
+          const actionableIndex = nextShipment.events.findIndex((event) => 
+            ['pending', 'locked', 'rejected'].includes(event.status));
+          setSelectedIndex(actionableIndex >= 0 ? actionableIndex : 0);
         }
       })
       .catch((loadError) => {
@@ -84,6 +88,11 @@ export function Track() {
   const isShipper = Boolean(
     account && shipment && account.toLowerCase() === shipment.shipper.toLowerCase(),
   );
+  const isCarrier = Boolean(
+    account && shipment && shipment.carrier
+      && account.toLowerCase() === shipment.carrier.toLowerCase(),
+  );
+  const isParticipant = isShipper || isCarrier;
   const proposalPending = shipment?.status === 'PendingApproval';
   const milestonesApproved = !['Open', 'PendingApproval'].includes(shipment?.status);
   const busy = actionStage !== 'idle';
@@ -143,6 +152,67 @@ export function Track() {
       setActionStage('idle');
     }
   };
+
+  const submitMilestoneProof = async (milestoneId, file) => {
+    if (busy || !shipment || !signer || !contracts?.deliveryEscrow) {
+      show('Connect the carrier wallet first', 'error');
+      return false;
+    }
+
+    if(!isCarrier){
+      show('Only the assigned carrier can submit milestone proof.', 'error');
+      return false;
+    }
+
+    if(!file){
+      show('No file selected for upload.', 'error');
+      return false;
+    }
+
+    const fileTypes = [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+    ];
+
+    if(!fileTypes.includes(file.type)){
+      show('Invalid file type. Please upload a JPEG, PNG, or WEBP image.', 'error');
+      return false;
+    }
+    
+    if(file.size > 2 * 1024 * 1024) {
+      show('File size exceeds 2MB limit. Please upload a smaller image.', 'error');
+      return false;
+    }
+
+    setActionStage('submitting-proof');
+
+    try{
+      const hash = await hashFile(file);
+      const uploadResult = await uploadPhoto(file, hash);
+      const proofReference = `${uploadResult.url}?sha256=${encodeURIComponent(hash)}`;
+      const tx = await contracts.deliveryEscrow.connect(signer).submitProof(
+        BigInt(shipment.id),
+        BigInt(milestoneId),
+        [proofReference],
+        '',
+      );
+      show('Submitting milestone proof on-chain...', 'info');
+      const receipt = await tx.wait();
+      if (!receipt || receipt.status !== 1) throw new Error('Proof submission was not confirmed.');
+      
+      show('Milestone proof submitted successfully.', 'success');
+      setRefreshKey((value) => value + 1);
+      return true;
+    } catch (actionError) {
+      show(formatActionError(actionError), 'error');
+        return false;
+    } finally {
+        setActionStage('idle');
+    }
+  }
+
+
 
   const verifyMilestone = async (milestoneId, approve) => {
     if (busy || !shipment || !signer || !contracts?.deliveryEscrow) return;
@@ -319,8 +389,10 @@ export function Track() {
                 selectedIndex={selectedIndex}
                 onSelect={setSelectedIndex}
                 canVerify={isShipper}
+                canSubmitProof={isCarrier}
                 busy={busy}
                 onVerify={verifyMilestone}
+                onSubmitProof={submitMilestoneProof}
               />
             )}
             {tab === 'proof' && <ProofPanel milestones={shipment.milestones} />}
@@ -413,7 +485,7 @@ function ProposalReview({
   );
 }
 
-function TimelinePanel({ events, selectedIndex, onSelect, canVerify, busy, onVerify }) {
+function TimelinePanel({ events, selectedIndex, onSelect, canVerify, busy, onVerify, canSubmitProof, onSubmitProof }) {
   if (!events.length) return <div className={styles.tabEmpty}>No timeline entries yet.</div>;
   const selectedEvent = events[selectedIndex] || events[0];
 
@@ -469,6 +541,16 @@ function TimelinePanel({ events, selectedIndex, onSelect, canVerify, busy, onVer
                 <span className={styles.sidebarValueAddress}>{selectedEvent.actor}</span>
               </div>
             )}
+            {selectedEvent.milestoneId !== null && canSubmitProof && (
+              selectedEvent.status === 'locked' || selectedEvent.status === 'rejected' ) && (
+                <ProofSubmitBox
+                  key={`${selectedEvent.milestoneId}-${selectedEvent.status}`}
+                  milestoneId={selectedEvent.milestoneId}
+                  rejected={selectedEvent.status === 'rejected'}
+                  busy={busy}
+                  onSubmit={onSubmitProof}
+                />
+              )}
             {selectedEvent.status === 'pending' && canVerify && (
               <div className={styles.sidebarVerifyPanel}>
                 <span className={styles.sidebarLabel}>Shipper verification required</span>
@@ -504,6 +586,45 @@ function TimelinePanel({ events, selectedIndex, onSelect, canVerify, busy, onVer
   );
 }
 
+function ProofSubmitBox({ milestoneId, rejected, busy, onSubmit }) {
+  const [selectedFile, setSelectedFile] = useState(null);
+  const handleSubmit = async () => {
+    const success = await onSubmit(milestoneId, selectedFile);
+    if (success) {
+      setSelectedFile(null);
+    }
+  };
+  return (
+    <div className={styles.sidebarVerifyPanel}>
+      <span className={styles.sidebarLabel}>
+        {rejected 
+        ? 'Resubmit proof for this milestone' 
+        : 'Carrier checkpoint update'}
+        </span>
+
+        <input 
+        type="file" 
+        accept="image/jpeg,image/png,image/webp" 
+        disabled={busy}
+        onChange={(e) => setSelectedFile(e.target.files[0])} />
+
+        {selectedFile && (
+          <span> 
+            Selected: {selectedFile.name}
+          </span>
+        )}
+
+        <Button
+        size="sm"
+        disabled={busy || !selectedFile}
+        onClick={handleSubmit}
+        >
+          {busy ? 'Submitting proof...' : rejected ? 'Resubmit Proof' : 'Submit Proof'}
+        </Button>
+    </div>
+  );
+}
+
 function ProofPanel({ milestones }) {
   const withProof = milestones.filter((milestone) => milestone.proofUris.length > 0);
   if (!withProof.length) {
@@ -515,19 +636,151 @@ function ProofPanel({ milestones }) {
       <div className={styles.proofHeader}>
         <HiOutlinePhoto className={styles.proofHeaderIcon} aria-hidden="true" />
         <div>
-          <div className={styles.proofHeaderTitle}>Submitted proof references</div>
-          <div className={styles.proofHeaderBody}>Proof references are loaded from the shipment milestones.</div>
+          <div className={styles.proofHeaderTitle}>
+            Milestone photo proof
+          </div>
+
+          <div className={styles.proofHeaderBody}>
+            Review the photos submitted by the carrier.
+          </div>
         </div>
       </div>
-      <div className={styles.proofList}>
-        {withProof.map((milestone) => (
-          <div key={milestone.index} className={styles.proofPlaceholder}>
-            <strong>{milestone.name}</strong>
-            <span className={styles.proofPlaceholderHint}>{milestone.proofUris.length} file reference(s)</span>
-          </div>
-        ))}
+
+      <div className={styles.proofGrid}>
+        {withProof.flatMap((milestone) =>
+          milestone.proofUris.map((proofUri, proofIndex) => (
+            <ProofImageCard
+              key={`${milestone.index}-${proofIndex}`}
+              milestone={milestone}
+              proofUri={proofUri}
+              proofIndex={proofIndex}
+            />
+          )),
+        )}
       </div>
     </div>
+  );
+}
+
+function ProofImageCard({
+  milestone,
+  proofUri,
+  proofIndex,
+}) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const imageUrl = new URL(
+    proofUri,
+    window.location.origin,
+  ).href;
+
+  const parsedUrl = new URL(
+    proofUri,
+    window.location.origin,
+  );
+
+  const proofHash =
+    parsedUrl.searchParams.get('sha256') || '';
+
+  const copyHash = async () => {
+    if (!proofHash) return;
+
+    try {
+      await navigator.clipboard.writeText(proofHash);
+      setCopied(true);
+
+      window.setTimeout(() => {
+        setCopied(false);
+      }, 1500);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <article className={styles.proofCard}>
+      <div className={styles.proofImageWrap}>
+        {!imageFailed ? (
+          <img
+            src={imageUrl}
+            alt={`Proof ${proofIndex + 1} for ${milestone.name}`}
+            className={styles.proofImage}
+            onError={() => setImageFailed(true)}
+          />
+        ) : (
+          <div className={styles.proofImageError}>
+            <HiOutlineExclamationCircle aria-hidden="true" />
+            <span>Photo could not be loaded</span>
+          </div>
+        )}
+
+        <span className={styles.proofNumber}>
+          Proof {proofIndex + 1}
+        </span>
+      </div>
+
+      <div className={styles.proofCardBody}>
+        <div className={styles.proofCardHeader}>
+          <div>
+            <span className={styles.proofCardLabel}>
+              Milestone
+            </span>
+
+            <h3 className={styles.proofCardTitle}>
+              {milestone.name}
+            </h3>
+          </div>
+
+          <Badge tone={
+            milestone.status === 'Rejected'
+              ? 'danger'
+              : milestone.status === 'Paid'
+                ? 'success'
+                : 'warning'
+          }>
+            {milestone.status}
+          </Badge>
+        </div>
+
+        {milestone.remark && (
+          <div className={styles.proofRemark}>
+            <span className={styles.proofCardLabel}>
+              Carrier remark
+            </span>
+
+            <p>{milestone.remark}</p>
+          </div>
+        )}
+
+        {milestone.submittedAt > 0 && (
+          <div className={styles.proofSubmittedTime}>
+            Submitted {formatDate(milestone.submittedAt)}
+          </div>
+        )}
+
+        <div className={styles.proofActions}>
+          <a
+            href={imageUrl}
+            target="_blank"
+            rel="noreferrer"
+            className={styles.proofActionLink}
+          >
+            View full image
+          </a>
+
+          {proofHash && (
+            <button
+              type="button"
+              className={styles.proofHashButton}
+              onClick={copyHash}
+            >
+              {copied ? 'Hash copied' : 'Copy proof hash'}
+            </button>
+          )}
+        </div>
+      </div>
+    </article>
   );
 }
 
