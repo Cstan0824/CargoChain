@@ -96,7 +96,13 @@ export function ProposeMilestoneModal({ isOpen, onClose, requestId, onSuccess })
       if (onSuccess) onSuccess();
       onClose();
     } catch (e) {
-      show(e.shortMessage || e.reason || e.message || 'Failed to submit proposal.', 'error');
+      const message = e.shortMessage || e.reason || e.message || '';
+      show(
+        message.includes('carrier already has active proposal')
+          ? 'You already have an active proposal for this request. Open it to revoke or revise your plan.'
+          : message || 'Failed to submit proposal.',
+        'error',
+      );
     } finally {
       setSubmitting(false);
     }

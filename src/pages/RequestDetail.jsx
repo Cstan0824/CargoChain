@@ -204,8 +204,8 @@ export function RequestDetail() {
               }
             />
             <MetaRow
-              label="Milestone plan"
-              value={request.milestones.length ? `${request.milestones.length} proposed` : 'Awaiting carrier'}
+              label="Carrier proposals"
+              value={request.activeProposalCount ? `${request.activeProposalCount} awaiting review` : 'Awaiting carrier'}
             />
           </Card>
         </div>
@@ -223,7 +223,7 @@ export function RequestDetail() {
         )}
         {request.status !== 'Open' && (
           <Button onClick={() => navigate(`/track/${request.id}`)}>
-            {request.status === 'PendingApproval' ? 'Review proposal' : 'Open shipment timeline'}
+            Open shipment timeline
           </Button>
         )}
       </div>
@@ -233,10 +233,11 @@ export function RequestDetail() {
 
 async function loadRequest(deliveryEscrow, idParam) {
   const requestId = BigInt(idParam);
-  const [rawRequest, rawItems, rawMilestones] = await Promise.all([
+  const [rawRequest, rawItems, rawMilestones, rawProposals] = await Promise.all([
     deliveryEscrow.getRequest(requestId),
     deliveryEscrow.getItems(requestId),
     deliveryEscrow.getMilestones(requestId),
+    deliveryEscrow.getProposals(requestId),
   ]);
 
   const carrier = rawRequest.carrier ?? rawRequest[2];
@@ -258,6 +259,9 @@ async function loadRequest(deliveryEscrow, idParam) {
       quantity: Number(item.quantity ?? item[2]),
     })),
     milestones: Array.from(rawMilestones || []),
+    activeProposalCount: Array.from(rawProposals || []).filter(
+      (proposal) => Number(proposal.status ?? proposal[1]) === 0,
+    ).length,
   };
 }
 
