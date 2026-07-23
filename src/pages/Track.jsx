@@ -386,21 +386,48 @@ export function Track() {
 
 
   const verifyMilestone = async (milestoneId, approve) => {
-    if (busy || !shipment || !signer || !contracts?.deliveryEscrow) return;
-    setActionStage(approve ? 'verifying' : 'rejecting-proof');
+    if (busy ||!shipment ||!signer ||!contracts?.deliveryEscrow) {
+        return;
+    }
+
+    setActionStage(
+      approve ? 'verifying' : 'rejecting-proof',
+    );
 
     try {
-      const tx = await contracts.deliveryEscrow.connect(signer).verifyMilestone(
-        BigInt(shipment.id),
-        BigInt(milestoneId),
-        [proofReference],
-        '',
-      );
-      show(approve ? 'Verifying proof and releasing payment...' : 'Rejecting milestone proof...', 'info');
-      const receipt = await tx.wait();
-      if (!receipt || receipt.status !== 1) throw new Error('Verification was not confirmed.');
+      const tx = await contracts.deliveryEscrow
+        .connect(signer)
+        .verifyMilestone(
+          BigInt(shipment.id),
+          BigInt(milestoneId),
+          approve,
+          approve
+            ? ''
+            : 'Proof rejected by shipper',
+        );
 
-      show(approve ? 'Milestone verified and payment released.' : 'Milestone proof rejected.', 'success');
+      show(
+        approve
+          ? 'Verifying proof and releasing payment...'
+          : 'Rejecting milestone proof...',
+        'info',
+      );
+
+      const receipt = await tx.wait();
+
+      if (!receipt || receipt.status !== 1) {
+        throw new Error(
+          'Verification was not confirmed.',
+        );
+      }
+
+      show(
+        approve
+          ? 'Milestone verified and payment released.'
+          : 'Milestone proof rejected.',
+        'success',
+      );
+
       setRefreshKey((value) => value + 1);
     } catch (actionError) {
       show(formatActionError(actionError), 'error');
