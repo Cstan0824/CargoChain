@@ -17,6 +17,7 @@
     "start": "node scripts/dev-launcher.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.110.7",
     "@truffle/hdwallet-provider": "^2.1.4",
     "ethers": "^6.13.0",
     "express": "^4.19.2",
