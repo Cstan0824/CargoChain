@@ -296,8 +296,24 @@
 /* --- Transaction history --- */
 .txsCard { padding: 0; }
 
+.historyState {
+  min-height: 220px;
+  display: grid;
+  place-items: center;
+  padding: var(--s-6);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+.txTableWrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
 .txTable {
   width: 100%;
+  min-width: 880px;
   border-collapse: collapse;
   font-size: var(--fs-sm);
 }
@@ -369,12 +385,3 @@
 }
 
 .mutedCell { color: var(--text-secondary); font-size: var(--fs-xs); }
-
-.deployNote {
-  padding: var(--s-3) var(--s-5);
-  border-top: 1px solid var(--border-soft);
-  font-size: var(--fs-xs);
-  color: var(--text-secondary);
-  background: var(--bg-subtle);
-  border-radius: 0 0 var(--r-lg) var(--r-lg);
-}

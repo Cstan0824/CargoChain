@@ -27,10 +27,17 @@ import {
 } from '../utils/format.js';
 import styles from './ProposeMilestones.module.css';
 
+let nextMilestoneKey = 1;
+const createMilestone = (name = '', payoutPercentage = '') => ({
+  id: `milestone-${nextMilestoneKey++}`,
+  name,
+  payoutPercentage,
+});
+
 const DEFAULT_MILESTONES = [
-  { name: 'Package Pickup', payoutPercentage: '30' },
-  { name: 'In Transit Hub', payoutPercentage: '40' },
-  { name: 'Final Delivery', payoutPercentage: '30' },
+  createMilestone('Package Pickup', '30'),
+  createMilestone('In Transit Hub', '40'),
+  createMilestone('Final Delivery', '30'),
 ];
 
 export function ProposeMilestones() {
@@ -46,6 +53,11 @@ export function ProposeMilestones() {
   const [milestones, setMilestones] = useState(DEFAULT_MILESTONES);
   const [submissionStage, setSubmissionStage] = useState('idle');
   const [submissionResult, setSubmissionResult] = useState(null);
+  const [ownProposal, setOwnProposal] = useState(null);
+  const [proposalRefreshKey, setProposalRefreshKey] = useState(0);
+  const [revoking, setRevoking] = useState(false);
+  const [draggedMilestoneIndex, setDraggedMilestoneIndex] = useState(null);
+  const [dropTarget, setDropTarget] = useState(null);
 
   // Load request details to display context
   useEffect(() => {
@@ -85,11 +97,87 @@ export function ProposeMilestones() {
     return () => {
       cancelled = true;
     };
-  }, [contracts, idParam]);
+  }, [contracts, idParam, proposalRefreshKey]);
 
-  const addMilestone = () => setMilestones((arr) => [...arr, { name: '', payoutPercentage: '' }]);
+  useEffect(() => {
+    if (!account || !request || request.status !== 'Open' || !contracts?.deliveryEscrow) {
+      setOwnProposal(null);
+      return;
+    }
+
+    let cancelled = false;
+    contracts.deliveryEscrow.getProposals(BigInt(idParam))
+      .then(async (proposals) => {
+        const proposalId = Array.from(proposals).findIndex((proposal) => (
+          Number(proposal.status ?? proposal[1]) === 0
+          && (proposal.carrier ?? proposal[0]).toLowerCase() === account.toLowerCase()
+        ));
+        if (proposalId < 0 || cancelled) {
+          if (!cancelled) setOwnProposal(null);
+          return;
+        }
+
+        const plan = await contracts.deliveryEscrow.getProposalMilestones(BigInt(idParam), proposalId);
+        if (!cancelled) {
+          setOwnProposal({
+            id: proposalId,
+            milestones: Array.from(plan).map((milestone) => ({
+              name: milestone.name ?? milestone[0],
+              payoutPercentage: Number(milestone.payoutPercentage ?? milestone[1]),
+            })),
+          });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setOwnProposal(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [account, contracts, idParam, request, proposalRefreshKey]);
+
+  const addMilestone = () => setMilestones((arr) => [...arr, createMilestone()]);
   const updateMilestone = (i, k, v) => setMilestones((arr) => arr.map((m, idx) => (idx === i ? { ...m, [k]: v } : m)));
   const removeMilestone = (i) => setMilestones((arr) => arr.filter((_, idx) => idx !== i));
+  const reorderMilestone = (fromIndex, targetIndex, placement) => {
+    if (fromIndex === targetIndex || targetIndex < 0 || targetIndex >= milestones.length) return;
+    setMilestones((current) => {
+      const next = [...current];
+      const [moved] = next.splice(fromIndex, 1);
+      let insertionIndex = targetIndex + (placement === 'after' ? 1 : 0);
+      if (fromIndex < insertionIndex) insertionIndex -= 1;
+      next.splice(insertionIndex, 0, moved);
+      return next;
+    });
+  };
+  const startMilestoneDrag = (event, index) => {
+    if (ownProposal) return;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', String(index));
+    setDraggedMilestoneIndex(index);
+  };
+  const dragOverMilestone = (event, index) => {
+    if (ownProposal || draggedMilestoneIndex === null) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    if (draggedMilestoneIndex === index) {
+      setDropTarget(null);
+      return;
+    }
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const placement = event.clientY < bounds.top + (bounds.height / 2) ? 'before' : 'after';
+    setDropTarget({ index, placement });
+  };
+  const dropMilestone = (event, index) => {
+    event.preventDefault();
+    const sourceIndex = draggedMilestoneIndex;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const placement = event.clientY < bounds.top + (bounds.height / 2) ? 'before' : 'after';
+    if (Number.isInteger(sourceIndex)) reorderMilestone(sourceIndex, index, placement);
+    setDraggedMilestoneIndex(null);
+    setDropTarget(null);
+  };
 
   const totalPercentage = useMemo(() => {
     return milestones.reduce((sum, m) => sum + (Number(m.payoutPercentage) || 0), 0);
@@ -116,6 +204,7 @@ export function ProposeMilestones() {
     !isOwnRequest &&
     isValid &&
     !loadingRequest &&
+    !ownProposal &&
     !submissionResult &&
     !submitting &&
     !walletBusy,
@@ -186,6 +275,7 @@ export function ProposeMilestones() {
         blockNumber: receipt.blockNumber,
         transactionHash: receipt.hash,
       });
+      setProposalRefreshKey((value) => value + 1);
     } catch (e) {
       show(formatProposalError(e), 'error');
     } finally {
@@ -194,6 +284,34 @@ export function ProposeMilestones() {
   };
 
   const goBack = () => navigate(`/requests/${idParam}`);
+
+  const revokeProposal = async () => {
+    if (revoking || !ownProposal || !provider || !contracts?.deliveryEscrow) return;
+
+    if (!window.confirm('Revoke your current proposal? You can submit a revised plan after it is confirmed.')) {
+      return;
+    }
+
+    setRevoking(true);
+    try {
+      const activeSigner = signer || await provider.getSigner();
+      const tx = await contracts.deliveryEscrow.connect(activeSigner).revokeMilestoneProposal(
+        BigInt(idParam),
+      );
+      show('Revoking proposal on-chain...', 'info');
+      const receipt = await tx.wait();
+      if (!receipt || receipt.status !== 1) throw new Error('Proposal revocation was not confirmed.');
+
+      setOwnProposal(null);
+      setSubmissionResult(null);
+      setProposalRefreshKey((value) => value + 1);
+      show(`Proposal revoked in block ${receipt.blockNumber}. You can now submit a new plan.`, 'success');
+    } catch (e) {
+      show(formatProposalError(e), 'error');
+    } finally {
+      setRevoking(false);
+    }
+  };
 
   return (
     <div className={styles.page}>
@@ -208,7 +326,7 @@ export function ProposeMilestones() {
         </div>
       )}
 
-      {submissionResult && (
+      {submissionResult && !ownProposal && (
         <Card className={styles.successPanel}>
           <span className={styles.successIcon}>
             <HiOutlineCheckCircle aria-hidden="true" />
@@ -265,7 +383,10 @@ export function ProposeMilestones() {
                       ? (request.proposedAmountWei * BigInt(percentage)) / 100n
                       : 0n;
                     return (
-                      <div key={i} className={styles.timelineRow}>
+                      <div
+                        key={m.id}
+                        className={styles.timelineRow}
+                      >
                         
                         {/* Timeline Marker (Intermediate node) */}
                         <div className={styles.intermediateNode}>
@@ -273,9 +394,18 @@ export function ProposeMilestones() {
                         </div>
 
                         {/* Input Fields block */}
-                        <div className={styles.inputCard}>
+                        <div
+                          className={`${styles.inputCard} ${draggedMilestoneIndex === i ? styles.inputCardDragging : ''} ${dropTarget?.index === i && dropTarget.placement === 'before' ? styles.inputCardDropBefore : ''} ${dropTarget?.index === i && dropTarget.placement === 'after' ? styles.inputCardDropAfter : ''}`}
+                          draggable={!ownProposal}
+                          onDragStart={(event) => startMilestoneDrag(event, i)}
+                          onDragOver={(event) => dragOverMilestone(event, i)}
+                          onDrop={(event) => dropMilestone(event, i)}
+                          onDragEnd={() => {
+                            setDraggedMilestoneIndex(null);
+                            setDropTarget(null);
+                          }}
+                        >
                           <div className={styles.fieldsGrid}>
-                            
                             {/* Column 1: Milestone Name */}
                             <div className={styles.field} style={{ flex: 3 }}>
                               <label className={styles.label}>Milestone Name</label>
@@ -284,6 +414,7 @@ export function ProposeMilestones() {
                                 className={styles.input}
                                 value={m.name}
                                 onChange={(e) => updateMilestone(i, 'name', e.target.value)}
+                                disabled={Boolean(ownProposal)}
                                 placeholder="e.g. Customs check / Delivery to Hub"
                               />
                             </div>
@@ -301,6 +432,7 @@ export function ProposeMilestones() {
                                   className={styles.input}
                                   value={m.payoutPercentage}
                                   onChange={(e) => updateMilestone(i, 'payoutPercentage', e.target.value)}
+                                  disabled={Boolean(ownProposal)}
                                   placeholder="0"
                                 />
                                 <span className={styles.percentUnit}>%</span>
@@ -316,7 +448,7 @@ export function ProposeMilestones() {
                                 type="button"
                                 className={styles.removeBtn}
                                 onClick={() => removeMilestone(i)}
-                                disabled={milestones.length === 1}
+                                disabled={milestones.length === 1 || Boolean(ownProposal)}
                                 title="Remove milestone step"
                               >
                                 <HiOutlineTrash className={styles.trashIcon} />
@@ -345,7 +477,7 @@ export function ProposeMilestones() {
               </div>
 
               {/* Add Milestone button */}
-              <button type="button" className={styles.addBtn} onClick={addMilestone}>
+              <button type="button" className={styles.addBtn} onClick={addMilestone} disabled={Boolean(ownProposal)}>
                 <HiOutlinePlus className={styles.addIcon} /> Add Intermediate Milestone
               </button>
             </div>
@@ -404,6 +536,27 @@ export function ProposeMilestones() {
             </div>
           )}
 
+          {ownProposal && (
+            <Card className={styles.activeProposalCard}>
+              <span className={styles.activeProposalKicker}>Your active proposal</span>
+              <h3>Awaiting shipper review</h3>
+              <p>
+                You have one active proposal on this request. Revoke it to submit a revised milestone plan.
+              </p>
+              <ol className={styles.activeProposalList}>
+                {ownProposal.milestones.map((milestone, index) => (
+                  <li key={`${milestone.name}-${index}`}>
+                    <span>{milestone.name}</span>
+                    <strong>{milestone.payoutPercentage}%</strong>
+                  </li>
+                ))}
+              </ol>
+              <Button variant="danger" onClick={revokeProposal} disabled={revoking || submitting}>
+                {revoking ? 'Revoking proposal...' : 'Revoke proposal'}
+              </Button>
+            </Card>
+          )}
+
           <div className={styles.actions}>
             <Button variant="secondary" onClick={goBack} disabled={submitting} className={styles.actionBtn}>
               Cancel
@@ -431,8 +584,11 @@ function formatProposalError(error) {
   }
 
   const message = error?.shortMessage || error?.reason || error?.message || '';
-  if (message.includes('request is not open') || message.includes('already has a carrier')) {
-    return 'Another carrier already proposed milestones for this request.';
+  if (message.includes('carrier already has active proposal')) {
+    return 'You already have an active proposal. Revoke it before submitting a revised plan.';
+  }
+  if (message.includes('request is not open')) {
+    return 'This request is no longer accepting proposals.';
   }
   if (message.includes('shipper cannot be carrier')) {
     return 'The shipper cannot propose milestones for their own request.';

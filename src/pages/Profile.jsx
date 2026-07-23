@@ -30,6 +30,12 @@ import {
   requestStatus,
   REQUEST_TONE,
 } from '../utils/format.js';
+import {
+  loadPaymentHistory,
+  paymentActionLabel,
+  PAYMENT_ACTION_TONE,
+  shortTransactionHash,
+} from '../utils/paymentHistory.js';
 import { pickAvatar } from '../utils/avatar.js';
 import {
   workerPackingInventory,
@@ -38,16 +44,6 @@ import {
 import styles from './Profile.module.css';
 
 const CHAIN_NAMES = { 1: 'Mainnet', 11155111: 'Sepolia', 1337: 'Ganache', 5777: 'Ganache' };
-
-// Demo TransactionRecord rows. `requestStatus` is what the request is
-// doing right now — it's the "where is this escrow going" indicator
-// the user asked for on the history view.
-const DEMO_TXS = [
-  { id: '0xabc…1234', action: 'EscrowFunded',     requestId: 1001, requestStatus: 'InProgress', amount: 2500000000000000000n, timestamp: 1700000000 },
-  { id: '0xdef…5678', action: 'MilestonePayment', requestId: 1001, requestStatus: 'InProgress', amount:  750000000000000000n, timestamp: 1700000600 },
-  { id: '0x9ab…cdef', action: 'RefundIssued',     requestId: 1002, requestStatus: 'Refunded',   amount: 1400000000000000000n, timestamp: 1700001200 },
-  { id: '0x77a…bb00', action: 'MilestonePayment', requestId: 1003, requestStatus: 'Completed',  amount:  600000000000000000n, timestamp: 1700002000 },
-];
 
 export function Profile() {
   const navigate = useNavigate();
@@ -58,6 +54,10 @@ export function Profile() {
   const [loading, setLoading] = useState(false);
   const [balance, setBalance] = useState(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
+  const [transactions, setTransactions] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState(null);
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!account || !contracts?.userRegistry) return;
@@ -73,6 +73,41 @@ export function Profile() {
     if (provider && account) fetchBalance();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider, account, chainId]);
+
+  useEffect(() => {
+    if (!provider || !account || !contracts?.deliveryEscrow) {
+      setTransactions([]);
+      setHistoryLoading(false);
+      setHistoryError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setHistoryLoading(true);
+    setHistoryError(null);
+
+    loadPaymentHistory({
+      contract: contracts.deliveryEscrow,
+      provider,
+      account,
+    })
+      .then((rows) => {
+        if (!cancelled) setTransactions(rows);
+      })
+      .catch((historyLoadError) => {
+        if (!cancelled) {
+          setTransactions([]);
+          setHistoryError(formatHistoryError(historyLoadError));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [provider, account, contracts, historyRefreshKey]);
 
   const fetchBalance = async () => {
     if (!provider || !account) return;
@@ -255,9 +290,38 @@ export function Profile() {
               Escrow funding, milestone payments, and refunds emitted on-chain. Click a row to open the request timeline.
             </p>
           </div>
+          {account && contracts?.deliveryEscrow && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setHistoryRefreshKey((value) => value + 1)}
+              disabled={historyLoading}
+            >
+              {historyLoading ? 'Refreshing…' : 'Refresh history'}
+            </Button>
+          )}
         </div>
         <Card padded={false} className={styles.txsCard}>
-          {DEMO_TXS.length === 0 ? (
+          {!account ? (
+            <EmptyState
+              illustration={escrowFundedTile}
+              title="Connect your wallet"
+              description="Connect MetaMask to load payment events for your delivery requests."
+            />
+          ) : historyLoading ? (
+            <div className={styles.historyState} role="status">Loading payment events from Ganache…</div>
+          ) : historyError || deployError ? (
+            <EmptyState
+              illustration={escrowFundedTile}
+              title="Payment history unavailable"
+              description={historyError || deployError}
+              action={contracts?.deliveryEscrow && (
+                <Button variant="secondary" onClick={() => setHistoryRefreshKey((value) => value + 1)}>
+                  Try again
+                </Button>
+              )}
+            />
+          ) : transactions.length === 0 ? (
             <EmptyState
               illustration={escrowFundedTile}
               title="No on-chain activity yet"
@@ -265,14 +329,9 @@ export function Profile() {
             />
           ) : (
             <TxHistoryTable
-              rows={DEMO_TXS}
+              rows={transactions}
               onRowClick={(requestId) => navigate(`/track/${requestId}`)}
             />
-          )}
-          {deployError && (
-            <div className={styles.deployNote}>
-              Contracts not deployed — showing demo history. Run <code>npm run migrate</code> to populate from the contract.
-            </div>
           )}
         </Card>
       </div>
@@ -292,20 +351,22 @@ function TxHistoryTable({ rows, onRowClick }) {
     }
   };
   return (
-    <table className={styles.txTable}>
-      <thead>
-        <tr>
-          <th>Tx hash</th>
-          <th>Request</th>
-          <th>Request status</th>
-          <th>Amount</th>
-          <th>When</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r, i) => (
-          <tr
-            key={i}
+    <div className={styles.txTableWrap}>
+      <table className={styles.txTable}>
+        <thead>
+          <tr>
+            <th>Action</th>
+            <th>Tx hash</th>
+            <th>Request</th>
+            <th>Request status</th>
+            <th>Amount</th>
+            <th>When</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr
+            key={r.id}
             className={styles.txRow}
             onClick={() => onRowClick(r.requestId)}
             role="button"
@@ -319,13 +380,18 @@ function TxHistoryTable({ rows, onRowClick }) {
             aria-label={`Open request #${String(r.requestId).padStart(4, '0')} timeline`}
           >
             <td>
+              <Badge tone={PAYMENT_ACTION_TONE[r.action] || 'neutral'}>
+                {paymentActionLabel(r.action, r.milestoneId)}
+              </Badge>
+            </td>
+            <td>
               <button
                 type="button"
                 className={styles.hashBtn}
-                onClick={(e) => copyHash(e, r.id)}
+                onClick={(e) => copyHash(e, r.transactionHash)}
                 title="Copy tx hash"
               >
-                <code>{r.id}</code>
+                <code>{shortTransactionHash(r.transactionHash)}</code>
               </button>
             </td>
             <td><span className={styles.reqId}>#{String(r.requestId).padStart(4, '0')}</span></td>
@@ -336,11 +402,20 @@ function TxHistoryTable({ rows, onRowClick }) {
             </td>
             <td className={styles.numCell}>{formatEth(r.amount)}</td>
             <td className={styles.mutedCell}>{formatDate(r.timestamp)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
+}
+
+function formatHistoryError(error) {
+  const message = error?.shortMessage || error?.reason || error?.message || '';
+  if (message.includes('could not coalesce error')) {
+    return 'Ganache or MetaMask returned an RPC error. Confirm CargoChain is selected, then refresh.';
+  }
+  return message || 'Could not read payment events from DeliveryEscrow.';
 }
 
 function DetailRow({ label, value }) {
