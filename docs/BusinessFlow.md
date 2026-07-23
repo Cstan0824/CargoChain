@@ -50,11 +50,14 @@ Shipper                  Carrier                Smart Contract           Upload 
    │                       │                       │                        │
    │                       ├─ browse Open ────────►│ returns requests[]     │
    │                       │                       │                        │
-   │                       ├─ proposeMilestones() ►│ status=PendingApproval │
-   │                       │  (name, pct, amount)  │                        │
+   │                       ├─ proposeMilestones() ►│ stores proposal;       │
+   │                       │  (name, pct, amount)  │ request stays Open     │
    │                       │                       │                        │
-   ├─ approveMilestones() ►│                       │ status=Open (ready)    │
-   ├─ fundEscrow(value) ──────────────────────────►│ locks ETH,             │
+   │                       ├─ revokeProposal() ───►│ proposal marked        │
+   │                       │  (optional)           │ Revoked; can resubmit  │
+   │                       │                       │                        │
+   ├─ approveAndFund() ───────────────────────────►│ selects one proposal,  │
+   │  (proposalId, value)                           │ locks ETH,             │
    │                                               │ status=Funded          │
    │                                               │                        │
    │                       │  delivery starts      │ status=InProgress      │
@@ -79,7 +82,8 @@ Shipper                  Carrier                Smart Contract           Upload 
 
 ### Key invariants enforced by the smart contract
 
-- **`fundEscrow` is only callable after `approveMilestones`.**
+- **`approveAndFund(requestId, proposalId)` selects one active proposal and locks escrow in the same transaction.**
+- **A request remains `Open` while proposals are collected; each carrier can hold at most one active proposal and may revoke it before selection.**
 - **ETH must equal `sum(milestone.payoutAmount)`** before the contract accepts funding.
 - **`submitProof` requires `milestone.status ∈ {PendingProof, Rejected}`** and `msg.sender == request.carrier`.
 - **`verifyProof` is callable only by `msg.sender == request.shipper`** and `milestone.status == Submitted`.
@@ -93,7 +97,7 @@ Shipper                  Carrier                Smart Contract           Upload 
 ### Scenario A — Normal successful delivery
 
 1. Shipper creates request (status = **Open**).
-2. Carrier proposes milestones; shipper approves (status = **Funded** after `fundEscrow`).
+2. One or more carriers propose milestones; the shipper selects one proposal and funds it (status = **Funded** after `approveAndFund`).
 3. Carrier ships goods; `submitProof(uri[])` per milestone (status = **Submitted**).
 4. Shipper verifies each proof → smart contract releases `payoutAmount` to carrier (milestone = **Paid**).
 5. All milestones paid → request status = **Completed**. Carrier received full escrow. Shipper received delivery.
@@ -133,6 +137,7 @@ Shipper                  Carrier                Smart Contract           Upload 
 | **DeliveryRequest** | `requestId`, `shipper`, `carrier`, `pickupLocation`, `deliveryLocation`, `totalAmount`, `releasedAmount`, `remainingBalance`, `deadline`, `specialInstruction`, `status`, `createdAt` | Marketplace list, My Shipments, request detail |
 | **Item** | `itemName`, `itemDescription`, `quantity` | Create Request form, request detail |
 | **Milestone** | `name`, `payoutPercentage`, `payoutAmount`, `proofUris[]`, `remark`, `rejectionReason`, `status`, `submittedAt`, `verifiedAt` | Track page, Verify/Reject modal, stepper |
+| **CarrierProposal** | `proposalId`, `carrier`, `status`, `createdAt`, `updatedAt`, `ProposedMilestone[]` | Track proposal review, carrier proposal page, on-chain audit trail |
 | **TransactionRecord** *(optional, on-chain history)* | `transactionId`, `requestId`, `milestoneId`, `from`, `to`, `amount`, `action`, `txHash` (frontend-captured), `timestamp` | Wallet / history view |
 
 ### Status enums (must match exactly between contract, UI, and events)
@@ -142,6 +147,7 @@ Shipper                  Carrier                Smart Contract           Upload 
 | `Role` | `None`, `Shipper`, `Carrier` |
 | `RequestStatus` | `Open`, `PendingApproval`, `Funded`, `InProgress`, `Completed`, `Cancelled`, `Expired`, `Refunded` |
 | `MilestoneStatus` | `Proposed`, `PendingProof`, `Submitted`, `Verified`, `Rejected`, `Paid` |
+| `ProposalStatus` | `Active`, `Revoked`, `Rejected`, `Accepted` |
 | `TransactionAction` | `EscrowFunded`, `MilestonePayment`, `RefundIssued`, `RequestCancelled`, `RecoveryCreated` |
 
 ---

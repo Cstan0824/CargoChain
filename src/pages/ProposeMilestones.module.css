@@ -88,6 +88,62 @@
   gap: var(--s-2);
 }
 
+.activeProposalCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  border: 1px solid var(--primary-border, var(--border-soft));
+  background: linear-gradient(145deg, var(--primary-soft), var(--bg-surface));
+}
+
+.activeProposalKicker {
+  color: var(--primary);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.activeProposalCard h3,
+.activeProposalCard p {
+  margin: 0;
+}
+
+.activeProposalCard h3 {
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+}
+
+.activeProposalCard p {
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+}
+
+.activeProposalList {
+  display: grid;
+  gap: var(--s-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.activeProposalList li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--bg-surface) 72%, transparent);
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+}
+
+.activeProposalList strong {
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+}
+
 @media (max-width: 760px) {
   .successPanel {
     grid-template-columns: 48px minmax(0, 1fr);
@@ -277,13 +333,42 @@
 }
 
 .inputCard {
+  position: relative;
   flex: 1;
   background: var(--bg-surface);
   border: 1px solid var(--border-soft);
   border-radius: var(--r-md);
   padding: var(--s-4);
   box-shadow: var(--shadow-sm);
+  transition:
+    opacity var(--dur-1) var(--ease),
+    box-shadow var(--dur-1) var(--ease),
+    transform var(--dur-1) var(--ease);
+  cursor: grab;
 }
+
+.inputCard:active { cursor: grabbing; }
+
+.inputCardDragging {
+  opacity: 0.42;
+  transform: scale(0.985);
+}
+
+.inputCardDropBefore::before,
+.inputCardDropAfter::after {
+  position: absolute;
+  left: var(--s-3);
+  right: var(--s-3);
+  height: 3px;
+  border-radius: var(--r-pill);
+  background: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+  content: '';
+  pointer-events: none;
+}
+
+.inputCardDropBefore::before { top: -8px; }
+.inputCardDropAfter::after { bottom: -8px; }
 
 .fieldsGrid {
   display: flex;
@@ -291,11 +376,21 @@
   align-items: flex-start;
 }
 
+.reorderHint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  text-align: center;
+  text-wrap: pretty;
+}
+
 @media (max-width: 600px) {
   .fieldsGrid {
     flex-direction: column;
     align-items: stretch;
   }
+
 }
 
 .field {

@@ -27,7 +27,6 @@ import styles from './MyShipments.module.css';
 const STATUS_FILTERS = [
   { value: 'all',        label: 'All' },
   { value: 'Open',       label: 'Open' },
-  { value: 'PendingApproval', label: 'Proposals' },
   { value: 'Funded',     label: 'Funded' },
   { value: 'InProgress', label: 'In progress' },
   { value: 'Completed',  label: 'Completed' },
@@ -267,7 +266,12 @@ async function loadWalletShipments(deliveryEscrow, account) {
       const carrier = request.carrier ?? request[2];
       const isShipper = shipper.toLowerCase() === normalizedAccount;
       const isCarrier = !isZeroAddress(carrier) && carrier.toLowerCase() === normalizedAccount;
-      if (!isShipper && !isCarrier) return null;
+      const proposals = await deliveryEscrow.getProposals(id);
+      const hasActiveProposal = Array.from(proposals || []).some((proposal) => (
+        Number(proposal.status ?? proposal[1]) === 0
+        && (proposal.carrier ?? proposal[0]).toLowerCase() === normalizedAccount
+      ));
+      if (!isShipper && !isCarrier && !hasActiveProposal) return null;
 
       const milestones = await deliveryEscrow.getMilestones(id);
       const milestoneRows = Array.from(milestones || []);
@@ -283,7 +287,7 @@ async function loadWalletShipments(deliveryEscrow, account) {
         status: requestStatus(request.status ?? request[9]),
         milestones: milestoneRows.length,
         current: milestoneRows.filter((milestone) => Number(milestone.status ?? milestone[6]) === 5).length,
-        relationship: isShipper ? 'Shipper' : 'Carrier',
+        relationship: isShipper ? 'Shipper' : isCarrier ? 'Carrier' : 'Carrier proposal',
         isShipper,
       };
     }),
