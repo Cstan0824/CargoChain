@@ -1,3 +1,4 @@
+import {supabase} from '../lib/supabase.js';
 // src/utils/upload.js — CargoChain
 // Photo proof upload flow. Stays thin so the team can swap the storage
 // backend later (S3, IPFS, etc.) without touching page code.
@@ -34,16 +35,65 @@ export async function hashFile(file) {
  * @param {string} hash  0x-prefixed 32-byte hex (output of hashFile)
  * @returns {Promise<{hash: string, url: string, size: number}>}
  */
-export async function uploadPhoto(file, hash) {
-  const fd = new FormData();
-  fd.append('hash',  hash);
-  fd.append('photo', file);
 
+const PROOF_BUCKET = 'milestone-proofs';
 
-  const res = await fetch('/uploads', { method: 'POST', body: fd });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `Upload failed (${res.status})`);
+export async function uploadPhoto(file, hash,requestId,milestoneId) {
+   const cleanHash = hash.replace(/^0x/, '');
+  const extension = getImageExtension(file);
+
+  const objectPath =
+    `shipments/${requestId}` +
+    `/milestones/${milestoneId}` +
+    `/${cleanHash}.${extension}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from(PROOF_BUCKET)
+    .upload(objectPath, file, {
+      contentType: file.type,
+      cacheControl: '3600',
+
+      // Do not replace existing evidence.
+      upsert: false,
+    });
+
+  const duplicateUpload =
+    uploadError?.message
+      ?.toLowerCase()
+      .includes('already exists') ||
+    uploadError?.message
+      ?.toLowerCase()
+      .includes('duplicate');
+
+  if (uploadError && !duplicateUpload) {
+    throw new Error(
+      uploadError.message || 'Supabase upload failed.',
+    );
   }
-  return res.json();
+
+  const { data } = supabase.storage
+    .from(PROOF_BUCKET)
+    .getPublicUrl(objectPath);
+
+  if (!data?.publicUrl) {
+    throw new Error(
+      'Supabase did not return a public image URL.',
+    );
+  }
+
+  return {
+    url: data.publicUrl,
+    path: objectPath,
+    hash,
+  };
+}
+
+function getImageExtension(file) {
+  const extensionByType = {
+    'image/jpeg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+  };
+
+  return extensionByType[file.type] || 'jpg';
 }

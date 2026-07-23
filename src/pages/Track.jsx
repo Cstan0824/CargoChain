@@ -189,7 +189,7 @@ export function Track() {
 
     try{
       const hash = await hashFile(file);
-      const uploadResult = await uploadPhoto(file, hash);
+      const uploadResult = await uploadPhoto(file, hash, shipment.id, milestoneId);
       const proofReference = `${uploadResult.url}?sha256=${encodeURIComponent(hash)}`;
       const tx = await contracts.deliveryEscrow.connect(signer).submitProof(
         BigInt(shipment.id),
@@ -222,8 +222,8 @@ export function Track() {
       const tx = await contracts.deliveryEscrow.connect(signer).verifyMilestone(
         BigInt(shipment.id),
         BigInt(milestoneId),
-        approve,
-        approve ? '' : 'Proof rejected by shipper',
+        [proofReference],
+        '',
       );
       show(approve ? 'Verifying proof and releasing payment...' : 'Rejecting milestone proof...', 'info');
       const receipt = await tx.wait();
