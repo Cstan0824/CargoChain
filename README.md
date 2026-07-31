@@ -14,10 +14,10 @@
 A trustless delivery marketplace where:
 
 1. A **shipper** posts a goods request with milestones + locks ETH in escrow.
-2. A **carrier** accepts the request (first-come-first-served).
-3. The carrier uploads a **photo-proof** per milestone — the browser hashes it with SHA-256 and stores only the hash on-chain. The actual photo lives on a small Express upload server (`/uploads/`).
-4. The **shipper verifies** the proof in the web UI and triggers milestone-based payment release. If the shipper doesn't act within the dispute window, the milestone auto-confirms.
-5. If the carrier disappears, **anyone can republish** after the deadline — the request goes back to the marketplace.
+2. Carriers submit proposals and the **shipper chooses one**; the remaining active proposals are rejected on-chain.
+3. The accepted carrier uploads a **photo-proof** per milestone. The image is stored in Supabase Storage and its SHA-256 content hash and public URL are recorded with the on-chain proof.
+4. The **shipper verifies** the proof in the web UI, releasing that milestone's escrow allocation.
+5. Eligible cancelled, expired, or overdue requests can return their remaining escrow to the shipper.
 
 This is the **assignment version** — built for clarity, demo, and grading — not a production logistics platform.
 
@@ -35,7 +35,8 @@ This is the **assignment version** — built for clarity, demo, and grading — 
 | Testnet | Sepolia — **future plan, not part of v1** |
 | Frontend | React 18 + Vite (plain JavaScript) |
 | Wallet layer | ethers.js v6 |
-| Photo upload | Tiny Node.js + Express.js server, browser-side SHA-256 hashing |
+| Off-chain services | Express SIWE/chat API + Supabase Database/Storage |
+| Photo upload | Supabase Storage with browser-side SHA-256 hashing |
 | Tests | Mocha + Chai (Truffle built-in) |
 
 **Do not** introduce Hardhat, Next.js, Vue, wagmi, viem, or Web3.js — these are out of scope. ethers.js is approved as the client library (project owner decision 2026-07-06).
@@ -46,7 +47,7 @@ This is the **assignment version** — built for clarity, demo, and grading — 
 
 ```
 CargoChain/
-├── contracts/              # Solidity sources (5 contracts)
+├── contracts/              # Solidity sources and Truffle migration contract
 ├── migrations/             # Truffle deploy scripts
 ├── test/                   # Mocha + Chai tests
 ├── src/                    # React 18 + Vite frontend
@@ -57,11 +58,10 @@ CargoChain/
 │   ├── contracts/          # getContract() factory
 │   ├── utils/              # format, upload
 │   └── css/                # global stylesheet
-├── server/                 # Tiny Express upload server
-├── uploads/                # Local photo storage (gitignored)
+├── server/                 # Express SIWE authentication + private chat API
 ├── docs/                   # PRD, Spec, Architecture, Module-Split
 ├── truffle-config.js       # Ganache default; Sepolia commented (future plan)
-├── vite.config.js          # port 5173, /uploads proxy -> :3000
+├── vite.config.js          # Vite dev server on 127.0.0.1:5173
 ├── package.json
 ├── README.md               # this file
 ├── AGENTS.md               # Coding-agent rules (read first)
@@ -126,7 +126,7 @@ the project's v1 chain — Sepolia is a future plan, not active.
 | **Gas cost** | **0 real ETH** — unlimited free transactions | Real money |
 | **Block time** | **Instant** (mined on demand) | ~12 seconds |
 | **Time travel** | `evm_increaseTime` works (use it in tests) | Block timestamp is real |
-| **Chain state** | In-memory, **lost on restart** | Permanent, public |
+| **Chain state** | Stored locally by `dev:all`; disposable | Permanent, public |
 
 You can spam thousands of transactions, send 100 ETH between accounts, and
 revert everything in a second. Nothing is real. That's the whole point.
@@ -158,8 +158,10 @@ to import into MetaMask, never the public addresses alone.
 npx ganache --deterministic          # uses the local copy from devDependencies
 ```
 No global install needed. The command is in `package.json`'s `dev:all`
-script. Output appears with the `[ganache]` prefix in the same terminal as
-Vite and the upload server.
+script. The launcher persists block history under `ganache-data/` and handles
+RPC requests serially so MetaMask does not retain invalid block references
+between restarts. Output appears in the same terminal as Vite and the
+CargoChain API.
 
 **Option B — GUI (nicer for demos):**
 Download from <https://trufflesuite.com/ganache/>. Click **QUICKSTART** —
@@ -192,24 +194,17 @@ the Carrier. Both come from the same MNEMONIC.
 
 ### Resetting the chain
 
-Ganache state lives in memory. To wipe everything and redeploy from
-scratch:
-
-```bash
-# stop the dev:all process (Ctrl+C)
-npm run dev:all                            # restart
-npx truffle migrate --reset --network development
-```
-
-Use this freely during development. There's no state to lose — your real
-work is the contracts in `contracts/` and the React code in `src/`.
+`npm run dev:all` keeps local block history in the gitignored
+`ganache-data/` directory and redeploys the current contracts on startup.
+To create a completely new chain, stop the launcher and rename or remove that
+directory before starting it again. A complete reset invalidates MetaMask's
+cached local history, so only do it when a clean chain is actually required.
 
 ### Time travel in tests
 
 Ganache supports `evm_increaseTime` and `evm_mine`, which let tests fast-
-forward the chain clock without sleeping. CargoChain's MilestoneVerifier
-tests use this to simulate the 48–72h dispute window for auto-release.
-See `test/milestoneVerifier.test.js` (when written) for the pattern.
+forward the chain clock without sleeping. CargoChain's DeliveryEscrow
+tests use this to verify deadline-based proof and refund rules.
 
 ### What Ganache is **not**
 
@@ -237,9 +232,6 @@ cd CargoChain
 # 2. Install JS dependencies
 npm install
 
-# 3. Compile + migrate contracts to Ganache
-npx truffle compile
-npx truffle migrate --reset --network development
 ```
 
 **Every dev session — one command, one terminal:**
@@ -248,13 +240,13 @@ npx truffle migrate --reset --network development
 npm run dev:all
 ```
 
-That single command runs Ganache + the upload server + the Vite dev server in **one terminal**, with colour-coded prefixes so the logs are easy to read:
+That single command waits for Ganache, compiles and deploys the contracts, then starts the CargoChain API and Vite in **one terminal**:
 
 ```
-[ganache] Listening on 127.0.0.1:7545
-[upload]  [upload-server] listening on http://127.0.0.1:3000
-[vite]    VITE v5.4.21 ready in 311ms
-[vite]    ➜  Local: http://localhost:5173/
+RPC Listening on 127.0.0.1:7545
+[cargochain-api] listening on http://127.0.0.1:3000
+VITE v5.4.21 ready
+➜  Local: http://127.0.0.1:5173/
 ```
 
 **Then in the browser:**
@@ -276,11 +268,13 @@ That single command runs Ganache + the upload server + the Vite dev server in **
 The CLI Ganache is just for one-line convenience. If you prefer the standalone Ganache app, open it and click "Quickstart" first, then run:
 
 ```bash
-npm run dev       # Vite only
-npm run upload-server   # Express upload (in another terminal, or use the GUI)
+npm run compile
+npm run migrate
+npm run server    # SIWE/chat API
+npm run dev       # Vite (in another terminal)
 ```
 
-The two commands above are equivalent to `npm run dev:all` minus Ganache.
+Run the API and Vite commands in separate terminals after the migration completes.
 
 ### Production build (for demo day)
 
@@ -297,11 +291,9 @@ npm run preview   # serves dist/ on http://127.0.0.1:8080
 
 | File | Module | Owner |
 |---|---|---|
-| `DeliveryEscrow.sol` | b + c | GAN + Jeremy |
-| `MilestoneVerifier.sol` | d | Melissa |
-| `LifecycleManager.sol` | b | GAN |
+| `DeliveryEscrow.sol` | request, proposal, escrow, proof, milestone, refund | team |
 | `UserRegistry.sol` | a | wx |
-| `PaymentEvents.sol` | c | Jeremy |
+| `PaymentEvents.sol` | payment event base inherited by `DeliveryEscrow` | Jeremy |
 
 See `API_v1.md` for the function reference, `docs/Module-Split.md` for per-file responsibilities.
 
@@ -310,19 +302,19 @@ See `API_v1.md` for the function reference, `docs/Module-Split.md` for per-file 
 | File / Folder | Purpose |
 |---|---|
 | `index.html`, `main.jsx`, `App.jsx` | Vite entry + React root + Router |
-| `pages/` | `Marketplace.jsx` (browse + accept), `Shipper.jsx` (create + verify), `Carrier.jsx` (accept + submit proof), `Track.jsx` (public timeline) |
-| `components/` | `Navbar.jsx`, `ConnectButton.jsx`, `RequireWallet.jsx` |
-| `context/` | `Web3Context.jsx` (ethers + MetaMask events), `ContractsContext.jsx` (5 contract handles), `ToastContext.jsx` |
-| `hooks/` | `useWallet`, `useContracts`, `useToast` (re-exports of context) |
+| `pages/` | marketplace, request details, proposals, shipments/tracking, profile, and messages |
+| `components/` | shared UI plus proposal, registration, and private-chat components |
+| `context/` | wallet/contracts, registered profile, SIWE chat auth, and toast state |
+| `hooks/` | context access helpers |
 | `contracts/index.js` | `getContract(provider, name, networkId)` factory |
-| `utils/` | `format.js` (ETH, addresses, dates, status labels), `upload.js` (SHA-256 + POST) |
+| `utils/` | `format.js` (ETH, addresses, dates, status labels), `upload.js` (SHA-256 + Supabase Storage) |
 | `css/style.css` | Global stylesheet (layout, navbar, toast, timeline) |
 
 See `src/README.md` for the full structure and conventions.
 
-### `server/` — Tiny Express server
+### `server/` — CargoChain API
 
-`upload-server.js` is a ~50-LOC Express endpoint that accepts `POST /uploads`, stores the file under `/uploads/{sha256prefix}.jpg`, and returns the hash. This is the **only** Node.js backend; the main app is a React SPA in `src/`. See [the "What's the point of upload?" answer](#) in commit history or the "How the upload flow works" section below for why this exists.
+The Express API verifies SIWE wallet sessions, authorizes request-scoped conversations against the deployed contract, and reads/writes private chat data in Supabase. Photo proofs do not pass through this API; the frontend uploads them directly to the configured Supabase Storage bucket.
 
 ### `test/` — Truffle tests
 
@@ -352,10 +344,10 @@ Mocha + Chai tests run via `npx truffle test`. Each major contract has at least 
 Use Conventional Commits:
 
 ```
-feat(contracts): add submitProof to MilestoneVerifier
+feat(contracts): add proof submission validation
 fix(frontend): handle MetaMask not installed
 docs(readme): add Ganache setup steps
-test(escrow): add republish flow test
+test(escrow): add refund deadline test
 ```
 
 ### Code review
@@ -376,20 +368,20 @@ The demo runs end-to-end on Ganache + a fresh `truffle migrate`:
 
 1. **Connect MetaMask** to `http://127.0.0.1:7545` (chain 1337), import Shipper + Carrier accounts from the Ganache MNEMONIC shown in the `[ganache]` log.
 2. **Browse** the marketplace at `http://localhost:5173/` (Vite dev server).
-3. **Carrier** accepts a request → status changes to **In progress**.
+3. Multiple **carriers submit proposals**; the shipper reviews them and funds one accepted plan.
 4. **Carrier** uploads a photo-proof for Milestone 1 → SHA-256 hash written on-chain.
 5. **Shipper** verifies the proof in the dashboard → payment releases (proportional split).
-6. **Republish demo**: skip Milestone 2's deadline → anyone calls `republishIfStuck()` → the request returns to the marketplace.
-7. **Public tracker**: open `http://localhost:5173/track/42` in an incognito tab → timeline visible without a wallet.
+6. **Private chat**: the accepted participants authenticate with SIWE and exchange request-scoped messages.
+7. **Refund demo**: pass the delivery deadline and have the shipper reclaim the unpaid escrow balance.
 
 ---
 
 ## Limitations / known constraints
 
-- Single active carrier per request (intentional; recovery is republish-based).
+- One accepted carrier per request; multiple carriers may propose while the request is open.
 - Photo off-chain storage is mutable; on-chain SHA-256 is the integrity anchor.
 - Time-travel tests depend on Ganache's `evm_increaseTime`. (Sepolia is a future plan; when/if activated, its clock is real-time.)
-- No mobile-friendly layout — the React app is desktop-first.
+- The main workflow is responsive, but MetaMask extension remains the supported wallet flow.
 
 ---
 

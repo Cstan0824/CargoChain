@@ -8,9 +8,9 @@ const HDWalletProvider = require('@truffle/hdwallet-provider');
 module.exports = {
   networks: {
     development: {
-      host: '127.0.0.1',
-      port: 7545,
-      network_id: 1337,
+      host: process.env.GANACHE_HOST || '127.0.0.1',
+      port: Number(process.env.GANACHE_PORT || 7545),
+      network_id: Number(process.env.GANACHE_NETWORK_ID || 1337),
     },
 
     // =========================================================================

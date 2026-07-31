@@ -1,276 +1,335 @@
-# API_v1.md — CargoChain Smart Contract API Reference
+# CargoChain Smart Contract API v1
 
-> **Status:** Draft v1 — implemented surfaces are documented separately from planned surfaces.
-> When you change a function signature, update this file in the same PR.
+> **Status:** Implemented contract surface.
+> All ETH amounts are in wei, timestamps are Unix seconds, request IDs start at 1, and milestone/proposal IDs are zero-indexed within a request.
 
-> **Current implementation:** `DeliveryEscrow.sol` and the inherited
-> `PaymentEvents.sol` event surface exist. `UserRegistry.sol`,
-> `MilestoneVerifier.sol`, and `LifecycleManager.sol` remain planned work.
+## Deployment order
+
+1. Deploy `UserRegistry`.
+2. Deploy `DeliveryEscrow` with the deployed registry address.
+
+```solidity
+new DeliveryEscrow(address(userRegistry))
+```
+
+`DeliveryEscrow` rejects the zero address as its registry with `registry address required`.
 
 ---
 
-## Conventions
+## UserRegistry.sol
 
-- `external` functions are the user-facing surface
-- `public` functions may be called internally or externally
-- `internal` / `private` are not listed here
-- All ETH amounts are in **wei** (uint256)
-- All timestamps are **unix seconds** (uint256)
-- `requestId` is auto-incremented from 1
-- `milestoneId` is 0-indexed within a request
+`UserRegistry` stores wallet identity only. It has no shipper/carrier roles; a registered wallet may act as either depending on its relationship to a delivery request.
+
+### Data structure
+
+```solidity
+struct User {
+    address userAddress;
+    string displayName;
+    uint256 registeredAt;
+    bool isRegistered;
+}
+```
+
+Display names are normalized by removing ASCII whitespace from both boundaries. ASCII whitespace means space (`0x20`) and tab/newline-style bytes `0x09` through `0x0d`. The trimmed value must contain 1–64 UTF-8 bytes.
+
+### `registerUser(string displayName)`
+
+- **Purpose:** Register `msg.sender` once.
+- **Caller:** Any unregistered wallet.
+- **Parameters:** `displayName` — trimmed and validated before storage.
+- **Effects:** Stores the caller address, trimmed display name, current block timestamp, and `isRegistered = true`.
+- **Reverts:**
+  - `user already registered`
+  - `display name required`
+  - `display name exceeds 64 bytes`
+- **Event:** `UserRegistered`.
+- **Frontend:** Wallet/profile registration flow.
+
+### `updateDisplayName(string displayName)`
+
+- **Purpose:** Change the caller's display name without changing `registeredAt`.
+- **Caller:** Registered wallet only.
+- **Parameters:** `displayName` — trimmed and validated before storage.
+- **Effects:** Replaces only the stored display name.
+- **Reverts:**
+  - `user is not registered`
+  - `display name required`
+  - `display name exceeds 64 bytes`
+- **Event:** `DisplayNameUpdated`.
+- **Frontend:** Profile settings.
+
+### `isRegistered(address user) view returns (bool)`
+
+Returns whether `user` has registered.
+
+### `getUser(address user) view returns (User memory)`
+
+Returns the stored profile. An unregistered address returns the default empty struct with `isRegistered = false`.
+
+### Events
+
+```solidity
+event UserRegistered(
+    address indexed user,
+    string displayName,
+    uint256 registeredAt
+);
+
+event DisplayNameUpdated(
+    address indexed user,
+    string oldDisplayName,
+    string newDisplayName
+);
+```
+
+### Constant getter
+
+```solidity
+MAX_DISPLAY_NAME_BYTES() view returns (uint256) // 64
+```
 
 ---
 
 ## DeliveryEscrow.sol
 
-### `createRequest(string pickupLocation, string deliveryLocation, string specialInstruction, uint256 deadline, uint256 proposedAmount, ItemInput[] items) returns (uint256 requestId)`
+### Registration rule
 
-- **Purpose:** Publish an open delivery request and advertise its intended ETH payment.
-- **Caller:** Any wallet; `msg.sender` becomes the shipper.
-- **Payable:** No. No ETH is locked during this transaction.
-- **Effects:** Stores the route, items, deadline, instructions, and `proposedAmount`; status becomes `Open`.
-- **Events:** `RequestCreated(requestId, shipper, proposedAmount)`.
-- **Frontend:** Marketplace create-request modal.
+Every external state-changing user action requires:
+
+```solidity
+userRegistry.isRegistered(msg.sender) == true
+```
+
+An unregistered caller reverts with `caller is not registered`. This applies to request creation, proposal submission/revocation/rejection, approval/funding, proof submission/verification, cancellation, and refunds. View functions remain public.
+
+### Constructor and registry getter
+
+```solidity
+constructor(address registryAddress)
+userRegistry() view returns (address)
+```
+
+`userRegistry()` is the public getter for the immutable `IUserRegistry` reference.
+
+### `createRequest(...) returns (uint256 requestId)`
+
+```solidity
+function createRequest(
+    string pickupLocation,
+    string deliveryLocation,
+    string specialInstruction,
+    uint256 deadline,
+    uint256 proposedAmount,
+    ItemInput[] items
+) external returns (uint256 requestId)
+```
+
+- **Purpose:** Publish an unfunded delivery request.
+- **Caller:** Any registered wallet; the caller becomes the shipper.
+- **Payable:** No. ETH is not locked until `approveAndFund`.
+- **Validation:** Non-empty pickup/delivery, future deadline, positive proposed amount, at least one item, non-empty item names, and positive quantities.
+- **Effects:** Stores request/items, sets status to `Open`, and adds the ID to all/open request indexes.
+- **Event:** `RequestCreated(requestId, shipper, proposedAmount)`.
+- **Frontend:** Marketplace create-request flow.
 
 ### `proposeMilestones(uint256 requestId, MilestoneInput[] milestones)`
 
-- **Purpose:** A carrier submits one milestone plan for an open request.
-- **Caller:** Any wallet except the request shipper.
-- **Validation:** Request must be `Open`; the caller must not already have an active proposal on that request; at least one milestone; percentages must be positive and total exactly 100.
-- **Effects:** Stores a proposal record and its plan. The request stays `Open`, so other carriers can submit their own plans.
-- **Events:** `MilestonePlanProposed(requestId, carrier, proposalId)`.
-- **Frontend:** Marketplace request details and `/shipments/:id/propose`.
+- **Purpose:** Submit a carrier milestone plan for an open request.
+- **Caller:** Registered wallet other than that request's shipper.
+- **Validation:** Request is `Open`; caller has no other active proposal for it; at least one milestone; each name and percentage is non-empty/positive; percentages total exactly 100.
+- **Effects:** Appends an `Active` historical proposal and its milestone plan. The request remains open to other proposals.
+- **Event:** `MilestonePlanProposed(requestId, carrier, proposalId)`.
+- **Frontend:** `ProposeMilestones` / request details.
 
 ### `revokeMilestoneProposal(uint256 requestId)`
 
-- **Purpose:** Withdraw the caller's active proposal before the shipper selects or rejects it.
-- **Caller:** The proposing carrier only.
-- **Validation:** Request must still be `Open` and the caller must have an active proposal.
-- **Effects:** Marks the proposal `Revoked` without deleting it. The carrier may then submit one replacement proposal.
-- **Events:** `MilestonePlanRevoked(requestId, carrier, proposalId)`.
-- **Frontend:** `/shipments/:id/propose`.
-
-### `approveAndFund(uint256 requestId, uint256 proposalId) payable`
-
-- **Purpose:** The shipper approves the selected carrier's milestone plan and locks the advertised ETH payment.
-- **Caller:** Request shipper only.
-- **Payable:** Yes. `msg.value` must equal the stored `proposedAmount`.
-- **Validation:** Request must be `Open`; `proposalId` must refer to an active proposal; the deadline must not have passed.
-- **Effects:** Assigns the selected proposal's carrier, marks that proposal `Accepted`, marks every other active proposal `Rejected`, copies the selected plan into the delivery, calculates payouts, removes the request from the open marketplace, and changes status to `Funded`.
-- **Events:** `MilestonePlanAccepted(requestId, carrier, proposalId)`, one `MilestonePlanRejected(...)` event for each automatically declined active proposal, and `EscrowFunded(requestId, amount)`.
-- **Frontend:** `/track/:id`.
+- **Purpose:** Withdraw the caller's active proposal while the request remains open.
+- **Caller:** Registered proposing carrier.
+- **Effects:** Marks the proposal `Revoked`; the carrier may submit another plan.
+- **Event:** `MilestonePlanRevoked(requestId, carrier, proposalId)`.
+- **Frontend:** `ProposeMilestones`.
 
 ### `rejectMilestoneProposal(uint256 requestId, uint256 proposalId)`
 
-- **Purpose:** Reject one carrier's active plan before escrow funding.
-- **Caller:** Request shipper only.
-- **Validation:** Request must be `Open`; `proposalId` must refer to an active proposal.
-- **Effects:** Marks that proposal `Rejected`, retaining its plan and lifecycle record. Other carriers' proposals and the open request are unchanged.
-- **Events:** `MilestonePlanRejected(requestId, carrier, proposalId)`.
-- **Frontend:** `/track/:id`.
+- **Purpose:** Reject one active proposal without closing the request.
+- **Caller:** Registered request shipper only.
+- **Effects:** Marks the proposal `Rejected` and clears that carrier's active-proposal slot.
+- **Event:** `MilestonePlanRejected(requestId, carrier, proposalId)`.
+- **Frontend:** Request details / shipper proposal review.
+
+### `approveAndFund(uint256 requestId, uint256 proposalId) payable`
+
+- **Purpose:** Select one proposal and lock the advertised ETH amount.
+- **Caller:** Registered request shipper only.
+- **Value:** `msg.value` must exactly equal `proposedAmount`.
+- **Validation:** Request is `Open`, request deadline has not passed, proposal exists and is `Active`, and its plan is non-empty.
+- **Effects:**
+  - Assigns the selected carrier and marks its proposal `Accepted`.
+  - Marks every other active proposal `Rejected`.
+  - Copies the selected milestones and calculates payout amounts; rounding remainder goes to the final milestone.
+  - Removes the request from the open index and sets status to `Funded`.
+  - Adds `msg.value` to the shipper's maintained locked total and increments the shipper's contributing request count.
+- **Events:** `MilestonePlanAccepted`, zero or more `MilestonePlanRejected`, and `EscrowFunded`.
+- **Frontend:** Shipper proposal approval / request details.
+
+### `submitProof(...)`
+
+```solidity
+function submitProof(
+    uint256 requestId,
+    uint256 milestoneId,
+    string[] proofUris,
+    string remark
+) external
+```
+
+- **Purpose:** Submit one or more proof URIs for a milestone.
+- **Caller:** Registered assigned carrier only.
+- **Validation:** Request is `Funded` or `InProgress`; deadline has not passed; at least one non-empty proof URI; previous milestone is `Paid`; target milestone is `PendingProof` or `Rejected`.
+- **Effects:** Replaces existing proof URIs, stores the remark, clears rejection reason, sets milestone to `Submitted`, and request to `InProgress`.
+- **Event:** `ProofSubmitted(requestId, milestoneId)`.
+- **Frontend:** Carrier proof submission.
+
+### `verifyMilestone(...)`
+
+```solidity
+function verifyMilestone(
+    uint256 requestId,
+    uint256 milestoneId,
+    bool approve,
+    string rejectionReason
+) external
+```
+
+- **Purpose:** Approve or reject submitted milestone proof.
+- **Caller:** Registered request shipper only.
+- **Validation:** Milestone exists and is `Submitted`; a rejection requires a non-empty reason.
+- **Approval effects:** Marks the milestone `Verified`, then `Paid`; increments request `releasedAmount`; decreases the shipper's locked total; transfers the payout to the carrier; sets request to `Completed` after the final payout. The contributing request count decreases only when remaining escrow reaches zero.
+- **Rejection effects:** Marks the milestone `Rejected` and stores the reason for carrier resubmission.
+- **Approval events:** `MilestoneVerified`, `MilestonePaid`, `PaymentReleased`.
+- **Rejection events:** `MilestoneVerified`, `MilestoneRejected`.
+- **Frontend:** Shipper proof review / tracking.
 
 ### `cancelRequest(uint256 requestId)`
 
-- **Purpose:** Cancel before work starts, or cancel a failed in-progress delivery after its deadline.
-- **Caller:** Request shipper only.
-- **Allowed states:** `Open`, `PendingApproval`, `Funded`, or `InProgress` after the deadline.
-- **Effects:** Removes an open request from the marketplace, emits cancellation, and refunds any remaining escrow. A funded cancellation finishes as `Refunded`.
-- **Events:** `RequestCancelled(requestId, shipper)` and, when ETH is returned, `RefundIssued(requestId, shipper, amount)`.
-- **Frontend:** `/track/:id` shipper cancellation action.
-
-### `verifyMilestone(uint256 requestId, uint256 milestoneId, bool approve, string rejectionReason)`
-
-- **Purpose:** Approve or reject submitted proof. Approval releases the agreed milestone payout.
-- **Caller:** Request shipper only.
-- **Validation:** Milestone must be `Submitted`; rejection requires a reason.
-- **Effects when approved:** Marks the milestone paid, increments `releasedAmount`, transfers ETH to the carrier, and completes the request when all milestones are paid.
-- **Effects when rejected:** Marks the milestone `Rejected` so the carrier can resubmit.
-- **Events when approved:** `MilestoneVerified`, `MilestonePaid`, and `PaymentReleased`.
-- **Frontend:** `/track/:id`.
+- **Purpose:** Cancel before work starts, or cancel an in-progress request after its deadline.
+- **Caller:** Registered request shipper only.
+- **Allowed states:** `Open`, `PendingApproval`, `Funded`, or deadline-passed `InProgress`.
+- **Effects:** Removes an open request from the marketplace and emits cancellation. If escrow remains, refunds all remaining escrow, sets status to `Refunded`, decreases the shipper's locked total, and removes the request from the active locked count.
+- **Events:** `RequestCancelled`; `RefundIssued` when value is returned.
+- **Frontend:** Shipper request cancellation.
 
 ### `refundRemaining(uint256 requestId)`
 
-- **Purpose:** Refund only the unpaid and unrefunded escrow after failure or expiry.
-- **Caller:** Request shipper only.
-- **Allowed states:** `Cancelled`, `Expired`, or a `Funded`/`InProgress` request after its deadline.
-- **Effects:** Increments `refundedAmount`, sets status to `Refunded`, and transfers the remaining escrow to the shipper. `releasedAmount` continues to represent carrier payments only.
-- **Events:** `RefundIssued(requestId, shipper, amount)`.
-- **Frontend:** `/track/:id` shipper refund action after expiry or cancellation.
+- **Purpose:** Refund all unpaid/unrefunded escrow after cancellation, expiry, or an active request's passed deadline.
+- **Caller:** Registered request shipper only.
+- **Allowed states:** `Cancelled`, `Expired`, or deadline-passed `Funded`/`InProgress`.
+- **Effects:** Adds the remaining value to `refundedAmount`, sets status to `Refunded`, decreases the shipper's locked total and active count, then transfers the remaining ETH to the shipper.
+- **Event:** `RefundIssued(requestId, shipper, amount)`.
+- **Frontend:** Shipper refund action.
 
-### Planned — `republishIfStuck(uint256 requestId)`
-
-- **Purpose:** Public fallback — reset carrier if deadline missed, with optional partial pay.
-- **Caller:** Anyone.
-- **Parameters:** `requestId`
-- **Reverts:**
-  - `NotStuck()` if no milestone deadline has passed
-  - `NoCarrier()` if carrier is already `address(0)`
-- **Effects:** partial payment to abandoned carrier (proportional to completed milestones), reset carrier, status → `Open` again
-- **Events:** `RequestRepublished(requestId, previousCarrier)`, `PartialPayOnRepublish(requestId, previousCarrier, amount)`
-- **Frontend page:** `index.html` (Republish button on stuck requests)
-
-### Planned — `confirmByTimeout(uint256 requestId, uint256 milestoneId)`
-
-- **Purpose:** Dispute-window auto-release — anyone (or shipper) can finalise a milestone after the 72h window.
-- **Caller:** Anyone.
-- **Parameters:** `requestId`, `milestoneId`
-- **Reverts:**
-  - `NotAwaitingVerification()` if status is not `AwaitingVerification`
-  - `WindowNotExpired()` if `block.timestamp < milestone.deadline + 72h`
-- **Effects:** triggers `releaseStage()` automatically
-- **Events:** `MilestoneVerified(requestId, milestoneId, true, address(0))`, `PaymentReleased(...)`
-
-### View functions
-
-- `getRequestCount() view returns (uint256)`
-- `getRequestIds(uint256 offset, uint256 limit) view returns (uint256[] memory)`
-- `getOpenRequests(uint256 offset, uint256 limit) view returns (uint256[] memory)`
-- `getRequest(uint256 requestId) view returns (DeliveryRequest memory)`
-- `getItems(uint256 requestId) view returns (Item[] memory)`
-- `getMilestones(uint256 requestId) view returns (Milestone[] memory)`
-- `getProposals(uint256 requestId) view returns (CarrierProposal[] memory)`
-- `getProposalMilestones(uint256 requestId, uint256 proposalId) view returns (ProposedMilestone[] memory)`
-- `getMilestone(uint256 requestId, uint256 milestoneId) view returns (Milestone memory)`
-- `getProofUris(uint256 requestId, uint256 milestoneId) view returns (string[] memory)`
-- `escrowBalance(uint256 requestId) view returns (uint256)`
-- `getPaymentSummary(uint256 requestId) view returns (PaymentSummary memory)`
-
-`getPaymentSummary` returns `proposedAmount`, `totalFunded`, `totalReleased`,
-`totalRefunded`, `remainingEscrow`, `fullyFunded`, `fullyPaid`, and
-`refundable`.
-
-Transaction history is intentionally event-derived; there is no growing
-on-chain `PaymentRecord[]` array.
-
----
-
-## MilestoneVerifier.sol — planned, not implemented
-
-### `submitProof(uint256 requestId, uint256 milestoneId, bytes32 proofHash)`
-
-- **Purpose:** Carrier uploads photo-proof (hash only) for a milestone.
-- **Caller:** `msg.sender == request.carrier` only.
-- **Parameters:** `requestId`, `milestoneId`, `proofHash` (SHA-256 of the photo, computed in browser)
-- **Reverts:**
-  - `NotCarrier()`
-  - `MilestoneNotPending()` if status is not `Pending`
-  - `ProofRequired()` if `milestone.requiresProof == false` (use `markMilestoneComplete` instead)
-  - `ZeroHash()` if `proofHash == bytes32(0)`
-- **Effects:** stores hash, status → `AwaitingVerification`
-- **Events:** `MilestoneSubmitted(requestId, milestoneId, proofHash, carrier)`
-- **Frontend page:** `carrier.html` (Submit Proof button)
-
-### `verifyMilestone(uint256 requestId, uint256 milestoneId, bool approve)`
-
-- **Purpose:** Shipper approves (true) or rejects (false) the proof.
-- **Caller:** `msg.sender == request.shipper` only.
-- **Parameters:** `requestId`, `milestoneId`, `approve`
-- **Reverts:**
-  - `NotShipper()`
-  - `NotAwaitingVerification()`
-- **Effects (approve=true):** status → `Verified`, calls `DeliveryEscrow.releaseStage(...)` → `Paid`
-- **Effects (approve=false):** status → `Rejected`; carrier may re-submit proof
-- **Events:** `MilestoneVerified(requestId, milestoneId, approved, verifier)`
-- **Frontend page:** `shipper.html` (Verify / Reject buttons)
-
-### `markMilestoneComplete(uint256 requestId, uint256 milestoneId)`
-
-- **Purpose:** For non-photo milestones — carrier self-attests; shipper's approval is implicit.
-- **Caller:** `msg.sender == request.carrier` only.
-- **Parameters:** `requestId`, `milestoneId`
-- **Reverts:**
-  - `NotCarrier()`
-  - `MilestoneNotPending()`
-  - `ProofRequired()` if `milestone.requiresProof == true` (use `submitProof` instead)
-- **Effects:** status → `Verified` → `Paid` via `releaseStage(...)`
-- **Events:** `MilestoneVerified(requestId, milestoneId, true, carrier)`, `PaymentReleased(...)`
-- **Frontend page:** `carrier.html` (Mark Complete button on non-photo milestones)
-
-### View functions
-
-- `getProofHash(uint256 requestId, uint256 milestoneId) view returns (bytes32)`
-- `getMilestoneStatus(uint256 requestId, uint256 milestoneId) view returns (MilestoneStatus)`
-
----
-
-## LifecycleManager.sol — planned, not implemented
-
-### `republishIfStuck(uint256 requestId)`
-
-- See DeliveryEscrow.sol — same function (re-exposed for clarity, delegates to DeliveryEscrow).
-
-### `getRequestTimeline(uint256 requestId) view returns (TimelineEvent[] memory)`
-
-- **Purpose:** Return all events for a request, in order, for the public tracker.
-- **Caller:** Anyone (no wallet needed on `track.html`).
-- **Returns:** array of `{ timestamp, eventType, actor, details }`
-
-### `isStuck(uint256 requestId) view returns (bool)`
-
-- **Purpose:** Check if any milestone deadline has passed without completion.
-- **Returns:** `true` if the request can be republished.
-
----
-
-## UserRegistry.sol — planned, not implemented
-
-### `register(string displayName, Role role)`
-
-- **Purpose:** One-time registration with display name + role.
-- **Caller:** Anyone.
-- **Parameters:** `displayName`, `role` (Shipper / Carrier / Both)
-- **Reverts:** `AlreadyRegistered()` if user has registered before
-- **Effects:** creates `UserProfile`, marks `registered[msg.sender] = true`
-- **Events:** `UserRegistered(user, role, block.timestamp)`
-
-### `setRole(Role newRole)`
-
-- **Purpose:** Update role (e.g., a Carrier wants to also act as Shipper).
-- **Caller:** Self only.
-- **Effects:** updates `users[msg.sender].role`
-- **Events:** `RoleChanged(user, oldRole, newRole)`
-
-### View functions
-
-- `isRegistered(address user) view returns (bool)`
-- `getProfile(address user) view returns (UserProfile memory)`
-- `getRole(address user) view returns (Role)`
-
----
-
-## PaymentEvents.sol — implemented event surface
-
-Abstract event surface inherited by `DeliveryEscrow`. The frontend will query
-these events with ethers `queryFilter()` rather than reading a stored history array.
+### Locked escrow aggregate
 
 ```solidity
-event EscrowFunded(uint256 indexed requestId, uint256 amount);
-event PaymentReleased(uint256 indexed requestId, uint256 indexed milestoneId, uint256 amount, address indexed recipient);
-event RefundIssued(uint256 indexed requestId, address indexed to, uint256 amount);
+function getLockedEscrow(address shipper)
+    external
+    view
+    returns (uint256 totalLocked, uint256 activeRequestCount)
 ```
 
----
+- `totalLocked` is the sum of remaining escrow across that shipper's funded requests.
+- `activeRequestCount` counts only requests whose remaining escrow is greater than zero.
+- An unfunded open request never contributes.
+- Funding increases both values; each payout/refund decreases `totalLocked`; final payout or full remaining refund decreases the count.
 
-## Data structures
+### Request and proposal views
 
-### `Milestone` (implemented)
 ```solidity
-struct Milestone {
-    string name;
-    uint256 payoutPercentage;
-    uint256 payoutAmount;
-    string[] proofUris;
-    string remark;
-    string rejectionReason;
-    MilestoneStatus status;
-    uint256 submittedAt;
-    uint256 verifiedAt;
+getRequestCount() view returns (uint256)
+getRequestIds(uint256 offset, uint256 limit) view returns (uint256[])
+getOpenRequests(uint256 offset, uint256 limit) view returns (uint256[])
+getRequest(uint256 requestId) view returns (DeliveryRequest)
+getItems(uint256 requestId) view returns (Item[])
+getMilestones(uint256 requestId) view returns (Milestone[])
+getProposals(uint256 requestId) view returns (CarrierProposal[])
+getProposalMilestones(uint256 requestId, uint256 proposalId) view returns (ProposedMilestone[])
+getMilestone(uint256 requestId, uint256 milestoneId) view returns (Milestone)
+getProofUris(uint256 requestId, uint256 milestoneId) view returns (string[])
+```
+
+Pagination returns an empty array when `offset` is outside the collection or `limit` is zero.
+
+### Payment views
+
+```solidity
+escrowBalance(uint256 requestId) view returns (uint256)
+getPaymentSummary(uint256 requestId) view returns (PaymentSummary)
+```
+
+`escrowBalance` returns `totalAmount - releasedAmount - refundedAmount`.
+
+```solidity
+struct PaymentSummary {
+    uint256 proposedAmount;
+    uint256 totalFunded;
+    uint256 totalReleased;
+    uint256 totalRefunded;
+    uint256 remainingEscrow;
+    bool fullyFunded;
+    bool fullyPaid;
+    bool refundable;
 }
 ```
 
-### `DeliveryRequest` (implemented)
+Transaction history is event-derived; there is no growing on-chain payment-record array.
+
+### Data structures and enums
+
 ```solidity
-enum RequestStatus { Open, PendingApproval, Funded, InProgress, Completed, Cancelled, Expired, Refunded }
+enum RequestStatus {
+    Open,
+    PendingApproval,
+    Funded,
+    InProgress,
+    Completed,
+    Cancelled,
+    Expired,
+    Refunded
+}
+
+enum MilestoneStatus {
+    Proposed,
+    PendingProof,
+    Submitted,
+    Verified,
+    Rejected,
+    Paid
+}
+
+enum ProposalStatus {
+    Active,
+    Revoked,
+    Rejected,
+    Accepted
+}
+
+struct ItemInput {
+    string itemName;
+    string itemDescription;
+    uint256 quantity;
+}
+
+struct MilestoneInput {
+    string name;
+    uint256 payoutPercentage;
+}
+
+struct Item {
+    string itemName;
+    string itemDescription;
+    uint256 quantity;
+}
 
 struct DeliveryRequest {
     uint256 requestId;
@@ -287,12 +346,18 @@ struct DeliveryRequest {
     uint256 proposedAmount;
     uint256 refundedAmount;
 }
-```
 
-### `CarrierProposal` and `ProposedMilestone` (implemented)
-
-```solidity
-enum ProposalStatus { Active, Revoked, Rejected, Accepted }
+struct Milestone {
+    string name;
+    uint256 payoutPercentage;
+    uint256 payoutAmount;
+    string[] proofUris;
+    string remark;
+    string rejectionReason;
+    MilestoneStatus status;
+    uint256 submittedAt;
+    uint256 verifiedAt;
+}
 
 struct CarrierProposal {
     address carrier;
@@ -307,57 +372,32 @@ struct ProposedMilestone {
 }
 ```
 
-Proposal records are never deleted. `getProposals` and the proposal events expose the
-history; only one `Active` proposal is permitted for a carrier on one open request.
+Proposal records are retained for history. A carrier may have only one `Active` proposal per open request.
 
-### `MilestoneStatus` (in MilestoneVerifier)
-```solidity
-enum MilestoneStatus { Pending, AwaitingProof, AwaitingVerification, Verified, Paid, Rejected }
-```
-
-### `Role` (in UserRegistry)
-```solidity
-enum Role { None, Shipper, Carrier, Both }
-```
-
----
-
-## Errors (custom, for clearer reverts)
+### Events
 
 ```solidity
-error NotRegistered();
-error ZeroReward();
-error NoMilestones();
-error DeadlineInPast();
-error NotOpen();
-error DeadlinePassed();
-error AlreadyAccepted();
-error NotShipper();
-error NotCarrier();
-error NotVerifier();
-error MilestoneNotPending();
-error NotAwaitingVerification();
-error ProofRequired();
-error ZeroHash();
-error AlreadyPaid();
-error NotStuck();
-error NoCarrier();
-error WindowNotExpired();
-error AlreadyRegistered();
+event RequestCreated(uint256 indexed requestId, address indexed shipper, uint256 proposedAmount);
+event MilestonePlanProposed(uint256 indexed requestId, address indexed carrier, uint256 proposalId);
+event MilestonePlanRevoked(uint256 indexed requestId, address indexed carrier, uint256 proposalId);
+event MilestonePlanRejected(uint256 indexed requestId, address indexed carrier, uint256 proposalId);
+event MilestonePlanAccepted(uint256 indexed requestId, address indexed carrier, uint256 proposalId);
+event ProofSubmitted(uint256 indexed requestId, uint256 indexed milestoneId);
+event MilestoneVerified(uint256 indexed requestId, uint256 indexed milestoneId, bool approved);
+event MilestonePaid(uint256 indexed requestId, uint256 indexed milestoneId, address indexed carrier, uint256 amount);
+event MilestoneRejected(uint256 indexed requestId, uint256 indexed milestoneId, string reason);
+event RequestCancelled(uint256 indexed requestId, address indexed shipper);
+event EscrowFunded(uint256 indexed requestId, uint256 amount);
+event PaymentReleased(uint256 indexed requestId, uint256 indexed milestoneId, uint256 amount, address indexed recipient);
+event RefundIssued(uint256 indexed requestId, address indexed to, uint256 amount);
 ```
-
----
-
-## Versioning
-
-- **v1 (current):** the API defined above.
-- When breaking changes are needed → bump to v2 in a new `DeliveryEscrowV2.sol` (or `MilestoneVerifierV2.sol`); keep v1 deployed for backward compatibility.
 
 ---
 
 ## Changelog
 
-| Date | Author | Change |
-|---|---|---|
-| 2026-07-05 | Cstan + group | Initial draft (v1) — excludes recipient QR (R13 removed per group decision) |
-| 2026-07-21 | Jeremy + Codex | Align payment API with implemented escrow, refund accounting, payment summary, and event-derived history foundation |
+| Date | Change |
+|---|---|
+| 2026-07-29 | Added role-free `UserRegistry`, mandatory escrow registration checks, registry-first deployment, and maintained per-shipper locked escrow totals/counts. Reconciled this document to the implemented API. |
+| 2026-07-21 | Documented proposal-based escrow, refund accounting, payment summary, and event-derived payment history. |
+| 2026-07-05 | Initial v1 draft; recipient QR remained out of scope. |

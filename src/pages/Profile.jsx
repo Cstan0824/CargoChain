@@ -1,17 +1,9 @@
 // src/pages/Profile.jsx — CargoChain
-// Single page for "you, your funds, and what your wallet has done".
-// Folds in the standalone Wallet page (deleted).
-//
-//   • Identity         — User entity from BusinessFlow §6
-//                        (walletAddress, role, displayName, isRegistered).
-//   • Account details  — registered fields + inline registration form.
-//   • Funds overview   — Account balance / Locked in escrow / Available.
-//   • Network & account — chain pill, copy-address, refresh balance.
-//   • Transaction history — TransactionRecord rows (BusinessFlow §6),
-//                            each row navigates to /track/:requestId.
+// Wallet identity, real funds, carrier earnings, and event-based payment history.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { HiOutlineIdentification, HiOutlineInformationCircle, HiOutlineXMark } from 'react-icons/hi2';
 import { Topbar } from '../components/Topbar.jsx';
 import { Card } from '../components/Card.jsx';
 import { Button } from '../components/Button.jsx';
@@ -19,12 +11,17 @@ import { Badge } from '../components/Badge.jsx';
 import { Avatar } from '../components/Avatar.jsx';
 import { EmptyState } from '../components/EmptyState.jsx';
 import { KpiCard } from '../components/KpiCard.jsx';
+import { LineChart } from '../components/LineChart.jsx';
 import { useWallet } from '../hooks/useWallet.js';
 import { useContracts } from '../hooks/useContracts.js';
+import {
+  formatWalletTransactionError,
+  sendWalletContractTransaction,
+} from '../utils/walletTransaction.js';
 import { useToast } from '../hooks/useToast.js';
+import { useUserProfile } from '../hooks/useUserProfile.js';
 import {
   shortAddress,
-  roleLabel,
   formatDate,
   formatEth,
   requestStatus,
@@ -47,32 +44,38 @@ const CHAIN_NAMES = { 1: 'Mainnet', 11155111: 'Sepolia', 1337: 'Ganache', 5777: 
 
 export function Profile() {
   const navigate = useNavigate();
-  const { account, chainId, provider, role: sessionRole } = useWallet();
+  const { account, chainId, provider, signer } = useWallet();
   const { contracts, deployError } = useContracts();
   const { show } = useToast();
-  const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const {
+    isRegistered,
+    displayName,
+    userProfile,
+    isProfileLoading,
+    openRegistrationModal,
+    refreshUserProfile,
+  } = useUserProfile();
   const [balance, setBalance] = useState(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
+  const [lockedEscrow, setLockedEscrow] = useState(null);
+  const [lockedEscrowLoading, setLockedEscrowLoading] = useState(false);
+  const [fundsRefreshKey, setFundsRefreshKey] = useState(0);
   const [transactions, setTransactions] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState(null);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const [isEditOpen, setIsEditOpen] = useState(false);
 
+  // Refresh the real MetaMask balance on account, chain, and funds refresh.
   useEffect(() => {
-    if (!account || !contracts?.userRegistry) return;
-    setLoading(true);
-    contracts.userRegistry.getProfile(account)
-      .then((p) => setProfile(p))
-      .catch(() => setProfile(null))
-      .finally(() => setLoading(false));
-  }, [contracts, account]);
-
-  // Refresh balance on account / chain change.
-  useEffect(() => {
-    if (provider && account) fetchBalance();
+    if (provider && account) {
+      fetchBalance();
+    } else {
+      setBalance(null);
+      setBalanceLoading(false);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [provider, account, chainId]);
+  }, [provider, account, chainId, fundsRefreshKey]);
 
   useEffect(() => {
     if (!provider || !account || !contracts?.deliveryEscrow) {
@@ -109,29 +112,77 @@ export function Profile() {
     };
   }, [provider, account, contracts, historyRefreshKey]);
 
+  // Locked escrow is contract state, refreshed alongside account/contract/history changes.
+  useEffect(() => {
+    const deliveryEscrow = contracts?.deliveryEscrow;
+    if (!account || !deliveryEscrow) {
+      setLockedEscrow(null);
+      setLockedEscrowLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLockedEscrowLoading(true);
+    deliveryEscrow.getLockedEscrow(account)
+      .then((result) => {
+        if (cancelled) return;
+        setLockedEscrow({
+          totalLocked: BigInt(result?.totalLocked ?? result?.[0] ?? 0n),
+          activeRequestCount: Number(result?.activeRequestCount ?? result?.[1] ?? 0n),
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setLockedEscrow(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLockedEscrowLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [account, contracts?.deliveryEscrow, fundsRefreshKey, historyRefreshKey]);
+
+  useEffect(() => {
+    if (!isRegistered) setIsEditOpen(false);
+  }, [isRegistered]);
+
+  const earningsPayments = useMemo(() => {
+    const normalizedAccount = account?.toLowerCase();
+    if (!normalizedAccount) return [];
+
+    return transactions.filter((transaction) => (
+      transaction.action === 'PaymentReleased'
+      && transaction.recipient?.toLowerCase() === normalizedAccount
+    ));
+  }, [account, transactions]);
+
+  const cumulativeEarnings = useMemo(() => {
+    let cumulative = 0n;
+    return [...earningsPayments]
+      .sort((a, b) => a.blockNumber - b.blockNumber || a.logIndex - b.logIndex)
+      .map((payment) => {
+        cumulative += BigInt(payment.amount);
+        return cumulative;
+      });
+  }, [earningsPayments]);
+
   const fetchBalance = async () => {
     if (!provider || !account) return;
     setBalanceLoading(true);
     try {
       const wei = await provider.getBalance(account);
       setBalance(wei);
-    } catch (e) {
-      show('Could not fetch balance: ' + (e.shortMessage || e.message), 'error');
+    } catch (error) {
+      show('Could not fetch balance: ' + (error.shortMessage || error.message), 'error');
     } finally {
       setBalanceLoading(false);
     }
   };
 
-  const displayName = profile?.displayName || profile?.[1] || (account ? shortAddress(account) : 'Guest');
-  const role = roleLabel(profile?.role ?? sessionRole);
-  const roleSrc = profile?.role ?? sessionRole;
-  const avatarSrc = pickAvatar(roleSrc, account);
-  const registered = !!profile || (!deployError && account && profile !== null);
-  const memberSince = profile?.createdAt;
-
-  const chain = CHAIN_NAMES[chainId] || (chainId != null ? `Chain ${chainId}` : '—');
-  const lockedEscrow = 3450000000000000000n; // demo only; module c wires this
-  const available = balance != null ? balance - lockedEscrow : null;
+  const refreshFunds = () => {
+    setFundsRefreshKey((value) => value + 1);
+  };
 
   const copy = async () => {
     if (!account) return;
@@ -143,6 +194,14 @@ export function Profile() {
     }
   };
 
+  const profileName = isRegistered ? displayName : 'Guest';
+  const avatarSrc = pickAvatar(null, account);
+  const memberSince = userProfile?.registeredAt;
+  const chain = CHAIN_NAMES[chainId] || (chainId != null ? `Chain ${chainId}` : '—');
+  const activeRequestCount = lockedEscrow?.activeRequestCount ?? 0;
+  const totalEarnings = cumulativeEarnings.at(-1) ?? 0n;
+  const fundsAreLoading = balanceLoading || lockedEscrowLoading;
+
   return (
     <div className={styles.page}>
       <Topbar
@@ -150,50 +209,57 @@ export function Profile() {
         subtitle="Your account, funds, and on-chain activity."
       />
 
-      {/* --- Identity --- */}
       <div className={styles.identityGrid}>
         <Card className={styles.identityCard}>
-          <Avatar src={avatarSrc} name={displayName} size={88} />
-          <div className={styles.name}>{displayName}</div>
+          <Avatar src={avatarSrc} name={profileName} size={88} />
+          <div className={styles.name}>{profileName}</div>
           <div className={styles.addr}>{account ? shortAddress(account) : 'Not connected'}</div>
-          <div className={styles.roleRow}>
-            <Badge tone={roleSrc ? 'info' : 'neutral'}>{role}</Badge>
-            {registered
-              ? <Badge tone="success">Registered</Badge>
-              : <Badge tone="warning">Guest</Badge>}
+          <div className={styles.statusRow}>
+            <Badge tone={isRegistered ? 'success' : 'warning'}>
+              {isRegistered ? 'Registered' : 'Unregistered'}
+            </Badge>
           </div>
-          <div className={styles.actions}>
-            <Button variant="secondary" onClick={() => show('Edit profile coming soon — module a.', 'info')}>
-              Edit profile
-            </Button>
-          </div>
+          {isRegistered && (
+            <div className={styles.actions}>
+              <Button variant="secondary" onClick={() => setIsEditOpen(true)}>
+                Edit display name
+              </Button>
+            </div>
+          )}
         </Card>
 
         <Card padded={false} className={styles.detailCard}>
           <div className={styles.detailHeader}>
             <h2 className={styles.cardTitle}>Account details</h2>
-            {registered && memberSince && (
-              <span className={styles.memberSince}>Member since {formatDate(memberSince)}</span>
+            {isRegistered && memberSince > 0n && (
+              <span className={styles.memberSince}>Registered {formatDate(memberSince)}</span>
             )}
           </div>
 
-          {loading && <div className={styles.detailEmpty}>Loading profile…</div>}
+          {isProfileLoading && <div className={styles.detailEmpty}>Loading profile…</div>}
 
-          {!loading && profile && (
+          {!isProfileLoading && isRegistered && (
             <dl className={styles.detailList}>
+              <DetailRow label="Display name" value={displayName} />
               <DetailRow label="Wallet address" value={<code className={styles.code}>{account}</code>} />
-              <DetailRow label="Display name"  value={displayName} />
-              <DetailRow label="Role"          value={<Badge tone="info">{role}</Badge>} />
-              <DetailRow label="Registered"    value={<Badge tone="success">Yes</Badge>} />
-              {memberSince && <DetailRow label="Member since" value={formatDate(memberSince)} />}
+              <DetailRow label="Registration date" value={formatDate(memberSince)} />
             </dl>
           )}
 
-          {!loading && !profile && !deployError && account && (
-            <RegistrationForm />
+          {!isProfileLoading && !isRegistered && account && !deployError && (
+            <div className={styles.unregisteredDetails}>
+              <dl className={styles.detailList}>
+                <DetailRow label="Display name" value={<span className={styles.noName}>No display name registered</span>} />
+                <DetailRow label="Wallet address" value={<code className={styles.code}>{account}</code>} />
+              </dl>
+              <div className={styles.unregisteredAction}>
+                <p>Register a public display name so other CargoChain users can recognize this wallet.</p>
+                <Button onClick={() => openRegistrationModal()}>Register display name</Button>
+              </div>
+            </div>
           )}
 
-          {!loading && deployError && (
+          {!isProfileLoading && deployError && account && (
             <EmptyState
               illustration={workerPackingInventory}
               title="Contracts not deployed"
@@ -201,7 +267,7 @@ export function Profile() {
             />
           )}
 
-          {!loading && !account && (
+          {!isProfileLoading && !account && (
             <EmptyState
               illustration={workerPackingInventory}
               title="No wallet connected"
@@ -211,13 +277,12 @@ export function Profile() {
         </Card>
       </div>
 
-      {/* --- Funds overview (replaces standalone Wallet page) --- */}
       <div className={styles.section}>
         <div className={styles.sectionHead}>
           <h2 className={styles.cardTitle}>Funds</h2>
           {account && (
-            <Button variant="secondary" size="sm" onClick={fetchBalance} disabled={balanceLoading}>
-              {balanceLoading ? 'Refreshing…' : 'Refresh balance'}
+            <Button variant="secondary" size="sm" onClick={refreshFunds} disabled={fundsAreLoading}>
+              {fundsAreLoading ? 'Refreshing…' : 'Refresh funds'}
             </Button>
           )}
         </div>
@@ -229,19 +294,53 @@ export function Profile() {
           />
           <KpiCard
             label="Locked in escrow"
-            value="3.45 ETH"
-            sub="across active requests"
+            value={lockedEscrow ? formatEth(lockedEscrow.totalLocked) : '—'}
+            sub={account
+              ? `${activeRequestCount} active request${activeRequestCount === 1 ? '' : 's'}`
+              : 'Not connected'}
             tone="info"
-          />
-          <KpiCard
-            label="Available"
-            value={available != null ? formatEth(available) : '—'}
-            sub="after escrow lock"
           />
         </div>
       </div>
 
-      {/* --- Network & account --- */}
+      <div className={styles.section}>
+        <div className={styles.sectionHead}>
+          <div>
+            <h2 className={styles.cardTitle}>Carrier earnings</h2>
+            <p className={styles.cardSub}>Cumulative milestone payments released to this wallet.</p>
+          </div>
+        </div>
+        <Card className={styles.earningsCard}>
+          {historyLoading ? (
+            <div className={styles.earningsLoading} role="status">Loading released payment events…</div>
+          ) : earningsPayments.length > 0 ? (
+            <>
+              <div className={styles.earningsSummary}>
+                <div>
+                  <span className={styles.earningsLabel}>Total earned</span>
+                  <strong className={styles.earningsTotal}>{formatEth(totalEarnings)}</strong>
+                </div>
+                <Badge tone="success">
+                  {earningsPayments.length} released payment{earningsPayments.length === 1 ? '' : 's'}
+                </Badge>
+              </div>
+              <LineChart
+                values={cumulativeEarnings}
+                height={180}
+                color="var(--chart-5)"
+                ariaLabel={`Cumulative carrier earnings ending at ${formatEth(totalEarnings)}`}
+              />
+            </>
+          ) : (
+            <EmptyState
+              illustration={escrowFundedTile}
+              title="No carrier earnings yet"
+              description="Payments released to this wallet will appear here as cumulative earnings."
+            />
+          )}
+        </Card>
+      </div>
+
       <div className={styles.section}>
         <div className={styles.sectionHead}>
           <h2 className={styles.cardTitle}>Network &amp; account</h2>
@@ -266,7 +365,7 @@ export function Profile() {
             </div>
             <div>
               <div className={styles.label}>Balance</div>
-              <div className={styles.value}>
+              <div className={`${styles.value} ${styles.numericValue}`}>
                 {balance != null ? formatEth(balance) : '—'}
               </div>
             </div>
@@ -281,7 +380,6 @@ export function Profile() {
         </Card>
       </div>
 
-      {/* --- Transaction history --- */}
       <div className={styles.section}>
         <div className={styles.sectionHead}>
           <div>
@@ -335,14 +433,260 @@ export function Profile() {
           )}
         </Card>
       </div>
+
+      {isRegistered && isEditOpen && (
+        <EditDisplayNameModal
+          account={account}
+          currentName={displayName}
+          provider={provider}
+          signer={signer}
+          userRegistry={contracts?.userRegistry}
+          refreshUserProfile={refreshUserProfile}
+          onClose={() => setIsEditOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditDisplayNameModal({
+  account,
+  currentName,
+  provider,
+  signer,
+  userRegistry,
+  refreshUserProfile,
+  onClose,
+}) {
+  const { show } = useToast();
+  const titleId = useId();
+  const inputRef = useRef(null);
+  const submitLockRef = useRef(false);
+  const operationRef = useRef(0);
+  const [newName, setNewName] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+  const [touched, setTouched] = useState(false);
+  const [stage, setStage] = useState('idle');
+  const [error, setError] = useState('');
+  const [transactionHash, setTransactionHash] = useState('');
+
+  const trimmedName = useMemo(() => trimAsciiWhitespace(newName), [newName]);
+  const trimmedConfirmation = useMemo(() => trimAsciiWhitespace(confirmation), [confirmation]);
+  const nameBytes = useMemo(() => new TextEncoder().encode(trimmedName).length, [trimmedName]);
+  const nameError = getDisplayNameError(trimmedName, nameBytes);
+  const confirmationError = getConfirmationError(trimmedConfirmation, trimmedName);
+  const isSubmitting = stage === 'wallet' || stage === 'mining' || stage === 'refreshing';
+
+  useEffect(() => {
+    const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 80);
+    return () => window.clearTimeout(focusTimer);
+  }, []);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape' && !submitLockRef.current) onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  useEffect(() => () => {
+    operationRef.current += 1;
+    submitLockRef.current = false;
+  }, []);
+
+  const requestClose = () => {
+    if (!submitLockRef.current) onClose();
+  };
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (submitLockRef.current) return;
+
+    setTouched(true);
+    setError('');
+    if (nameError || confirmationError) return;
+    if (!account || !userRegistry || !signer || !provider) {
+      setError('Display name updates are not available on the current network.');
+      return;
+    }
+
+    submitLockRef.current = true;
+    const operationId = ++operationRef.current;
+    const submittedAccount = account;
+
+    try {
+      setStage('wallet');
+      const activeSigner = signer;
+      const signerAddress = await activeSigner.getAddress();
+      if (signerAddress.toLowerCase() !== submittedAccount.toLowerCase()) {
+        throw new Error('The active MetaMask account changed. Close this dialog and edit the current wallet profile.');
+      }
+
+      const transaction = await sendWalletContractTransaction({
+        contract: userRegistry,
+        method: 'updateDisplayName',
+        args: [trimmedName],
+        signer: activeSigner,
+        provider,
+      });
+
+      if (operationId !== operationRef.current) return;
+      setTransactionHash(transaction.hash || '');
+      setStage('mining');
+      await transaction.wait();
+
+      if (operationId !== operationRef.current) return;
+      setStage('refreshing');
+      await refreshUserProfile();
+
+      if (operationId !== operationRef.current) return;
+      show('Display name updated.', 'success');
+      onClose();
+    } catch (caughtError) {
+      if (operationId !== operationRef.current) return;
+      setStage('error');
+      setError(formatDisplayNameUpdateError(caughtError));
+    } finally {
+      if (operationId === operationRef.current) submitLockRef.current = false;
+    }
+  };
+
+  return (
+    <div
+      className={styles.modalOverlay}
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) requestClose();
+      }}
+    >
+      <section
+        className={styles.editModal}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+      >
+        <header className={styles.modalHeader}>
+          <div className={styles.modalHeadingGroup}>
+            <span className={styles.modalIcon} aria-hidden="true">
+              <HiOutlineIdentification />
+            </span>
+            <div>
+              <h2 id={titleId} className={styles.modalTitle}>Edit display name</h2>
+              <p className={styles.modalSubtitle}>Update the public name associated with this wallet.</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            className={styles.modalClose}
+            onClick={requestClose}
+            disabled={isSubmitting}
+            aria-label="Close display name editor"
+          >
+            <HiOutlineXMark aria-hidden="true" />
+          </button>
+        </header>
+
+        <form className={styles.modalBody} onSubmit={submit} noValidate>
+          <div className={styles.readOnlyGrid}>
+            <div>
+              <span>Current display name</span>
+              <strong>{currentName}</strong>
+            </div>
+            <div>
+              <span>Wallet</span>
+              <code>{account}</code>
+            </div>
+          </div>
+
+          <div className={styles.gasNotice}>
+            <HiOutlineInformationCircle aria-hidden="true" />
+            <span>Updating your display name requires an on-chain transaction and a small gas fee.</span>
+          </div>
+
+          <div className={styles.modalField}>
+            <div className={styles.modalLabelRow}>
+              <label htmlFor={`${titleId}-new-name`}>New display name</label>
+              <span className={nameBytes > 64 ? styles.byteCountError : styles.byteCount}>{nameBytes}/64 bytes</span>
+            </div>
+            <input
+              ref={inputRef}
+              id={`${titleId}-new-name`}
+              className={`${styles.modalInput} ${touched && nameError ? styles.modalInputError : ''}`}
+              value={newName}
+              onChange={(event) => {
+                setNewName(event.target.value);
+                if (error) setError('');
+              }}
+              onBlur={() => setTouched(true)}
+              autoComplete="nickname"
+              disabled={isSubmitting}
+              aria-invalid={Boolean(touched && nameError)}
+            />
+            <span className={styles.fieldHelp}>
+              {touched && nameError ? <span className={styles.validationError}>{nameError}</span> : 'Leading and trailing ASCII spaces are removed.'}
+            </span>
+          </div>
+
+          <div className={styles.modalField}>
+            <label htmlFor={`${titleId}-confirmation`}>Confirm new display name</label>
+            <input
+              id={`${titleId}-confirmation`}
+              className={`${styles.modalInput} ${touched && confirmationError ? styles.modalInputError : ''}`}
+              value={confirmation}
+              onChange={(event) => {
+                setConfirmation(event.target.value);
+                if (error) setError('');
+              }}
+              onBlur={() => setTouched(true)}
+              autoComplete="off"
+              disabled={isSubmitting}
+              aria-invalid={Boolean(touched && confirmationError)}
+            />
+            <span className={styles.fieldHelp}>
+              {touched && confirmationError ? <span className={styles.validationError}>{confirmationError}</span> : 'Both names must match exactly after trimming.'}
+            </span>
+          </div>
+
+          {isSubmitting && (
+            <div className={styles.transactionStatus} role="status" aria-live="polite">
+              <span className={styles.spinner} aria-hidden="true" />
+              <div>
+                <strong>{getUpdateStageTitle(stage)}</strong>
+                <span>{getUpdateStageDescription(stage, transactionHash)}</span>
+              </div>
+            </div>
+          )}
+
+          {error && <div className={styles.modalError} role="alert">{error}</div>}
+
+          <footer className={styles.modalFooter}>
+            <button
+              type="button"
+              className={styles.modalSecondaryButton}
+              onClick={requestClose}
+              disabled={isSubmitting}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className={styles.modalPrimaryButton}
+              disabled={isSubmitting}
+            >
+              {getUpdateSubmitLabel(stage)}
+            </button>
+          </footer>
+        </form>
+      </section>
     </div>
   );
 }
 
 function TxHistoryTable({ rows, onRowClick }) {
   const { show } = useToast();
-  const copyHash = async (e, id) => {
-    e.stopPropagation();
+  const copyHash = async (event, id) => {
+    event.stopPropagation();
     try {
       await navigator.clipboard.writeText(id);
       show('Tx hash copied to clipboard', 'success');
@@ -350,6 +694,7 @@ function TxHistoryTable({ rows, onRowClick }) {
       show('Could not copy to clipboard', 'error');
     }
   };
+
   return (
     <div className={styles.txTableWrap}>
       <table className={styles.txTable}>
@@ -364,48 +709,57 @@ function TxHistoryTable({ rows, onRowClick }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {rows.map((row) => (
             <tr
-            key={r.id}
-            className={styles.txRow}
-            onClick={() => onRowClick(r.requestId)}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                onRowClick(r.requestId);
-              }
-            }}
-            aria-label={`Open request #${String(r.requestId).padStart(4, '0')} timeline`}
-          >
-            <td>
-              <Badge tone={PAYMENT_ACTION_TONE[r.action] || 'neutral'}>
-                {paymentActionLabel(r.action, r.milestoneId)}
-              </Badge>
-            </td>
-            <td>
-              <button
-                type="button"
-                className={styles.hashBtn}
-                onClick={(e) => copyHash(e, r.transactionHash)}
-                title="Copy tx hash"
-              >
-                <code>{shortTransactionHash(r.transactionHash)}</code>
-              </button>
-            </td>
-            <td><span className={styles.reqId}>#{String(r.requestId).padStart(4, '0')}</span></td>
-            <td>
-              <Badge tone={REQUEST_TONE[r.requestStatus] || 'neutral'}>
-                {requestStatus(r.requestStatus)}
-              </Badge>
-            </td>
-            <td className={styles.numCell}>{formatEth(r.amount)}</td>
-            <td className={styles.mutedCell}>{formatDate(r.timestamp)}</td>
+              key={row.id}
+              className={styles.txRow}
+              onClick={() => onRowClick(row.requestId)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  onRowClick(row.requestId);
+                }
+              }}
+              aria-label={`Open request #${String(row.requestId).padStart(4, '0')} timeline`}
+            >
+              <td>
+                <Badge tone={PAYMENT_ACTION_TONE[row.action] || 'neutral'}>
+                  {paymentActionLabel(row.action, row.milestoneId)}
+                </Badge>
+              </td>
+              <td>
+                <button
+                  type="button"
+                  className={styles.hashBtn}
+                  onClick={(event) => copyHash(event, row.transactionHash)}
+                  title="Copy tx hash"
+                >
+                  <code>{shortTransactionHash(row.transactionHash)}</code>
+                </button>
+              </td>
+              <td><span className={styles.reqId}>#{String(row.requestId).padStart(4, '0')}</span></td>
+              <td>
+                <Badge tone={REQUEST_TONE[row.requestStatus] || 'neutral'}>
+                  {requestStatus(row.requestStatus)}
+                </Badge>
+              </td>
+              <td className={styles.numCell}>{formatEth(row.amount)}</td>
+              <td className={styles.mutedCell}>{formatDate(row.timestamp)}</td>
             </tr>
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function DetailRow({ label, value }) {
+  return (
+    <div className={styles.detailRow}>
+      <dt className={styles.detailLabel}>{label}</dt>
+      <dd className={styles.detailValue}>{value}</dd>
     </div>
   );
 }
@@ -418,63 +772,74 @@ function formatHistoryError(error) {
   return message || 'Could not read payment events from DeliveryEscrow.';
 }
 
-function DetailRow({ label, value }) {
-  return (
-    <div className={styles.detailRow}>
-      <dt className={styles.detailLabel}>{label}</dt>
-      <dd className={styles.detailValue}>{value}</dd>
-    </div>
-  );
+function trimAsciiWhitespace(value) {
+  return value.replace(/^[\x09-\x0d\x20]+|[\x09-\x0d\x20]+$/g, '');
 }
 
-function RegistrationForm() {
-  const { show } = useToast();
-  const [name, setName] = useState('');
-  const [role, setRole] = useState('Shipper');
-  const [busy, setBusy] = useState(false);
+function getDisplayNameError(name, byteLength) {
+  if (!name) return 'Enter a new display name.';
+  if (byteLength > 64) return 'Display name must be 64 UTF-8 bytes or fewer.';
+  return '';
+}
 
-  const submit = (e) => {
-    e.preventDefault();
-    if (!name.trim()) {
-      show('Display name is required.', 'error');
-      return;
-    }
-    setBusy(true);
-    setTimeout(() => {
-      show(`Registration call would invoke userRegistry.register("${name}", ${role}).`, 'info');
-      setBusy(false);
-    }, 600);
-  };
+function getConfirmationError(confirmation, name) {
+  if (!confirmation) return 'Confirm the new display name.';
+  if (confirmation !== name) return 'Display names must match exactly after trimming.';
+  return '';
+}
 
-  return (
-    <form className={styles.regForm} onSubmit={submit}>
-      <div className={styles.regIntro}>
-        <strong>Register on-chain.</strong>{' '}
-        Pin your display name and role to your wallet so the marketplace and other
-        actors can recognize you.
-      </div>
-      <div className={styles.regField}>
-        <label className={styles.regLabel}>Display name</label>
-        <input
-          className={styles.regInput}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Soon Tian"
-        />
-      </div>
-      <div className={styles.regField}>
-        <label className={styles.regLabel}>Role</label>
-        <div className={styles.regInputWrap}>
-          <select className={styles.regSelect} value={role} onChange={(e) => setRole(e.target.value)}>
-            <option value="Shipper">Shipper</option>
-            <option value="Carrier">Carrier</option>
-          </select>
-          <span className={styles.regCaret} aria-hidden="true">▾</span>
-        </div>
-      </div>
-      <div className={styles.regActions}>
-        <Button type="submit" disabled={busy}>{busy ? 'Registering…' : 'Register on-chain'}</Button>
-      </div>
-    </form>
+function getUpdateStageTitle(stage) {
+  if (stage === 'wallet') return 'Confirm in MetaMask';
+  if (stage === 'mining') return 'Update submitted';
+  return 'Update confirmed';
+}
+
+function getUpdateStageDescription(stage, transactionHash) {
+  if (stage === 'wallet') return 'Review and approve the display name update in your wallet.';
+  if (stage === 'mining') {
+    return transactionHash
+      ? `Waiting for the network to confirm ${shortTransactionHash(transactionHash)}.`
+      : 'Waiting for the network to confirm the transaction.';
+  }
+  return 'Refreshing your CargoChain profile.';
+}
+
+function getUpdateSubmitLabel(stage) {
+  if (stage === 'wallet') return 'Waiting for wallet…';
+  if (stage === 'mining') return 'Confirming on-chain…';
+  if (stage === 'refreshing') return 'Refreshing profile…';
+  return 'Update display name';
+}
+
+function formatDisplayNameUpdateError(error) {
+  if (error?.code === 4001 || error?.code === 'ACTION_REJECTED' || (error?.code === 'TRANSACTION_REPLACED' && error?.cancelled)) {
+    return 'Update was cancelled in MetaMask. Your display name was not changed.';
+  }
+
+  const message = [
+    error?.info?.error?.data?.reason,
+    error?.error?.data?.reason,
+    error?.shortMessage,
+    error?.reason,
+    error?.info?.error?.message,
+    error?.message,
+  ].find(Boolean) || '';
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes('display name required')) return 'The contract rejected the update because the display name is empty.';
+  if (normalized.includes('display name exceeds 64 bytes')) return 'The contract rejected the update because the display name exceeds 64 UTF-8 bytes.';
+  if (normalized.includes('user is not registered')) return 'The contract rejected the update because this wallet is not registered.';
+  if (normalized.includes('insufficient funds')) return 'This wallet does not have enough ETH for the transaction gas fee.';
+  if (normalized.includes('active metamask account changed')) return message;
+  if (normalized.includes('missing revert data')) {
+    return 'The deployed UserRegistry contract is unavailable or outdated. Confirm the network and redeploy the contracts.';
+  }
+  if (error?.code === 'CALL_EXCEPTION' || normalized.includes('execution reverted')) {
+    return 'The UserRegistry contract rejected the update. Confirm the profile is registered and try again.';
+  }
+
+  return formatWalletTransactionError(
+    error,
+    message || 'Display name could not be updated. Check MetaMask and try again.',
   );
 }

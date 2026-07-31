@@ -6,25 +6,22 @@
 
 ## 1. System overview
 
-CargoChain is a 3-tier DApp:
+CargoChain is a DApp with four cooperating layers:
 
 1. **Ethereum smart contracts** (Solidity 0.8.x) — the source of truth for request state, escrow, milestone status.
-2. **Tiny Node.js + Express upload server** — only for `/uploads` POST endpoint (photo storage). Doesn't talk to the chain.
-3. **Plain HTML/CSS/vanilla JS frontend** with **Web3.js v1.x** — calls contracts directly through MetaMask (or Ganache accounts in dev).
+2. **React 18 + Vite frontend** using **ethers.js v6** — calls contracts through MetaMask.
+3. **Node.js + Express API** — verifies SIWE sessions and enforces contract-backed private-chat authorization.
+4. **Supabase** — stores private chat records and milestone proof images; authoritative delivery and payment state remains on-chain.
 
 ```
-┌────────────┐    ┌────────────────┐    ┌──────────────┐
-│  Browser   │◄──►│ Ethereum node  │◄──►│  Truffle /   │
-│ (Web3.js)  │    │ (Ganache /     │    │   deploy /   │
-│            │    │  Sepolia)      │    │   migrate    │
-└─────┬──────┘    └────────────────┘    └──────────────┘
-      │ HTTP /uploads POST
-      ▼
-┌────────────┐
-│ Express    │  writes to /uploads/{sha256}.jpg
-│ upload     │
-│ server     │
-└────────────┘
+┌────────────┐    ethers.js     ┌────────────────┐
+│ React/Vite │◄───────────────►│ Ganache node   │
+│ + MetaMask │                 │ + contracts    │
+└─────┬──────┘                 └────────────────┘
+      │ HTTPS                         ▲
+      ├──────────────► Supabase       │ authorization reads
+      │                 Storage/DB    │
+      └──────────────► Express API ───┘
 ```
 
 ---
@@ -129,37 +126,38 @@ Pending ──submitProof──► AwaitingVerification ──verifyMilestone(tr
 
 | Page | URL | Connects to wallet? |
 |---|---|---|
-| `index.html` | `/` | Optional — read-only |
-| `shipper.html` | `/shipper.html` | Required |
-| `carrier.html` | `/carrier.html` | Required |
-| `track.html` | `/track.html?id=N` | Optional — read-only |
+| `Marketplace.jsx` | `/` | Optional for browsing; required for actions |
+| `MyShipments.jsx` | `/my-shipments` | Required |
+| `ProposeMilestones.jsx` | `/shipments/:id/propose` | Required |
+| `Track.jsx` | `/track/:id` | Required for role-specific actions |
+| `Messages.jsx` | `/messages/:conversationId?` | Required + SIWE chat session |
 
-### Web3.js initialisation pattern
+### ethers.js v6 initialisation pattern
 
 ```javascript
-// src/js/web3-init.js
-const web3 = new Web3(window.ethereum || new Web3.providers.HttpProvider('http://127.0.0.1:7545'));
+// src/context/Web3Context.jsx
+const readProvider = new JsonRpcProvider('http://127.0.0.1:7545', 1337, { staticNetwork: true });
+const walletProvider = new BrowserProvider(window.ethereum);
 
 async function connectWallet() {
   if (!window.ethereum) {
     alert('Please install MetaMask');
     return;
   }
-  const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-  return { address: accounts[0], chainId: await web3.eth.getChainId() };
+  await walletProvider.send('eth_requestAccounts', []);
+  const signer = await walletProvider.getSigner();
+  const network = await walletProvider.getNetwork();
+  return { account: await signer.getAddress(), signer, chainId: Number(network.chainId) };
 }
 ```
 
-### ABI loading (static, course-style)
+### ABI and address loading
 
 ```javascript
-// src/js/contracts.js
-import DeliveryEscrowABI from './abi/DeliveryEscrow.json';  // copy from build/contracts after migrate
-
-const addresses = { DeliveryEscrow: '0x...' };  // copy from migrate output
-export const contracts = {
-  escrow: new web3.eth.Contract(DeliveryEscrowABI, addresses.DeliveryEscrow),
-};
+// src/contracts/index.js
+const artifact = ARTIFACTS['../../build/contracts/DeliveryEscrow.json'];
+const address = artifact.networks[String(networkId)].address;
+const deliveryEscrow = new Contract(address, artifact.abi, provider);
 ```
 
 ---
@@ -173,14 +171,15 @@ FileReader.readAsArrayBuffer
   ↓
 crypto.subtle.digest('SHA-256', buffer) → hex hash
   ↓
-POST /uploads  (multipart/form-data, field 'photo', file)
+Upload to the Supabase `milestone-proofs` Storage bucket
   ↓
-Express server: writes to /uploads/{hashprefix}.jpg, returns { hash }
+Receive the public proof URL
   ↓
-submitProof(requestId, milestoneId, hash) → blockchain tx
+submitProof(requestId, milestoneId, proofUrl, hash) → blockchain tx
 ```
 
-Server: ~50 LOC Express. `multer` for multipart. No auth — dev only.
+The Express API is not in the proof-image data path. Supabase project and
+bucket access are configured through environment variables and Storage policies.
 
 ---
 
@@ -195,14 +194,14 @@ npx truffle compile
 npx truffle migrate --reset --network development
 npx truffle test
 
-# Terminal 3 — Upload server
-node server/upload-server.js     # http://127.0.0.1:3000
+# Terminal 3 — SIWE/chat API
+npm run server                   # http://127.0.0.1:3000
 
 # Terminal 4 — Frontend
-cd src && npx http-server -p 8080   # http://127.0.0.1:8080
+npm run dev                      # http://127.0.0.1:5173
 ```
 
-Or use `./start.sh` / `start.cmd` to launch all four.
+Or use `npm run dev:all`, `./start.sh`, or `start.cmd` to launch the local stack.
 
 ---
 

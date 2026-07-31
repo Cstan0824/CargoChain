@@ -6,7 +6,7 @@ const supabasePublishableKey =
 
 if (!supabaseUrl || !supabasePublishableKey) {
   throw new Error(
-    'Missing Supabase URL or publishable key in .env.local',
+    'Missing Supabase URL or publishable key in the frontend environment.',
   );
 }
 

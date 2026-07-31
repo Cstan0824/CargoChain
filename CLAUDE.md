@@ -20,7 +20,7 @@ If a request implies changing any of the above, refuse and refer to `AGENTS.md` 
 ## Cstan's explicit out-of-scope items
 
 - **NO QR-code recipient verification.** The PRD v3 lists R13 (QR confirmation) — **treat as REMOVED** in any planning or implementation work.
-- **S3 hybrid storage for photo-proof** is in-scope. Default to S3 over Supabase unless the team changes the decision.
+- **Supabase Storage for photo-proof** is the current implementation. Do not reintroduce the retired local storage backend.
 
 ## Common tasks — recipe
 
@@ -60,7 +60,7 @@ If a request implies changing any of the above, refuse and refer to `AGENTS.md` 
 - **No wagmi / viem** even when modern tutorials push them. Course mandate.
 - **No Next.js, no TypeScript** (project owner choice 2026-07-06 — React 18 + Vite, plain JS).
 - **Truffle `migrate --reset` if state is broken**, never hand-edit `build/contracts/`.
-- **Photo-proof storage**: `crypto.subtle.digest('SHA-256', …)` in browser → POST to `server/upload-server.js` → store in `/uploads/{sha256prefix}.jpg` → return the hash to the page → page sends `submitProof(requestId, milestoneId, hash)`.
+- **Photo-proof storage**: `crypto.subtle.digest('SHA-256', …)` in browser → upload to the Supabase `milestone-proofs` bucket → page sends the proof URL and content hash through `submitProof(...)`.
 - **Repo renamed** from "LogiChain" (PRD v3) to "CargoChain" (GitHub repo). When you see references to LogiChain in older docs, that's the same project.
 
 ## Tone for this project

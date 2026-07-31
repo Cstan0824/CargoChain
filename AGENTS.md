@@ -27,7 +27,7 @@ Use the course-mandated stack only:
 - Frontend: **React 18 + Vite** (plain JavaScript, no TypeScript)
 - Blockchain client library: **ethers.js v6** (project owner decision 2026-07-06 — supersedes the earlier Web3.js v1.x rule)
 - Tests: **Mocha + Chai through Truffle**
-- Optional upload backend: **Node.js + Express.js** for photo-proof upload only
+- Off-chain support: **Node.js + Express.js** for SIWE/private chat; **Supabase Storage** for photo proofs
 - **Sepolia testnet: future plan, NOT part of v1.** The team has explicitly deferred it. The Sepolia block in `truffle-config.js` is commented out and the `.env.example` Sepolia vars are blank by design. Do not enable or test against Sepolia until the team agrees to ship v2.
 
 Do **not** replace the stack with:
@@ -122,16 +122,14 @@ Important hand-offs:
   css/
     style.css             # global stylesheet
   abi/                    # (legacy — no longer used; ABIs now in build/contracts/)
-/server
-  upload-server.js        # tiny Express for /uploads POST
-/uploads                  # local photo storage (dev only, gitignored)
+/server                   # SIWE authentication + private chat API
 /docs
   PRD.md                  # exported from LogiChain PRD v3
   Spec.md                 # concise functional + technical spec
   Architecture.md         # diagram-rich architecture doc
   Module-Split.md         # detailed module responsibilities
 truffle-config.js         # Ganache default; Sepolia commented (future plan)
-vite.config.js            # port 5173, /uploads proxy -> :3000
+vite.config.js            # Vite dev server on 127.0.0.1:5173
 package.json
 README.md
 AGENTS.md                 # this file
@@ -187,14 +185,14 @@ Expected events:
 - Component-scoped styles use **CSS Modules** (`*.module.css`) co-located with the component.
 - The global stylesheet `src/css/style.css` is reserved for layout, typography, navbar, and toasts.
 - Pages that need a connected wallet wrap their body in `<RequireWallet>`.
-- All four local services bind to `127.0.0.1` by default — see `SECURITY.md`.
+- All local services bind to `127.0.0.1` by default — see `SECURITY.md`.
 
 ### Node.js / Express
 
 Node.js is allowed only for support tasks such as:
 
 - local development server
-- upload server
+- SIWE/private chat API server
 - Truffle scripts
 - tests
 - package management
@@ -251,7 +249,7 @@ Keep these assumptions unless the team decides otherwise:
 
 Do not change these without asking the project owner (Cstan):
 
-- Course stack: Truffle + Ganache + Web3.js + plain HTML/CSS/JS
+- Course stack: Truffle + Ganache + ethers.js v6 + React 18/Vite JavaScript
 - Main app concept: decentralised escrow and milestone-based logistics platform
 - Five-module split (a / b / c / d / e) and named owners (wx / GAN / Jeremy / Melissa / Cstan)
 - Main contract names (DeliveryEscrow, MilestoneVerifier, LifecycleManager)

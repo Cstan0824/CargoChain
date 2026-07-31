@@ -22,9 +22,8 @@ coverage.json
 ganache-data/
 *.ganache
 
-# --- Local photo upload storage (dev only) ---
-uploads/*
-!uploads/.gitkeep
+# --- Legacy local proof files (kept out of source control) ---
+uploads/
 
 # --- Environment & secrets ---
 .env

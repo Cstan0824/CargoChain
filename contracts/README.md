@@ -1,15 +1,13 @@
 # `contracts/` — Solidity sources
 
-Five contracts, owned by module:
+Current contract sources:
 
 | File | Module | Owner | Status |
 |---|---|---|---|
-| `Migrations.sol` | (Truffle boilerplate) | — | ✅ scaffolded |
-| `UserRegistry.sol` | a — User & Wallet | wx | ⏳ to write |
-| `DeliveryEscrow.sol` | b + c — Request + Payment | GAN + Jeremy | ⏳ to write |
-| `LifecycleManager.sol` | b — Lifecycle / republish | GAN | ⏳ to write |
-| `MilestoneVerifier.sol` | d — Milestone + Proof | Melissa | ⏳ to write |
-| `PaymentEvents.sol` | c — Payment events | Jeremy | ⏳ to write |
+| `Migrations.sol` | Truffle migration bookkeeping | — | ✅ implemented |
+| `UserRegistry.sol` | wallet identity/profile | wx | ✅ implemented |
+| `DeliveryEscrow.sol` | requests, proposals, escrow, milestones, proof, payment, refunds | team | ✅ implemented |
+| `PaymentEvents.sol` | payment event definitions inherited by `DeliveryEscrow` | Jeremy | ✅ implemented |
 
 Use Solidity `^0.8.0`. Run `npx truffle compile` to verify before committing.
 

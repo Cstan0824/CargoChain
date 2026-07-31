@@ -18,8 +18,8 @@
 │         └─────────────────┴────────┬────────┴──────────────┘       │
 │                                   │                                │
 │                          ┌────────▼─────────┐                      │
-│                          │   web3-init.js   │                      │
-│                          │  (Web3.js setup) │                      │
+│                          │ Web3Context.jsx  │                      │
+│                          │ (ethers v6)      │                      │
 │                          └────────┬─────────┘                      │
 │                                   │                                │
 │                          ┌────────▼─────────┐                      │
@@ -33,16 +33,16 @@
 │                          └────┬──────────┬──┘                      │
 └───────────────────────────────┼──────────┼─────────────────────────┘
                                 │          │
-                Web3.js        │          │  HTTP /uploads POST
-                (.call/.send)  │          │  (multipart)
+                ethers.js      │          │  Supabase Storage upload
+                (read/write)   │          │
                                 │          │
         ┌───────────────────────▼──┐    ┌──▼─────────────────┐
-        │   Ethereum (Ganache /    │    │  Express upload    │
-        │   Sepolia)              │    │  server            │
-        │                          │    │  (port 3000)       │
+        │   Ethereum (Ganache)     │    │  Supabase Storage  │
+        │                          │    │  milestone-proofs  │
+        │                          │    │  bucket            │
         │  ┌──────────────────┐   │    │                    │
-        │  │ DeliveryEscrow   │   │    │  /uploads/         │
-        │  ├──────────────────┤   │    │  {sha256}.jpg      │
+        │  │ DeliveryEscrow   │   │    │  proof images +    │
+        │  ├──────────────────┤   │    │  public URLs       │
         │  │ MilestoneVerifier│   │    │                    │
         │  ├──────────────────┤   │    └────────────────────┘
         │  │ LifecycleManager │   │
@@ -164,22 +164,22 @@
        ▼                                           │
   crypto.subtle.digest('SHA-256', buffer)         │
        │                                           │
-       │ 3. POST /uploads (multipart)              │
+       │ 3. Upload to Supabase Storage             │
        ▼                                           │
   ┌──────────────┐                                 │
-  │  Express     │                                 │
-  │  upload      │                                 │
-  │  server      │                                 │
+  │  Supabase    │                                 │
+  │  Storage     │                                 │
+  │  bucket      │                                 │
   │              │                                 │
-  │  writes to   │                                 │
-  │  /uploads/   │                                 │
-  │  {hash}.jpg  │                                 │
+  │  stores in   │                                 │
+  │  milestone-  │                                 │
+  │  proofs      │                                 │
   │              │                                 │
   │  returns     │                                 │
-  │  { hash }    │                                 │
+  │  public URL  │                                 │
   └──────┬───────┘                                 │
          │                                         │
-         │ 4. submitProof(requestId, msId, hash)   │
+         │ 4. submitProof(requestId, msId, URL, hash)│
          ▼                                         │
   ┌────────────────────────────────────────────────▼─┐
   │              MilestoneVerifier                    │
@@ -232,13 +232,13 @@
 │  └────────────────────────────────────────────────┘    │
 │                                                        │
 │  ┌────────────────────────────────────────────────┐    │
-│  │  Express upload-server.js (port 3000)          │    │
-│  │  /uploads/{hash}.jpg                            │    │
+│  │  Express SIWE/chat API (port 3000)              │    │
+│  │  Supabase Database + Storage                    │    │
 │  └────────────────────────────────────────────────┘    │
 │                                                        │
 │  ┌────────────────────────────────────────────────┐    │
-│  │  http-server src/ (port 8080)                  │    │
-│  │  index.html / shipper.html / carrier.html      │    │
+│  │  Vite React app (port 5173)                     │    │
+│  │  SPA routes + ethers.js v6                      │    │
 │  └────────────────────────────────────────────────┘    │
 │                                                        │
 │  MetaMask browser extension                            │

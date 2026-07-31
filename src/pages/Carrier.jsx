@@ -26,7 +26,7 @@ import { ProgressLine } from '../components/ProgressLine.jsx';
 import { LineChart } from '../components/LineChart.jsx';
 import { useToast } from '../hooks/useToast.js';
 import { formatEth } from '../utils/format.js';
-import { hashFile, uploadPhoto } from '../utils/upload.js';
+import { hashFile } from '../utils/upload.js';
 import styles from './Carrier.module.css';
 
 // Demo jobs. status mirrors the MilestoneStatus enum from BusinessFlow §6:
@@ -250,8 +250,8 @@ export function Carrier() {
   );
 }
 
-// Proof upload modal. Real flow: pick file → SHA-256 in browser →
-// POST to /uploads → submitProof on-chain.
+// Legacy dashboard proof modal. The active tracking flow performs the real
+// Supabase Storage upload and submitProof transaction in Track.jsx.
 function ProofUploadModal({ job, onClose, onSubmitted }) {
   const { show } = useToast();
   const inputRef = useRef(null);
@@ -292,10 +292,9 @@ function ProofUploadModal({ job, onClose, onSubmitted }) {
     setBusy(true);
     try {
       const hash = await hashFile(file);
-      const result = await uploadPhoto(file, hash);
       show(
-        `Photo hashed (${result.hash.slice(0, 10)}…). submitProof(${job.id}, milestoneId, hash) coming online with module d.`,
-        'success',
+        `Photo hashed (${hash.slice(0, 10)}…). Open this request from My Shipments to upload and submit proof.`,
+        'info',
       );
       onSubmitted?.();
     } catch (e) {
@@ -334,7 +333,7 @@ function ProofUploadModal({ job, onClose, onSubmitted }) {
               <>
                 <HiOutlinePhoto className={styles.dropIcon} aria-hidden="true" />
                 <div className={styles.dropTitle}>Click or drag a photo</div>
-                <div className={styles.dropHint}>JPEG, PNG, or WebP. The bytes go to the upload server; the SHA-256 hash goes on-chain.</div>
+                <div className={styles.dropHint}>JPEG, PNG, or WebP. Proof images are stored in Supabase; the SHA-256 reference goes on-chain.</div>
               </>
             )}
             <input

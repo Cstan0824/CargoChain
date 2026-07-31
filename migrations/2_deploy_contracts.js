@@ -1,8 +1,12 @@
 // migrations/2_deploy_contracts.js
-// MVP deployment: a single DeliveryEscrow contract owns the v1 flow.
+// Deploy identity registration before the escrow that depends on it.
 
+const UserRegistry = artifacts.require('UserRegistry');
 const DeliveryEscrow = artifacts.require('DeliveryEscrow');
 
 module.exports = async function (deployer) {
-  await deployer.deploy(DeliveryEscrow);
+  await deployer.deploy(UserRegistry);
+  const registry = await UserRegistry.deployed();
+
+  await deployer.deploy(DeliveryEscrow, registry.address);
 };

@@ -1,14 +1,27 @@
 /* src/components/LineChart.module.css */
 
 .wrap {
-  width: 100%;
-  display: block;
   position: relative;
+  display: block;
+  width: 100%;
+  min-height: 100px;
 }
 
 .svg {
+  display: block;
   width: 100%;
   height: 100%;
-  display: block;
   overflow: visible;
+}
+
+.gridLine {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 3 5;
+}
+
+.point {
+  fill: var(--bg-surface);
+  stroke: currentColor;
+  stroke-width: 1.5;
 }

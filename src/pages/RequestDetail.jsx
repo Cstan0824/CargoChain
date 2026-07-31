@@ -10,10 +10,12 @@ import {
 import { Topbar } from '../components/Topbar.jsx';
 import { Card } from '../components/Card.jsx';
 import { Button } from '../components/Button.jsx';
+import { ChatButton } from '../components/chat/ChatButton.jsx';
 import { Badge } from '../components/Badge.jsx';
 import { EmptyState } from '../components/EmptyState.jsx';
 import { useContracts } from '../hooks/useContracts.js';
 import { useWallet } from '../hooks/useWallet.js';
+import { useWalletIdentities, walletIdentityLabel } from '../hooks/useWalletIdentities.js';
 import {
   formatDate,
   formatDaysLeft,
@@ -21,7 +23,6 @@ import {
   formatRelative,
   requestStatus,
   REQUEST_TONE,
-  shortAddress,
 } from '../utils/format.js';
 import { deliveryTruckCity } from '../assets';
 import styles from './RequestDetail.module.css';
@@ -34,6 +35,10 @@ export function RequestDetail() {
   const [request, setRequest] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const walletIdentities = useWalletIdentities([
+    request?.shipper,
+    ...(request?.proposals || []).map((proposal) => proposal.carrier),
+  ], contracts?.userRegistry);
 
   useEffect(() => {
     if (!idParam || !contracts?.deliveryEscrow) {
@@ -64,6 +69,19 @@ export function RequestDetail() {
     };
   }, [contracts, idParam]);
 
+  useEffect(() => {
+    if (!account || !request || request.status !== 'Open') return;
+
+    const isOwnActiveProposal = request.proposals.some((proposal) => (
+      proposal.status === 'Active'
+      && proposal.carrier.toLowerCase() === account.toLowerCase()
+    ));
+
+    if (isOwnActiveProposal) {
+      navigate(`/shipments/${request.id}/propose`, { replace: true });
+    }
+  }, [account, navigate, request]);
+
   const goBack = () => navigate('/');
 
   if (loading) {
@@ -93,6 +111,7 @@ export function RequestDetail() {
 
   const isShipper = Boolean(account && account.toLowerCase() === request.shipper.toLowerCase());
   const displayedPayment = request.escrow > 0n ? request.escrow : request.proposedAmount;
+  const shipperIdentity = walletIdentityLabel(request.shipper, walletIdentities);
 
   return (
     <div className={styles.page}>
@@ -140,7 +159,7 @@ export function RequestDetail() {
             <div className={styles.sectionHeader}>
               <HiOutlineCube className={styles.sectionIcon} aria-hidden="true" />
               <div>
-                <h2>Cargo manifest</h2>
+                <h2>Shipment contents</h2>
                 <p>{request.items.length} item type{request.items.length === 1 ? '' : 's'}</p>
               </div>
             </div>
@@ -184,7 +203,12 @@ export function RequestDetail() {
                 </Badge>
               }
             />
-            <MetaRow label="Shipper" value={<span title={request.shipper}>{shortAddress(request.shipper)}</span>} />
+            <MetaRow
+              label="Shipper"
+              value={isShipper
+                ? 'You'
+                : <span className={styles.walletIdentity} title={request.shipper}>{shipperIdentity}</span>}
+            />
             <MetaRow
               label="Delivery deadline"
               value={
@@ -203,23 +227,29 @@ export function RequestDetail() {
                 </span>
               }
             />
-            <MetaRow
-              label="Carrier proposals"
-              value={request.activeProposalCount ? `${request.activeProposalCount} awaiting review` : 'Awaiting carrier'}
-            />
           </Card>
         </div>
       </div>
 
       <div className={styles.footer}>
         <Button variant="secondary" onClick={goBack}>Back</Button>
-        {request.status === 'Open' && !isShipper && (
+        {request.proposals && request.proposals.some(p => account && p.carrier.toLowerCase() === account.toLowerCase()) && (
+          <ChatButton requestId={request.id} label="Message Shipper" variant="primary" />
+        )}
+        {request.status === 'Open' && !isShipper && !request.proposals.some(p => account && p.carrier.toLowerCase() === account.toLowerCase()) && (
           <Button onClick={() => navigate(`/shipments/${request.id}/propose`)}>
             Propose milestones
           </Button>
         )}
         {request.status === 'Open' && isShipper && (
-          <Button onClick={() => navigate(`/track/${request.id}`)}>View shipment status</Button>
+          <Button onClick={() => navigate(`/track/${request.id}`)}>
+            View shipment status
+            {request.activeProposalCount > 0 && (
+              <span className={styles.proposalCount} aria-label={`${request.activeProposalCount} carrier proposal${request.activeProposalCount === 1 ? '' : 's'} awaiting review`}>
+                {request.activeProposalCount}
+              </span>
+            )}
+          </Button>
         )}
         {request.status !== 'Open' && (
           <Button onClick={() => navigate(`/track/${request.id}`)}>
@@ -262,6 +292,10 @@ async function loadRequest(deliveryEscrow, idParam) {
     activeProposalCount: Array.from(rawProposals || []).filter(
       (proposal) => Number(proposal.status ?? proposal[1]) === 0,
     ).length,
+    proposals: Array.from(rawProposals || []).map((proposal) => ({
+      carrier: proposal.carrier ?? proposal[0],
+      status: ['Active', 'Revoked', 'Rejected', 'Accepted'][Number(proposal.status ?? proposal[1])] || 'Unknown',
+    })),
   };
 }
 

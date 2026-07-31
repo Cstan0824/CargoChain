@@ -8,6 +8,7 @@ import {
   HiOutlineChevronLeft,
   HiOutlineChevronRight,
   HiOutlineCreditCard,
+  HiOutlineCube,
   HiOutlineExclamationCircle,
   HiOutlineInformationCircle,
   HiOutlineLockClosed,
@@ -19,14 +20,16 @@ import { Card } from '../components/Card.jsx';
 import { Badge } from '../components/Badge.jsx';
 import { Tabs } from '../components/Tabs.jsx';
 import { Button } from '../components/Button.jsx';
+import { ChatButton } from '../components/chat/ChatButton.jsx';
 import { useContracts } from '../hooks/useContracts.js';
 import { useToast } from '../hooks/useToast.js';
 import { useWallet } from '../hooks/useWallet.js';
+import { useUserProfile } from '../hooks/useUserProfile.js';
+import { useWalletIdentities, walletIdentityLabel } from '../hooks/useWalletIdentities.js';
 import {
   formatDate,
   formatEth,
   requestStatus,
-  shortAddress,
 } from '../utils/format.js';
 import {
   loadPaymentHistory,
@@ -36,6 +39,10 @@ import {
 } from '../utils/paymentHistory.js';
 import styles from './Track.module.css';
 import {hashFile, uploadPhoto} from '../utils/upload.js';
+import {
+  formatWalletTransactionError,
+  sendWalletContractTransaction,
+} from '../utils/walletTransaction.js';
 
 const TAB_ITEMS = [
   { value: 'timeline', label: 'Timeline & Checkpoints' },
@@ -52,6 +59,7 @@ export function Track() {
   const { contracts, deployError } = useContracts();
   const { account, signer, provider } = useWallet();
   const { show } = useToast();
+  const { requireRegistration } = useUserProfile();
   const [tab, setTab] = useState('timeline');
   const [shipment, setShipment] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -64,6 +72,11 @@ export function Track() {
   const [paymentHistoryError, setPaymentHistoryError] = useState(null);
   const [proofViewerMilestone, setProofViewerMilestone] = useState(null);
   const [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1000));
+  const walletIdentities = useWalletIdentities([
+    shipment?.shipper,
+    shipment?.carrier,
+    ...(shipment?.proposals || []).map((proposal) => proposal.carrier),
+  ], contracts?.userRegistry);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -154,15 +167,27 @@ export function Track() {
     account && shipment && shipment.carrier
       && account.toLowerCase() === shipment.carrier.toLowerCase(),
   );
-  const isParticipant = isShipper || isCarrier;
   const proposalPending = Boolean(
     shipment?.status === 'Open'
       && shipment.proposals?.some((proposal) => proposal.status === 'Active'),
   );
-  const hasRecordedProposals = Boolean(
-    shipment?.status === 'Open' && shipment.proposals?.length,
-  );
   const milestonesApproved = !['Open', 'PendingApproval'].includes(shipment?.status);
+  const proposalHistory = (shipment?.proposals || []).filter((proposal) => (
+    shipment?.status === 'Open'
+      ? !['Active', 'Accepted'].includes(proposal.status)
+      : proposal.status !== 'Accepted'
+  ));
+  const showShipmentTabs = milestonesApproved || (isShipper && proposalHistory.length > 0);
+  const proposalHistoryTab = {
+    value: 'proposal-history',
+    label: 'Proposal History',
+    count: proposalHistory.length || undefined,
+  };
+  const tabItems = !milestonesApproved
+    ? [proposalHistoryTab]
+    : isShipper
+      ? [...TAB_ITEMS, proposalHistoryTab]
+      : TAB_ITEMS;
   const deadlinePassed = Boolean(
     shipment?.deadline && nowSeconds > shipment.deadline,
   );
@@ -186,6 +211,13 @@ export function Track() {
   );
   const busy = actionStage !== 'idle';
 
+  useEffect(() => {
+    if (!isShipper && tab === 'proposal-history') setTab('timeline');
+    if (isShipper && !milestonesApproved && proposalHistory.length > 0 && tab !== 'proposal-history') {
+      setTab('proposal-history');
+    }
+  }, [isShipper, milestonesApproved, proposalHistory.length, tab]);
+
   const acceptProposal = async (proposalId) => {
     if (busy || !shipment || !signer || !contracts?.deliveryEscrow) return;
     setActionStage('accepting');
@@ -204,11 +236,19 @@ export function Track() {
         throw new Error('This request is no longer open for proposal selection.');
       }
 
-      const tx = await contracts.deliveryEscrow.connect(signer).approveAndFund(
-        BigInt(shipment.id),
-        BigInt(proposalId),
-        { value: proposedAmount },
-      );
+      if (!await requireRegistration(
+        'Register your CargoChain profile to approve a proposal and fund escrow.',
+        activeAddress,
+      )) return;
+
+      const tx = await sendWalletContractTransaction({
+        contract: contracts.deliveryEscrow,
+        method: 'approveAndFund',
+        args: [BigInt(shipment.id), BigInt(proposalId)],
+        overrides: { value: proposedAmount },
+        signer,
+        provider,
+      });
       show(`Locking ${formatEth(proposedAmount)} in escrow...`, 'info');
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) throw new Error('Approval was not confirmed.');
@@ -227,10 +267,19 @@ export function Track() {
     setActionStage('rejecting');
 
     try {
-      const tx = await contracts.deliveryEscrow.connect(signer).rejectMilestoneProposal(
-        BigInt(shipment.id),
-        BigInt(proposalId),
-      );
+      const activeSignerAddress = await signer.getAddress();
+      if (!await requireRegistration(
+        'Register your CargoChain profile to reject a milestone proposal.',
+        activeSignerAddress,
+      )) return;
+
+      const tx = await sendWalletContractTransaction({
+        contract: contracts.deliveryEscrow,
+        method: 'rejectMilestoneProposal',
+        args: [BigInt(shipment.id), BigInt(proposalId)],
+        signer,
+        provider,
+      });
       show('Rejecting this carrier proposal...', 'info');
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) throw new Error('Rejection was not confirmed.');
@@ -264,9 +313,19 @@ export function Track() {
         throw new Error('This request can no longer be cancelled from its current status.');
       }
 
-      const tx = await contracts.deliveryEscrow.connect(signer).cancelRequest(
-        BigInt(shipment.id),
-      );
+      const activeSignerAddress = await signer.getAddress();
+      if (!await requireRegistration(
+        'Register your CargoChain profile to cancel a delivery request.',
+        activeSignerAddress,
+      )) return;
+
+      const tx = await sendWalletContractTransaction({
+        contract: contracts.deliveryEscrow,
+        method: 'cancelRequest',
+        args: [BigInt(shipment.id)],
+        signer,
+        provider,
+      });
       show(hasEscrow ? 'Cancelling request and refunding escrow...' : 'Cancelling request...', 'info');
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) throw new Error('Cancellation was not confirmed.');
@@ -309,8 +368,19 @@ export function Track() {
         throw new Error('This request is not currently eligible for a refund.');
       }
 
-      const refundContract = contracts.deliveryEscrow.connect(signer);
-      const tx = await refundContract.refundRemaining(BigInt(shipment.id));
+      const activeSignerAddress = await signer.getAddress();
+      if (!await requireRegistration(
+        'Register your CargoChain profile to claim the remaining escrow refund.',
+        activeSignerAddress,
+      )) return;
+
+      const tx = await sendWalletContractTransaction({
+        contract: contracts.deliveryEscrow,
+        method: 'refundRemaining',
+        args: [BigInt(shipment.id)],
+        signer,
+        provider,
+      });
       show('Claiming remaining escrow refund...', 'info');
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) throw new Error('Refund was not confirmed.');
@@ -359,15 +429,22 @@ export function Track() {
     setActionStage('submitting-proof');
 
     try{
+      const activeSignerAddress = await signer.getAddress();
+      if (!await requireRegistration(
+        'Register your CargoChain profile to submit milestone proof.',
+        activeSignerAddress,
+      )) return false;
+
       const hash = await hashFile(file);
       const uploadResult = await uploadPhoto(file, hash, shipment.id, milestoneId);
       const proofReference = `${uploadResult.url}?sha256=${encodeURIComponent(hash)}`;
-      const tx = await contracts.deliveryEscrow.connect(signer).submitProof(
-        BigInt(shipment.id),
-        BigInt(milestoneId),
-        [proofReference],
-        '',
-      );
+      const tx = await sendWalletContractTransaction({
+        contract: contracts.deliveryEscrow,
+        method: 'submitProof',
+        args: [BigInt(shipment.id), BigInt(milestoneId), [proofReference], ''],
+        signer,
+        provider,
+      });
       show('Submitting milestone proof on-chain...', 'info');
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) throw new Error('Proof submission was not confirmed.');
@@ -395,16 +472,28 @@ export function Track() {
     );
 
     try {
-      const tx = await contracts.deliveryEscrow
-        .connect(signer)
-        .verifyMilestone(
+      const activeSignerAddress = await signer.getAddress();
+      if (!await requireRegistration(
+        approve
+          ? 'Register your CargoChain profile to approve milestone proof.'
+          : 'Register your CargoChain profile to reject milestone proof.',
+        activeSignerAddress,
+      )) return;
+
+      const tx = await sendWalletContractTransaction({
+        contract: contracts.deliveryEscrow,
+        method: 'verifyMilestone',
+        args: [
           BigInt(shipment.id),
           BigInt(milestoneId),
           approve,
           approve
             ? ''
             : 'Proof rejected by shipper',
-        );
+        ],
+        signer,
+        provider,
+      });
 
       show(
         approve
@@ -486,6 +575,15 @@ export function Track() {
             <div className={styles.statusKicker}>Current status</div>
             <div className={styles.statusTitleRow}>
               <h2 className={styles.statusTitle}>{requestStatus(shipment.status)}</h2>
+              {shipment.carrier && (isShipper || isCarrier) && (
+                <ChatButton
+                  requestId={shipment.id}
+                  carrierWallet={isShipper ? shipment.carrier : undefined}
+                  label={isShipper ? 'Chat with carrier' : 'Chat with shipper'}
+                  variant="secondary"
+                  size="sm"
+                />
+              )}
             </div>
             <div className={styles.statusRoute}>
               <span>{shipment.from}</span>
@@ -524,11 +622,11 @@ export function Track() {
             </div>
           </div>
           <div className={styles.summaryField}>
-            <div className={styles.summaryFieldLabel}>Carrier address</div>
+            <div className={styles.summaryFieldLabel}>Carrier</div>
             <div className={styles.summaryFieldVal}>
               {shipment.carrier ? (
                 <span className={styles.addressVal} title={shipment.carrier}>
-                  {shortAddress(shipment.carrier)}
+                  {walletIdentityLabel(shipment.carrier, walletIdentities)}
                 </span>
               ) : (
                 <span className={styles.muted}>Awaiting proposal</span>
@@ -536,6 +634,10 @@ export function Track() {
             </div>
           </div>
         </div>
+
+        {shipment.items.length > 0 && (
+          <ShipmentContents items={shipment.items} />
+        )}
 
         {shipment.specialInstruction && (
           <div className={styles.specialNote}>
@@ -585,7 +687,7 @@ export function Track() {
         </div>
       )}
 
-      {shipment.status === 'Open' && (
+      {shipment.status === 'Open' && !isShipper && (
         <Card className={styles.proposalCard}>
           <div className={styles.proposalHeader}>
             <div>
@@ -613,8 +715,9 @@ export function Track() {
         </Card>
       )}
 
-      {hasRecordedProposals && (
+      {shipment.status === 'Open' && isShipper && (
         <ProposalReview
+          requestId={idParam}
           proposals={shipment.proposals}
           proposedAmount={shipment.proposedAmount}
           isShipper={isShipper}
@@ -623,13 +726,16 @@ export function Track() {
           actionStage={actionStage}
           onAccept={acceptProposal}
           onReject={rejectProposal}
+          walletIdentities={walletIdentities}
+          openShipment
+          showHistory={false}
         />
       )}
 
-      {milestonesApproved && (
+      {showShipmentTabs && (
         <Card padded={false} className={styles.tabsCard}>
           <div className={styles.tabsWrap}>
-            <Tabs items={TAB_ITEMS} value={tab} onChange={setTab} />
+            <Tabs items={tabItems} value={tab} onChange={setTab} />
           </div>
           <div className={styles.tabBody}>
             {tab === 'timeline' && (
@@ -638,6 +744,7 @@ export function Track() {
                 milestones={shipment.milestones}
                 selectedIndex={selectedIndex}
                 onSelect={setSelectedIndex}
+                walletIdentities={walletIdentities}
                 onViewProof={setProofViewerMilestone}
                 canVerify={isShipper}
                 canSubmitProof={proofSubmissionOpen}
@@ -655,6 +762,15 @@ export function Track() {
                 historyError={paymentHistoryError}
                 onCopyHash={copyTransactionHash}
                 onRetry={() => setRefreshKey((value) => value + 1)}
+              />
+            )}
+            {tab === 'proposal-history' && isShipper && (
+              <ProposalHistoryPanel
+                requestId={idParam}
+                proposals={proposalHistory}
+                proposedAmount={shipment.proposedAmount}
+                walletIdentities={walletIdentities}
+                collapsedByDefault={shipment.status === 'Open'}
               />
             )}
           </div>
@@ -679,7 +795,35 @@ function SummaryField({ label, value }) {
   );
 }
 
+function ShipmentContents({ items }) {
+  return (
+    <section className={styles.shipmentContents} aria-label="Shipment contents">
+      <div className={styles.shipmentContentsHeader}>
+        <HiOutlineCube aria-hidden="true" />
+        <div>
+          <div className={styles.summaryFieldLabel}>Shipment contents</div>
+          <div className={styles.shipmentContentsMeta}>
+            {items.length} item type{items.length === 1 ? '' : 's'}
+          </div>
+        </div>
+      </div>
+      <div className={styles.shipmentContentsList}>
+        {items.map((item, index) => (
+          <div key={`${item.name}-${index}`} className={styles.shipmentContentItem}>
+            <div>
+              <strong>{item.name}</strong>
+              {item.description && <span>{item.description}</span>}
+            </div>
+            <span>Qty {item.quantity}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function ProposalReview({
+  requestId,
   proposals,
   proposedAmount,
   isShipper,
@@ -688,6 +832,9 @@ function ProposalReview({
   actionStage,
   onAccept,
   onReject,
+  walletIdentities,
+  openShipment = false,
+  showHistory = true,
 }) {
   const [dateSort, setDateSort] = useState('');
   const [milestoneSort, setMilestoneSort] = useState('');
@@ -715,16 +862,34 @@ function ProposalReview({
       <Card className={styles.proposalCard}>
         <div className={styles.proposalHeader}>
           <div>
-            <div className={styles.proposalKicker}>Carrier proposals</div>
-            <h2>Compare milestone payout plans</h2>
-            <p>Selecting one plan locks {formatEth(proposedAmount)} in escrow and assigns that carrier.</p>
+            <div className={styles.proposalKicker}>{openShipment ? 'Open shipment' : 'Carrier proposals'}</div>
+            <h2>
+              {openShipment
+                ? activeProposals.length
+                  ? `${activeProposals.length} carrier proposal${activeProposals.length === 1 ? '' : 's'} ready to review`
+                  : 'No carrier proposal yet'
+                : 'Compare milestone payout plans'}
+            </h2>
+            <p>
+              {openShipment
+                ? activeProposals.length
+                  ? 'Compare each payout plan and select the carrier that should receive escrow funding.'
+                  : 'Carrier plans will appear here when they are submitted for your review.'
+                : `Selecting one plan locks ${formatEth(proposedAmount)} in escrow and assigns that carrier.`}
+            </p>
           </div>
           <Badge tone="warning">{activeProposals.length} active</Badge>
         </div>
 
         <div className={styles.proposalControls}>
-          <span>{activeProposals.length > 3 ? 'Showing three proposals at a time. Scroll to compare the rest.' : 'Open a proposal to inspect its milestone breakdown.'}</span>
-          <div className={styles.proposalSortControls}>
+          <span>
+            {activeProposals.length === 0
+              ? 'This request stays open until a carrier submits a milestone payout plan.'
+              : activeProposals.length > 3
+                ? 'Showing three proposals at a time. Scroll to compare the rest.'
+                : 'Open a proposal to inspect its milestone breakdown.'}
+          </span>
+          {activeProposals.length > 0 && <div className={styles.proposalSortControls}>
             <label className={styles.proposalSortLabel}>
               <span>Date</span>
               <select value={dateSort} onChange={(event) => setDateSort(event.target.value)}>
@@ -741,7 +906,7 @@ function ProposalReview({
                 <option value="fewest">Fewest first</option>
               </select>
             </label>
-          </div>
+          </div>}
         </div>
 
         {sortedProposals.length > 0 && (
@@ -750,6 +915,7 @@ function ProposalReview({
               <ProposalSummaryCard
                 key={proposal.id}
                 proposal={proposal}
+                walletIdentities={walletIdentities}
                 onOpen={() => setSelectedProposal(proposal)}
               />
             ))}
@@ -761,12 +927,14 @@ function ProposalReview({
             {!account
               ? 'Connect the shipper wallet to select a proposal.'
               : isShipper
-                ? 'Accept one plan to fund escrow, or reject individual plans without closing this request.'
+                ? activeProposals.length
+                  ? 'Accept one plan to fund escrow, or reject individual plans without closing this request.'
+                  : 'Your request remains visible in the marketplace while waiting for a carrier.'
                 : 'Each carrier can have one active proposal while the shipper reviews the options.'}
           </span>
         </div>
 
-        {historicalProposals.length > 0 && (
+        {showHistory && historicalProposals.length > 0 && (
           <details className={styles.proposalHistory}>
             <summary>Proposal history ({historicalProposals.length})</summary>
             <ul>
@@ -777,7 +945,7 @@ function ProposalReview({
                       className={styles.proposalHistoryEntry}
                       onClick={() => setSelectedProposal(proposal)}
                     >
-                      <span title={proposal.carrier}>{shortAddress(proposal.carrier)}</span>
+                      <span title={proposal.carrier}>{walletIdentityLabel(proposal.carrier, walletIdentities)}</span>
                       <Badge tone={proposalStatusTone(proposal.status)}>{proposal.status}</Badge>
                       <span>View details</span>
                     </button>
@@ -790,8 +958,10 @@ function ProposalReview({
 
       {selectedProposal && (
         <ProposalDetailModal
+          requestId={requestId}
           proposal={selectedProposal}
           proposedAmount={proposedAmount}
+          walletIdentities={walletIdentities}
           isShipper={isShipper}
           account={account}
           busy={busy}
@@ -805,12 +975,12 @@ function ProposalReview({
   );
 }
 
-function ProposalSummaryCard({ proposal, status, onOpen }) {
+function ProposalSummaryCard({ proposal, status, onOpen, walletIdentities }) {
   return (
     <button type="button" className={styles.proposalSummaryCard} onClick={onOpen}>
       <span className={styles.proposalSummaryIdentity}>
         <span className={styles.proposalCarrierLabel}>Carrier proposal #{proposal.id + 1}</span>
-        <strong title={proposal.carrier}>{shortAddress(proposal.carrier)}</strong>
+        <strong title={proposal.carrier}>{walletIdentityLabel(proposal.carrier, walletIdentities)}</strong>
       </span>
       <span className={styles.proposalSummaryMeta}>
         <span>{formatDate(proposal.createdAt)}</span>
@@ -824,6 +994,146 @@ function ProposalSummaryCard({ proposal, status, onOpen }) {
   );
 }
 
+function ProposalHistoryPanel({ requestId, proposals, proposedAmount, walletIdentities, collapsedByDefault = false }) {
+  const [dateSort, setDateSort] = useState('');
+  const [milestoneSort, setMilestoneSort] = useState('');
+  const [selectedProposal, setSelectedProposal] = useState(null);
+  const sortedProposals = [...proposals].sort((a, b) => {
+    const milestoneDifference = milestoneSort === 'most'
+      ? b.milestones.length - a.milestones.length
+      : milestoneSort === 'fewest'
+        ? a.milestones.length - b.milestones.length
+        : 0;
+    if (milestoneDifference) return milestoneDifference;
+    if (dateSort === 'oldest') return a.createdAt - b.createdAt;
+    if (dateSort === 'newest') return b.createdAt - a.createdAt;
+    return 0;
+  });
+
+  return (
+    <>
+      <div className={styles.proposalHistoryPanel}>
+        {collapsedByDefault ? (
+          <details className={styles.proposalHistoryDisclosure}>
+            <summary>
+              <span className={styles.proposalHistoryDisclosureTitle}>
+                <span className={styles.proposalKicker}>Recorded on-chain</span>
+                <strong>Proposal history</strong>
+              </span>
+              <span className={styles.proposalHistoryDisclosureMeta}>
+                {proposals.length > 0 && <Badge tone="neutral">{proposals.length} recorded</Badge>}
+                <HiOutlineChevronRight className={styles.proposalHistoryDisclosureChevron} aria-hidden="true" />
+              </span>
+            </summary>
+            <div className={styles.proposalHistoryDisclosureBody}>
+              <p>Review every carrier plan that was not selected for this delivery.</p>
+              <ProposalHistoryContent
+                proposals={proposals}
+                sortedProposals={sortedProposals}
+                dateSort={dateSort}
+                milestoneSort={milestoneSort}
+                onDateSort={setDateSort}
+                onMilestoneSort={setMilestoneSort}
+                onOpen={setSelectedProposal}
+                walletIdentities={walletIdentities}
+              />
+            </div>
+          </details>
+        ) : (
+          <>
+            <div className={styles.proposalHeader}>
+              <div>
+                <div className={styles.proposalKicker}>Recorded on-chain</div>
+                <h2>Proposal history</h2>
+                <p>Review every carrier plan that was not selected for this delivery.</p>
+              </div>
+              {proposals.length > 0 && <Badge tone="neutral">{proposals.length} recorded</Badge>}
+            </div>
+            <ProposalHistoryContent
+              proposals={proposals}
+              sortedProposals={sortedProposals}
+              dateSort={dateSort}
+              milestoneSort={milestoneSort}
+              onDateSort={setDateSort}
+              onMilestoneSort={setMilestoneSort}
+              onOpen={setSelectedProposal}
+              walletIdentities={walletIdentities}
+            />
+          </>
+        )}
+      </div>
+
+      {selectedProposal && (
+        <ProposalDetailModal
+          requestId={requestId}
+          proposal={selectedProposal}
+          proposedAmount={proposedAmount}
+          walletIdentities={walletIdentities}
+          isShipper={false}
+          account={null}
+          busy={false}
+          actionStage="idle"
+          onAccept={() => {}}
+          onReject={() => {}}
+          readOnly
+          onClose={() => setSelectedProposal(null)}
+        />
+      )}
+    </>
+  );
+}
+
+function ProposalHistoryContent({
+  proposals,
+  sortedProposals,
+  dateSort,
+  milestoneSort,
+  onDateSort,
+  onMilestoneSort,
+  onOpen,
+  walletIdentities,
+}) {
+  return proposals.length === 0 ? (
+    <div className={styles.proposalHistoryEmpty}>No earlier carrier proposal was recorded for this request.</div>
+  ) : (
+    <>
+            <div className={styles.proposalControls}>
+              <span>Open a proposal to inspect the milestone plan submitted by that carrier.</span>
+              <div className={styles.proposalSortControls}>
+                <label className={styles.proposalSortLabel}>
+                  <span>Date</span>
+                  <select value={dateSort} onChange={(event) => onDateSort(event.target.value)}>
+                    <option value="">No date sort</option>
+                    <option value="newest">Newest first</option>
+                    <option value="oldest">Oldest first</option>
+                  </select>
+                </label>
+                <label className={styles.proposalSortLabel}>
+                  <span>Milestones</span>
+                  <select value={milestoneSort} onChange={(event) => onMilestoneSort(event.target.value)}>
+                    <option value="">No milestone sort</option>
+                    <option value="most">Most first</option>
+                    <option value="fewest">Fewest first</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div className={styles.proposalList}>
+              {sortedProposals.map((proposal) => (
+                <ProposalSummaryCard
+                  key={proposal.id}
+                  proposal={proposal}
+                  status={proposal.status}
+                  walletIdentities={walletIdentities}
+                  onOpen={() => onOpen(proposal)}
+                />
+              ))}
+            </div>
+    </>
+  );
+}
+
 function proposalStatusTone(status) {
   if (status === 'Rejected') return 'danger';
   if (status === 'Accepted') return 'success';
@@ -831,14 +1141,17 @@ function proposalStatusTone(status) {
 }
 
 function ProposalDetailModal({
+  requestId,
   proposal,
   proposedAmount,
+  walletIdentities,
   isShipper,
   account,
   busy,
   actionStage,
   onAccept,
   onReject,
+  readOnly = false,
   onClose,
 }) {
   useEffect(() => {
@@ -861,7 +1174,7 @@ function ProposalDetailModal({
         <div className={styles.proposalPlanHeader}>
           <div>
             <span className={styles.proposalCarrierLabel}>Carrier proposal #{proposal.id + 1}</span>
-            <strong id="proposal-modal-title" title={proposal.carrier}>{shortAddress(proposal.carrier)}</strong>
+            <strong id="proposal-modal-title" title={proposal.carrier}>{walletIdentityLabel(proposal.carrier, walletIdentities)}</strong>
             <span className={styles.proposalCreated}>Submitted {formatDate(proposal.createdAt)}</span>
           </div>
           <div className={styles.proposalModalHeaderActions}>
@@ -902,16 +1215,33 @@ function ProposalDetailModal({
             ))}
           </ol>
         </div>
-        {isShipper && proposal.status === 'Active' && (
-          <div className={styles.proposalActions}>
-            <Button variant="danger" onClick={() => onReject(proposal.id)} disabled={busy}>
-              {actionStage === 'rejecting' ? 'Rejecting...' : 'Reject proposal'}
-            </Button>
-            <Button onClick={() => onAccept(proposal.id)} disabled={busy}>
-              {actionStage === 'accepting' ? 'Confirming...' : 'Accept & fund escrow'}
-            </Button>
-          </div>
-        )}
+        <div className={styles.proposalActions} style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'flex-end', marginTop: '16px' }}>
+          {isShipper && (
+            <ChatButton
+              requestId={requestId}
+              carrierWallet={proposal.carrier}
+              label="Message Carrier"
+              variant="secondary"
+            />
+          )}
+          {!isShipper && account && account.toLowerCase() === proposal.carrier.toLowerCase() && (
+            <ChatButton
+              requestId={requestId}
+              label="Message Shipper"
+              variant="primary"
+            />
+          )}
+          {isShipper && proposal.status === 'Active' && !readOnly && (
+            <>
+              <Button variant="danger" onClick={() => onReject(proposal.id)} disabled={busy}>
+                {actionStage === 'rejecting' ? 'Rejecting...' : 'Reject proposal'}
+              </Button>
+              <Button onClick={() => onAccept(proposal.id)} disabled={busy}>
+                {actionStage === 'accepting' ? 'Confirming...' : 'Accept & fund escrow'}
+              </Button>
+            </>
+          )}
+        </div>
         {!isShipper && account && account.toLowerCase() === proposal.carrier.toLowerCase() && (
           <span className={styles.proposalOwnerNote}>This is your active proposal.</span>
         )}
@@ -925,6 +1255,7 @@ function TimelinePanel({
   milestones,
   selectedIndex,
   onSelect,
+  walletIdentities,
   onViewProof,
   canVerify,
   busy,
@@ -988,7 +1319,9 @@ function TimelinePanel({
             {selectedEvent.actor && (
               <div className={styles.sidebarField}>
                 <span className={styles.sidebarLabel}>Actor</span>
-                <span className={styles.sidebarValueAddress}>{selectedEvent.actor}</span>
+                <span className={styles.sidebarValueAddress} title={selectedEvent.actor}>
+                  {walletIdentityLabel(selectedEvent.actor, walletIdentities)}
+                </span>
               </div>
             )}
             {hasPhotoProof && (
@@ -1424,10 +1757,11 @@ function PaymentRow({ label, value }) {
 
 async function loadShipment(deliveryEscrow, idParam) {
   const requestId = BigInt(idParam);
-  const [request, milestoneResult, proposalResult] = await Promise.all([
+  const [request, milestoneResult, proposalResult, itemResult] = await Promise.all([
     deliveryEscrow.getRequest(requestId),
     deliveryEscrow.getMilestones(requestId),
     deliveryEscrow.getProposals(requestId),
+    deliveryEscrow.getItems(requestId),
   ]);
 
   const shipper = request.shipper ?? request[1];
@@ -1465,6 +1799,11 @@ async function loadShipment(deliveryEscrow, idParam) {
       })),
     };
   }));
+  const items = Array.from(itemResult || []).map((item) => ({
+    name: item.itemName ?? item[0],
+    description: item.itemDescription ?? item[1],
+    quantity: Number(item.quantity ?? item[2] ?? 0),
+  }));
 
   return {
     id: Number(request.requestId ?? request[0]),
@@ -1481,6 +1820,7 @@ async function loadShipment(deliveryEscrow, idParam) {
     released,
     refunded,
     remaining: escrow - released - refunded,
+    items,
     milestones,
     proposals,
     events: buildTimelineEvents({ shipper, carrier, createdAt, proposedAmount, milestones }),
@@ -1569,12 +1909,6 @@ function formatActionError(error) {
     return 'Transaction cancelled in MetaMask.';
   }
   const message = error?.shortMessage || error?.reason || error?.message || '';
-  if (
-    message.includes('missing revert data')
-    || (error?.code === 'CALL_EXCEPTION' && !error?.data)
-  ) {
-    return 'The deployed DeliveryEscrow contract is outdated. Run npm run compile and npm run migrate, then refresh this page.';
-  }
   if (message.includes('insufficient funds')) return 'The shipper wallet does not have enough ETH.';
   if (message.includes('caller is not shipper')) return 'Only the request shipper can perform this action.';
   if (message.includes('proposal is not active')) return 'This proposal is no longer active. Refresh the request and choose another plan.';
@@ -1585,7 +1919,7 @@ function formatActionError(error) {
   if (message.includes('no escrow remaining')) return 'There is no remaining escrow to refund.';
   if (message.includes('request already refunded')) return 'This request has already been refunded.';
   if (message.includes('request is not active')) return 'Proof submission is closed because this request is no longer active.';
-  return message || 'The shipment transaction failed.';
+  return formatWalletTransactionError(error, message || 'The shipment transaction failed.');
 }
 
 function formatHistoryError(error) {

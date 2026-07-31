@@ -1,7 +1,7 @@
 // src/context/ContractsContext.jsx — CargoChain
-// Instantiates the 5 contract handles once `provider` is available from
-// Web3Context. Each handle is a read-only Contract (no signer) — for
-// write calls, the page does `contract.connect(signer).method(...)`.
+// Instantiates and validates contract handles once `provider` is available from
+// Web3Context. Each handle remains read-only; wallet writes use the shared
+// transaction executor so MetaMask never becomes the read/estimation RPC.
 //
 // If no deployment exists for the current network, `deployError` is set
 // and `contracts` stays null. Pages render the error message and prompt
@@ -9,26 +9,45 @@
 
 import { createContext, useContext, useEffect, useState } from 'react';
 import { useWallet } from './Web3Context.jsx';
-import { buildContractMap } from '../contracts/index.js';
+import { buildContractMap, validateContractMap } from '../contracts/index.js';
 
 const ContractsContext = createContext(null);
 
 export function ContractsProvider({ children }) {
-  const { provider, chainId } = useWallet();
+  const { provider, rpcChainId } = useWallet();
   const [contracts,   setContracts]   = useState(null);
   const [deployError, setDeployError] = useState(null);
 
   useEffect(() => {
-    if (!provider || chainId == null) return;
-
-    try {
-      setContracts(buildContractMap(provider, chainId));
-      setDeployError(null);
-    } catch (e) {
+    let cancelled = false;
+    if (!provider || rpcChainId == null) {
       setContracts(null);
-      setDeployError(e.message);
+      setDeployError(null);
+      return () => { cancelled = true; };
     }
-  }, [provider, chainId]);
+
+    setContracts(null);
+    setDeployError(null);
+
+    const initializeContracts = async () => {
+      try {
+        const nextContracts = buildContractMap(provider, rpcChainId);
+        await validateContractMap(provider, nextContracts);
+        if (!cancelled) {
+          setContracts(nextContracts);
+          setDeployError(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setContracts(null);
+          setDeployError(error.message || 'Could not validate the CargoChain deployment.');
+        }
+      }
+    };
+
+    initializeContracts();
+    return () => { cancelled = true; };
+  }, [provider, rpcChainId]);
 
   return (
     <ContractsContext.Provider value={{ contracts, deployError }}>

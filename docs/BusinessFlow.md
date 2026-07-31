@@ -34,14 +34,14 @@ CargoChain is a decentralised escrow + milestone-based logistics DApp. ETH is lo
 | **Shipper** | `Role.Shipper` wallet | Create delivery requests, approve milestone proposals, fund escrow, verify / reject proof, request refund. |
 | **Carrier** | `Role.Carrier` wallet | Browse open requests, propose milestone plan, submit milestone proof (URIs). |
 | **Smart contract** | `DeliveryEscrow`, `MilestoneVerifier`, `LifecycleManager` | Holds ETH, enforces state transitions, releases payments, issues refunds. |
-| **Off-chain upload server** | Express `/uploads` endpoint (Node.js) | Accepts proof image POSTs, stores file, returns content-addressable URI / SHA-256 hash. |
+| **Supabase Storage** | `milestone-proofs` bucket | Stores proof images off-chain and returns public URLs; the browser computes each SHA-256 hash. |
 
 ---
 
 ## 4. Core happy path
 
 ```
-Shipper                  Carrier                Smart Contract           Upload Server
+Shipper                  Carrier                Smart Contract           Supabase Storage
    │                       │                       │                        │
    ├─ createRequest() ────►│                       │ stores Open            │
    │  (items, locations,   │                       │                        │
@@ -62,9 +62,9 @@ Shipper                  Carrier                Smart Contract           Upload 
    │                                               │                        │
    │                       │  delivery starts      │ status=InProgress      │
    │                       │                       │                        │
-   │                       ├─ POST /uploads ──────────────────────────────►│
+   │                       ├─ upload proof ──────────────────────────────►│
    │                       │  (photo)              │                        │
-   │                       │◄─────────────── ipfs://... / sha256:... ──────┤
+   │                       │◄──────────────────── public URL ──────────────┤
    │                       │                       │                        │
    │                       ├─ submitProof(         │                        │
    │                       │   milestoneId, uri[], │ milestone.status=      │

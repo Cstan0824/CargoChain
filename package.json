@@ -4,36 +4,42 @@
   "private": true,
   "description": "CargoChain — Decentralised escrow and milestone-based logistics tracking DApp on Ethereum (BMIS2003 TARUMT Y3S1).",
   "scripts": {
-    "dev": "vite",
-    "dev:all": "concurrently -n upload,vite -c green,magenta \"node server/upload-server.js\" \"npm run dev\"",
+    "dev": "vite --host 127.0.0.1",
+    "dev:all": "node scripts/dev-launcher.js",
     "chain": "ganache --wallet.deterministic --server.host 127.0.0.1 --server.port 7545 --chain.chainId 1337 --chain.networkId 1337",
     "build": "vite build",
     "preview": "vite preview --port 8080",
     "compile": "truffle compile",
     "migrate": "truffle migrate --reset --network development",
     "test": "truffle test",
+    "test:frontend": "vitest run",
     "test:scenarios": "truffle exec scripts/run-scenarios.js",
-    "upload-server": "node server/upload-server.js",
-    "start": "node scripts/dev-launcher.js"
+    "server": "node server/index.js",
+    "start": "npm run dev:all"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.7",
     "@truffle/hdwallet-provider": "^2.1.4",
     "ethers": "^6.13.0",
     "express": "^4.19.2",
-    "multer": "^1.4.5-lts.1",
+    "jsonwebtoken": "^9.0.3",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "react-icons": "^5.7.0",
     "react-router-dom": "^6.26.0",
+    "siwe": "^3.0.0",
     "truffle": "^5.11.5"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@testing-library/user-event": "^14.5.2",
     "@vitejs/plugin-react": "^4.3.0",
-    "concurrently": "^9.0.0",
     "dotenv": "^16.4.5",
     "ganache": "^7.9.2",
-    "vite": "^5.4.0"
+    "jsdom": "^25.0.1",
+    "vite": "^5.4.0",
+    "vitest": "^2.1.9"
   },
   "engines": {
     "node": ">=18.0.0"

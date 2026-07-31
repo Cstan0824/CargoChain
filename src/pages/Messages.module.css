@@ -1,0 +1,40 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 40px);
+  max-height: calc(100vh - 40px);
+  padding: 0 var(--s-6) var(--s-4);
+}
+
+.shell {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-md);
+}
+
+.sidebar { width: 340px; flex: 0 0 340px; border-right: 1px solid var(--border-soft); }
+.conversation { display: flex; flex: 1; min-width: 0; flex-direction: column; background: var(--bg-subtle); }
+
+.emptyConversation {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s-8);
+  color: var(--text-secondary);
+  text-align: center;
+}
+.emptyConversation svg { width: 32px; height: 32px; margin-bottom: var(--s-4); color: var(--primary); }
+.emptyConversation h2 { margin: 0; color: var(--text-primary); font-size: var(--fs-lg); }
+.emptyConversation p { max-width: 300px; margin: var(--s-2) 0 0; font-size: var(--fs-sm); }
+.emptyConversation button { min-height: 40px; margin-top: var(--s-5); padding: 0 14px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-surface); color: var(--text-primary); font-size: var(--fs-sm); font-weight: var(--fw-semibold); cursor: pointer; }
+.emptyConversation button:active { transform: scale(0.96); }
+
+@media (max-width: 900px) { .page { padding: 0 var(--s-4) var(--s-4); } }
+@media (max-width: 767px) { .sidebar { width: 100%; flex-basis: 100%; border-right: 0; } }

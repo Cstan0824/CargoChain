@@ -21,8 +21,8 @@
 | Complexity | Low |
 | Effort | ~4 hours |
 | Files | `src/context/Web3Context.jsx`, `src/hooks/useWallet.js`, `src/components/ConnectButton.jsx`, `src/components/Navbar.jsx` |
-| Frontend | Detect `window.ethereum`, prompt MetaMask, handle account-switch, expose `{ account, chainId, provider, signer }` |
-| Backend (contract) | — (uses ethers `BrowserProvider`) |
+| Frontend | Detect `window.ethereum`, prompt MetaMask, handle account-switch, expose separate `{ rpcChainId, walletChainId, provider, signer }` state |
+| Backend (contract) | Reads use ethers `JsonRpcProvider`; writes use a queued MetaMask signer pipeline |
 | Test | Inject mock `window.ethereum`, verify hook returns expected shape |
 
 ### a.2 — Role Detection & Registration (R2)
@@ -181,8 +181,8 @@
 |---|---|
 | Complexity | Med |
 | Effort | ~8 hours |
-| Files | `contracts/MilestoneVerifier.sol`, `src/pages/Carrier.jsx`, `src/utils/upload.js`, `server/upload-server.js` |
-| Frontend | Carrier selects milestone → uploads photo → `crypto.subtle.digest('SHA-256', arrayBuffer)` → POST to `/uploads` → call `submitProof(requestId, milestoneId, hash)` |
+| Files | `contracts/DeliveryEscrow.sol`, `src/pages/Track.jsx`, `src/utils/upload.js` |
+| Frontend | Carrier selects milestone → hashes photo with `crypto.subtle.digest('SHA-256', arrayBuffer)` → uploads to Supabase Storage → calls `submitProof(...)` with the proof URL and hash |
 | Backend | `submitProof(requestId, milestoneId, bytes32 proofHash)` — only carrier; status: AwaitingProof → Submitted |
 | Events | `MilestoneSubmitted(requestId, milestoneId, proofHash, carrier)` |
 | Invariants | Only `request.carrier == msg.sender`; status must be AwaitingProof |
@@ -271,9 +271,9 @@
 |---|---|
 | Complexity | Med-High |
 | Effort | ~10 hours |
-| Files | `src/utils/upload.js`, `src/pages/Carrier.jsx`, `server/upload-server.js` |
-| Frontend | File → `FileReader.readAsArrayBuffer` → `crypto.subtle.digest('SHA-256')` → POST `/uploads` (multipart) → returns `{hash, url}` → call `submitProof(hash)` |
-| Backend | Express `multer` middleware; stores at `/uploads/{hashprefix}.jpg` |
+| Files | `src/utils/upload.js`, `src/pages/Track.jsx`, `src/lib/supabase.js` |
+| Frontend | File → `file.arrayBuffer()` → `crypto.subtle.digest('SHA-256')` → upload to Supabase Storage → returns `{hash, url}` → call `submitProof(...)` |
+| Storage | Supabase `milestone-proofs` bucket; the Express chat API is not involved |
 | Invariants | Hash matches upload; file size limit; MIME check |
 | Test | Upload 1KB → assert hash matches `sha256sum`; reject oversized files |
 

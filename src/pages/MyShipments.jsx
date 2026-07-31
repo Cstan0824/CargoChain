@@ -6,13 +6,14 @@ import { useNavigate } from 'react-router-dom';
 import { Topbar } from '../components/Topbar.jsx';
 import { Card } from '../components/Card.jsx';
 import { Button } from '../components/Button.jsx';
+import { ChatButton } from '../components/chat/ChatButton.jsx';
 import { Badge } from '../components/Badge.jsx';
 import { SearchInput } from '../components/SearchInput.jsx';
 import { EmptyState } from '../components/EmptyState.jsx';
 import { ProgressLine } from '../components/ProgressLine.jsx';
 import { CreateRequestModal } from '../components/CreateRequestModal.jsx';
 import { clipboardRouteMap } from '../assets';
-import { HiOutlineChevronRight } from 'react-icons/hi2';
+import { HiOutlineChevronRight, HiOutlineXMark } from 'react-icons/hi2';
 import { useWallet } from '../hooks/useWallet.js';
 import { useContracts } from '../hooks/useContracts.js';
 import {
@@ -44,6 +45,7 @@ export function MyShipments() {
   const [search, setSearch] = useState('');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [historyShipment, setHistoryShipment] = useState(null);
 
   useEffect(() => {
     if (!account || !contracts?.deliveryEscrow) {
@@ -92,7 +94,21 @@ export function MyShipments() {
     });
   }, [rows, filter, search]);
 
-  const openShipment = (row) => navigate(`/track/${row.id}`);
+  const openShipment = (row) => {
+    if (row.hasActiveProposal) {
+      navigate(`/shipments/${row.id}/propose`);
+      return;
+    }
+
+    if (row.isShipper || row.isCarrier) {
+      navigate(`/track/${row.id}`);
+      return;
+    }
+
+    if (row.ownHistoricalProposals.length > 0) {
+      setHistoryShipment(row);
+    }
+  };
 
   return (
     <div className={styles.page}>
@@ -132,10 +148,8 @@ export function MyShipments() {
 
       {deployError && (
         <Card className={styles.notice}>
-          <strong>Contracts not deployed.</strong>{' '}
-          <span className={styles.muted}>
-            Run <code>npm run migrate</code> to load your on-chain shipments.
-          </span>
+          <strong>Contract connection unavailable.</strong>{' '}
+          <span className={styles.muted}>{deployError}</span>
         </Card>
       )}
 
@@ -214,7 +228,7 @@ export function MyShipments() {
                       </span>
                     </td>
                     <td>
-                      <Badge tone={REQUEST_TONE[r.status] || 'neutral'}>{requestStatus(r.status)}</Badge>
+                      <Badge tone={shipmentStatus(r).tone}>{shipmentStatus(r).label}</Badge>
                     </td>
                     <td>
                       <div className={styles.deadlineCell}>
@@ -223,13 +237,22 @@ export function MyShipments() {
                       </div>
                     </td>
                     <td onClick={(e) => e.stopPropagation()}>
-                      <div className={styles.actionCell}>
+                      <div className={styles.actionCell} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {shouldShowShipmentChat(r) && (
+                          <ChatButton
+                            requestId={r.id}
+                            carrierWallet={shipmentChatCarrier(r)}
+                            label="Chat"
+                            variant="secondary"
+                            size="sm"
+                          />
+                        )}
                         <button
                           type="button"
                           className={`${styles.iconBtn} ${styles.chevBtn}`}
                           onClick={() => openShipment(r)}
-                          title="Open shipment timeline"
-                          aria-label={`Open timeline for shipment ${r.id}`}
+                          title={shipmentActionLabel(r)}
+                          aria-label={`${shipmentActionLabel(r)} for shipment ${r.id}`}
                         >
                           <HiOutlineChevronRight size={15} />
                         </button>
@@ -248,6 +271,17 @@ export function MyShipments() {
         onClose={() => setIsCreateModalOpen(false)}
         onSuccess={() => setRefreshKey((value) => value + 1)}
       />
+
+      {historyShipment && (
+        <CarrierProposalHistoryModal
+          shipment={historyShipment}
+          onResubmit={(proposal) => {
+            setHistoryShipment(null);
+            navigate(`/shipments/${historyShipment.id}/propose?resubmit=${proposal.id}`);
+          }}
+          onClose={() => setHistoryShipment(null)}
+        />
+      )}
     </div>
   );
 }
@@ -264,14 +298,43 @@ async function loadWalletShipments(deliveryEscrow, account) {
       const request = await deliveryEscrow.getRequest(id);
       const shipper = request.shipper ?? request[1];
       const carrier = request.carrier ?? request[2];
+      const assignedCarrier = isZeroAddress(carrier) ? null : carrier;
       const isShipper = shipper.toLowerCase() === normalizedAccount;
-      const isCarrier = !isZeroAddress(carrier) && carrier.toLowerCase() === normalizedAccount;
+      const isCarrier = Boolean(assignedCarrier) && assignedCarrier.toLowerCase() === normalizedAccount;
       const proposals = await deliveryEscrow.getProposals(id);
-      const hasActiveProposal = Array.from(proposals || []).some((proposal) => (
-        Number(proposal.status ?? proposal[1]) === 0
-        && (proposal.carrier ?? proposal[0]).toLowerCase() === normalizedAccount
-      ));
-      if (!isShipper && !isCarrier && !hasActiveProposal) return null;
+      const activeProposalCarriers = Array.from(proposals || [])
+        .filter((proposal) => Number(proposal.status ?? proposal[1]) === 0)
+        .map((proposal) => proposal.carrier ?? proposal[0]);
+      const ownProposals = Array.from(proposals || []).reduce((result, proposal, proposalId) => {
+        const proposalCarrier = proposal.carrier ?? proposal[0];
+        if (proposalCarrier.toLowerCase() === normalizedAccount) {
+          result.push({
+            id: proposalId,
+            status: PROPOSAL_STATUS[Number(proposal.status ?? proposal[1])] || 'Unknown',
+            createdAt: Number(proposal.createdAt ?? proposal[2] ?? 0n),
+          });
+        }
+        return result;
+      }, []);
+      const hasActiveProposal = ownProposals.some((proposal) => proposal.status === 'Active');
+      const hasAnyActiveProposal = Array.from(proposals || []).some(
+        (proposal) => Number(proposal.status ?? proposal[1]) === 0,
+      );
+      const ownHistoricalProposals = await Promise.all(
+        ownProposals
+          .filter((proposal) => proposal.status !== 'Active')
+          .map(async (proposal) => {
+            const proposalMilestones = await deliveryEscrow.getProposalMilestones(id, proposal.id);
+            return {
+              ...proposal,
+              milestones: Array.from(proposalMilestones || []).map((milestone) => ({
+                name: milestone.name ?? milestone[0],
+                payoutPercentage: Number(milestone.payoutPercentage ?? milestone[1]),
+              })),
+            };
+          }),
+      );
+      if (!isShipper && !isCarrier && !hasActiveProposal && !ownHistoricalProposals.length) return null;
 
       const milestones = await deliveryEscrow.getMilestones(id);
       const milestoneRows = Array.from(milestones || []);
@@ -287,8 +350,14 @@ async function loadWalletShipments(deliveryEscrow, account) {
         status: requestStatus(request.status ?? request[9]),
         milestones: milestoneRows.length,
         current: milestoneRows.filter((milestone) => Number(milestone.status ?? milestone[6]) === 5).length,
-        relationship: isShipper ? 'Shipper' : isCarrier ? 'Carrier' : 'Carrier proposal',
+        relationship: isShipper ? 'Shipper' : isCarrier ? 'Carrier' : hasActiveProposal ? 'Carrier proposal' : 'Proposal history',
         isShipper,
+        isCarrier,
+        carrier: assignedCarrier,
+        activeProposalCarriers,
+        hasActiveProposal,
+        hasAnyActiveProposal,
+        ownHistoricalProposals,
       };
     }),
   );
@@ -296,6 +365,117 @@ async function loadWalletShipments(deliveryEscrow, account) {
   return requests
     .filter(Boolean)
     .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+const PROPOSAL_STATUS = ['Active', 'Revoked', 'Rejected', 'Accepted'];
+
+function shipmentChatCarrier(row) {
+  if (!row.isShipper) return undefined;
+  if (row.carrier) return row.carrier;
+  return row.activeProposalCarriers.length === 1 ? row.activeProposalCarriers[0] : undefined;
+}
+
+function shouldShowShipmentChat(row) {
+  if (row.isShipper) return Boolean(shipmentChatCarrier(row));
+  return row.hasActiveProposal || row.isCarrier;
+}
+
+function shipmentActionLabel(row) {
+  if (row.hasActiveProposal) return 'Open active proposal';
+  if (row.isShipper || row.isCarrier) return 'Open shipment timeline';
+  return 'View proposal history';
+}
+
+function shipmentStatus(row) {
+  if (row.isShipper && row.status === 'Open' && row.hasAnyActiveProposal) {
+    return { label: 'Review pending', tone: 'warning' };
+  }
+
+  if (!row.isShipper && row.hasActiveProposal) {
+    return { label: 'Awaiting review', tone: 'warning' };
+  }
+
+  if (!row.isShipper && !row.isCarrier && row.ownHistoricalProposals.length > 0) {
+    const hasRejectedProposal = row.ownHistoricalProposals.some((proposal) => proposal.status === 'Rejected');
+    return hasRejectedProposal
+      ? { label: 'Rejected', tone: 'danger' }
+      : { label: 'Proposal archived', tone: 'neutral' };
+  }
+
+  return {
+    label: requestStatus(row.status),
+    tone: REQUEST_TONE[row.status] || 'neutral',
+  };
+}
+
+function CarrierProposalHistoryModal({ shipment, onResubmit, onClose }) {
+  const proposals = [...shipment.ownHistoricalProposals]
+    .sort((a, b) => b.createdAt - a.createdAt);
+
+  return (
+    <div className={styles.historyOverlay} role="presentation" onMouseDown={onClose}>
+      <section
+        className={styles.historyModal}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="carrier-proposal-history-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className={styles.historyModalHeader}>
+          <div>
+            <span className={styles.historyKicker}>Carrier proposal history</span>
+            <h2 id="carrier-proposal-history-title">Shipment #{String(shipment.id).padStart(4, '0')}</h2>
+            <p>{shipment.from} → {shipment.to}</p>
+          </div>
+          <button type="button" className={styles.historyClose} onClick={onClose} aria-label="Close proposal history">
+            <HiOutlineXMark aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className={styles.historyModalBody}>
+          <p className={styles.historyIntro}>
+            These submitted plans remain recorded on-chain, even after a shipper decision.
+          </p>
+          <div className={styles.historyProposalList}>
+            {proposals.map((proposal) => (
+              <article key={proposal.id} className={styles.historyProposalCard}>
+                <div className={styles.historyProposalHead}>
+                  <div>
+                    <span>Proposal #{proposal.id + 1}</span>
+                    <strong>Submitted {formatDate(proposal.createdAt)}</strong>
+                  </div>
+                  <Badge tone={proposalStatusTone(proposal.status)}>{proposal.status}</Badge>
+                </div>
+                <ol className={styles.historyMilestoneList}>
+                  {proposal.milestones.map((milestone, index) => (
+                    <li key={`${proposal.id}-${milestone.name}-${index}`}>
+                      <span className={styles.historyMilestoneIndex}>{index + 1}</span>
+                      <span>{milestone.name}</span>
+                      <strong>{milestone.payoutPercentage}%</strong>
+                    </li>
+                  ))}
+                </ol>
+                {shipment.status === 'Open' && !shipment.hasActiveProposal && proposal.status === 'Rejected' && (
+                  <div className={styles.historyProposalActions}>
+                    <Button size="sm" onClick={() => onResubmit(proposal)}>
+                      Resubmit this plan
+                    </Button>
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function proposalStatusTone(status) {
+  if (status === 'Rejected') return 'danger';
+  if (status === 'Revoked') return 'neutral';
+  if (status === 'Accepted') return 'success';
+  return 'warning';
 }
 
 function isZeroAddress(address) {

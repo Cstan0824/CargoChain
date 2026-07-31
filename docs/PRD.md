@@ -3,7 +3,7 @@
 > **v4 (2026-07-06)** — generated from the current repo state after the
 > 9:30 PM review session. Captures every change since PRD v3:
 > the React 18 + Vite + ethers.js v6 stack flip, the Vite proxy +
-> `concurrently` dev launcher, the new SECURITY policy, the new
+> sequenced local dev launcher, the new SECURITY policy, the new
 > `.env.example`, the agent-skill configuration, and the deferred
 > Sepolia testnet decision.
 >
@@ -11,9 +11,9 @@
 > 1. **Frontend stack flip** — plain HTML/CSS/JS + Web3.js v1.x → React 18 + Vite + ethers.js v6 (project owner decision 2026-07-06). The course syllabus permits either; v4 picks the modern option because the team's 5 members all know React already and ethers v6 has cleaner async semantics than Web3 v1.
 > 2. **Sepolia deferred** — was an active "demo testnet" in v3; now explicitly a *future plan* (not part of v1). Ganache is the v1 chain.
 > 3. **`SECURITY.md` added** — supported-versions policy, vulnerability reporting, secret-handling rules.
-> 4. **`.env.example` added** — UPLOAD_PORT, optional VITE_DEV_PORT, commented-out Sepolia block for the future PR.
-> 5. **`vite.config.js` added** — port 5173, `/uploads` proxy to Express server on `:3000`.
-> 6. **`npm run dev:all` launcher** — concurrently runs Ganache + Express + Vite in one terminal with prefixed logs (`[ganache]`, `[upload]`, `[vite]`).
+> 4. **`.env.example` added** — local chain, SIWE, and Supabase configuration plus a commented-out Sepolia block for the future PR.
+> 5. **`vite.config.js` added** — React/Vite development on port 5173.
+> 6. **`npm run dev:all` launcher** — runs Ganache, migration, the Express API, and Vite in one terminal.
 > 7. **React skeleton committed** — `src/pages/{Marketplace,Shipper,Carrier,Track}.jsx` stubs, plus `src/components/{Navbar,ConnectButton,RequireWallet}.jsx`, `src/context/{Web3,Contracts,Toast}.jsx`, `src/hooks/{useWallet,useContracts,useToast}.js`, `src/utils/{format,upload}.js`. Pages are stubs today — team members fill them in module-by-module.
 > 8. **Agent-skill configuration** — `.agents/`, `.claude/`, `skills-lock.json` added so coding agents (Claude Code etc.) pick up the `make-interfaces-feel-better` skill by default.
 >
@@ -48,16 +48,16 @@ Replace intermediaries in cross-region logistics with a transparent, code-enforc
 
 ### 1.5 Local-only Operation (v1)
 
-CargoChain v1 runs **entirely on the developer's laptop** — no public chain, no IPFS, no cloud dependency. Four services, all bound to `127.0.0.1`:
+CargoChain v1 uses a local Ganache chain and local application servers, with Supabase for private chat records and proof-image storage:
 
 | Service | Port | Purpose |
 |---|---|---|
 | **Ganache** (CLI, deterministic mode) | `7545` | Local Ethereum chain |
-| **Express upload server** (`server/upload-server.js`) | `3000` | Photo storage (`/uploads/{sha256prefix}.jpg`) |
-| **Vite dev server** | `5173` (auto-bumps to `5174+` if taken) | React app + `/uploads` proxy to `:3000` |
+| **Express CargoChain API** (`server/index.js`) | `3000` | SIWE authentication and private chat authorization |
+| **Vite dev server** | `5173` | React app |
 | **Truffle** | (CLI only) | Compile + migrate + test |
 
-All four launch with `npm run dev:all`. See § 6.3 for the launcher details.
+The local stack launches with `npm run dev:all`. See § 6.3 for the launcher details.
 
 ---
 
@@ -135,10 +135,10 @@ The v4 split is **identical to v3** for modules a–d. Module e expanded signifi
 | Frontend | **React 18 + Vite** (plain JavaScript, no TypeScript) | v4 decision 2026-07-06; supersedes the v3 "plain HTML/CSS/JS" choice |
 | Routing | **react-router-dom v6** | 4 routes: `/`, `/shipper`, `/carrier`, `/track/:id?` |
 | Wallet client library | **ethers.js v6** | v4 decision 2026-07-06; supersedes the v3 "Web3.js v1.x" choice |
-| Photo upload | Express.js server on `:3000`, browser `crypto.subtle.digest('SHA-256', …)` → POST | No need for full IPFS cluster for an assignment |
-| Photo storage | `/uploads/{sha256prefix}.jpg` on demo server | Group decision; matches the spec |
-| Build tool | **Vite** (port 5173, `/uploads` proxy → `:3000`) | Fast HMR, ESM-native, no Webpack config |
-| Dev launcher | **`npm run dev:all`** (`concurrently`) | One terminal, prefixed logs: `[ganache]`, `[upload]`, `[vite]` |
+| Photo upload | Browser `crypto.subtle.digest('SHA-256', …)` then Supabase Storage upload | Keeps image bytes off-chain while preserving content hashes |
+| Photo storage | Supabase `milestone-proofs` bucket | Shared proof access across teammates |
+| Build tool | **Vite** (port 5173) | Fast HMR, ESM-native, no Webpack config |
+| Dev launcher | **`npm run dev:all`** | Ganache → migration → `[api]` + `[vite]` |
 | Tests | Mocha + Chai (Truffle built-in) | Lab 8.2 style |
 | Time-travel tests | Truffle helpers + `evm_increaseTime` + `evm_mine` | Needed for R9 auto-republish tests |
 
@@ -197,9 +197,7 @@ CargoChain/
 │   ├── contracts/          # getContract() factory (reads build/contracts/*.json)
 │   ├── utils/              # format, upload
 │   └── css/                # global stylesheet
-├── server/
-│   └── upload-server.js    # Express upload (port 3000)
-├── uploads/                # Local photo storage (gitignored)
+├── server/                 # Express SIWE/private chat API (port 3000)
 ├── docs/
 │   ├── PRD.md              # this file
 │   ├── Spec.md             # technical spec
@@ -209,7 +207,7 @@ CargoChain/
 ├── dist/                   # Vite build output (gitignored)
 ├── node_modules/           # npm deps (gitignored)
 ├── truffle-config.js       # Ganache default; Sepolia commented (future plan)
-├── vite.config.js          # port 5173, /uploads proxy -> :3000
+├── vite.config.js          # Vite on 127.0.0.1:5173
 ├── package.json
 ├── package-lock.json
 ├── README.md               # user-facing project intro
@@ -249,7 +247,7 @@ These are agent metadata — they don't ship in the demo, but they're tracked in
 ### 5.2 Provider tree (v4)
 
 ```text
-<Web3Provider>          # window.ethereum → BrowserProvider, account, chainId, connect()
+<Web3Provider>          # direct read RPC + MetaMask signer, separate RPC/wallet chain IDs
   <ContractsProvider>   # reads build/contracts/*.json, builds ethers Contract instances
     <ToastProvider>     # toast notifications (upload success, tx confirmed, etc.)
       <BrowserRouter>
@@ -277,7 +275,7 @@ These are agent metadata — they don't ship in the demo, but they're tracked in
 | Module | Functions |
 |---|---|
 | `src/utils/format.js` | `formatEth(wei)`, `formatAddress(addr)`, `formatDate(unix)`, etc. |
-| `src/utils/upload.js` | `uploadPhoto(file)` → `{ hash, url }` — POST to `/uploads`, returns SHA-256 hex + served URL |
+| `src/utils/upload.js` | `uploadPhoto(file, requestId, milestoneId)` → `{ hash, url }` — hashes locally and uploads to Supabase Storage |
 
 ### 5.5 Demo flow (target end-state)
 
@@ -285,8 +283,8 @@ These are agent metadata — they don't ship in the demo, but they're tracked in
 2. **Connect wallet** — MetaMask popup → 1,000 ETH from deterministic MNEMONIC.
 3. **Shipper creates request** — `/shipper`, fill goods + milestones + deadline + ETH value → `createRequest()` → tx confirmed → marketplace updates.
 4. **Carrier accepts** — `/` (Marketplace) → click Accept → `acceptRequest()` → status = Accepted.
-5. **Carrier uploads photo-proof** — `/carrier` → select milestone → upload photo → browser SHA-256 → `submitProof(requestId, milestoneId, hash)` → photo stored at `/uploads/{hash}.jpg`.
-6. **Shipper verifies** — `/shipper` → review photo at `/uploads/{hash}.jpg` → `verifyMilestone(requestId, milestoneId, approved)`.
+5. **Carrier uploads photo-proof** — `/track/:id` → select milestone → browser SHA-256 → upload to Supabase Storage → `submitProof(...)` with URL and hash.
+6. **Shipper verifies** — `/track/:id` → review the Supabase-hosted proof → `verifyMilestone(requestId, milestoneId, approved)`.
 7. **Auto-release after window** — if shipper doesn't act within 48–72h, anyone can call `autoReleaseMilestone()` → payment released to carrier.
 8. **Track publicly** — `/track/42` → no wallet needed → see full timeline.
 9. **Repeat milestones 3–N** → final completion → carrier has full reward.
@@ -299,15 +297,15 @@ These are agent metadata — they don't ship in the demo, but they're tracked in
 
 | Script | Command | Purpose |
 |---|---|---|
-| `npm run dev` | `vite` | Vite dev server only (assumes Ganache + upload server already running) |
-| `npm run dev:all` | `concurrently -n ganache,upload,vite ...` | All three services in one terminal, prefixed logs |
+| `npm run dev` | `vite --host 127.0.0.1` | Vite dev server only |
+| `npm run dev:all` | `node scripts/dev-launcher.js` | Ganache readiness → compile/migrate → API and frontend |
 | `npm run build` | `vite build` | Production bundle to `dist/` |
 | `npm run preview` | `vite preview --port 8080` | Serve the built `dist/` |
 | `npm run compile` | `truffle compile` | Compile Solidity → `build/contracts/*.json` |
 | `npm run migrate` | `truffle migrate --reset --network development` | Deploy to Ganache (resets state) |
 | `npm run test` | `truffle test` | Run all Mocha + Chai tests |
 | `npm run test:scenarios` | `truffle exec scripts/run-scenarios.js` | End-to-end scenarios (when written) |
-| `npm run upload-server` | `node server/upload-server.js` | Upload server only |
+| `npm run server` | `node server/index.js` | SIWE/private chat API only |
 | `npm start` | `node scripts/dev-launcher.js` | Custom launcher script (fallback) |
 
 ### 6.2 Environment variables (`.env`)
@@ -316,8 +314,11 @@ These are agent metadata — they don't ship in the demo, but they're tracked in
 
 | Var | Default | Used by | Notes |
 |---|---|---|---|
-| `UPLOAD_PORT` | `3000` | Express server | v4 active |
-| `VITE_DEV_PORT` | `5173` | Vite dev server | Optional override |
+| `PORT` | `3000` | Express API | Local API port |
+| `VITE_CHAT_API_URL` | `http://127.0.0.1:3000` | Browser | SIWE/chat API base URL |
+| `VITE_GANACHE_RPC_URL` | `http://127.0.0.1:7545` | Browser | Direct read-only Ganache RPC |
+| `GANACHE_DATABASE_PATH` | `ganache-data` | Dev launcher | Persistent local chain database |
+| `SUPABASE_URL` / `VITE_SUPABASE_URL` | project URL | API/browser | Supabase Database and Storage |
 | `SEPOLIA_RPC` | (blank) | Truffle Sepolia network | **v4: blank, future plan** |
 | `TEAM_MNEMONIC` | (blank) | Truffle Sepolia deployer | **v4: blank, future plan** |
 
@@ -332,18 +333,18 @@ $ npm run dev:all
 [ganache] (1) 0x15d34ABf65c8A6D4F4F4...      (1,000 ETH)
 [ganache] ...
 [ganache] Listening on 127.0.0.1:7545
-[upload] Upload server listening on http://127.0.0.1:3000
-[upload]   POST /uploads  → /uploads/{sha256prefix}.{ext}
+[api]    CargoChain API listening on http://127.0.0.1:3000
 [vite]   VITE v5.4.0  ready in 412 ms
 [vite]   ➜  Local:   http://127.0.0.1:5173/
 [vite]   ➜  Network: use --host to expose
 ```
 
-Then in a separate terminal: `npm run compile && npm run migrate` to deploy contracts.
+The launcher waits for Ganache, compiles and redeploys the contracts, then
+starts the API and Vite. No second terminal or manual migration is required.
 
-### 6.4 Vite proxy (why `/uploads` works without CORS)
+### 6.4 Photo storage
 
-`vite.config.js` proxies `/uploads/*` from Vite (`:5173`) to Express (`:3000`). The React code can write `/uploads/abc123.jpg` and the browser sees it as same-origin. This avoids CORS preflight on every photo fetch.
+The frontend uploads proof images directly to the configured Supabase Storage project. The Express API is reserved for SIWE-authenticated chat endpoints.
 
 ---
 
@@ -368,10 +369,10 @@ Only the latest commit on `main` is supported. **No LTS branches.** This is a st
 
 ### 7.3 Secret handling rules
 
-- **`.env` is the only place secrets live.** Truffle, Vite, and the upload server all read from it.
+- **`.env` is the only place secrets live.** Truffle, Vite, and the API server read from it.
 - **`.env.example` is the public template** — blank by design, safe to commit.
 - **Never commit `.env`** — covered by `.gitignore`.
-- All four local services bind to **`127.0.0.1`** by default — no public exposure.
+- All local application services bind to **`127.0.0.1`** by default — no public exposure.
 - For LAN access, pass `--host 0.0.0.0` on the command line, **not** in the npm scripts.
 
 ---
@@ -381,7 +382,7 @@ Only the latest commit on `main` is supported. **No LTS branches.** This is a st
 The following are explicitly **not** in scope for v1:
 
 - Sepolia testnet deployment (Sepolia block is commented out in `truffle-config.js`).
-- IPFS / Filecoin for photo storage (using local Express `/uploads`).
+- IPFS / Filecoin for photo storage (Supabase Storage is used in v1).
 - Mainnet deployment.
 - Hardhat, Foundry, wagmi, viem, Web3.js v1, TypeScript, Vue, Angular.
 - Recipient QR-code confirmation (R13, removed 2026-07-05).
@@ -436,7 +437,7 @@ Hand-offs:
 
 1. **Sepolia activation** — When team agrees, uncomment the sepolia block in `truffle-config.js`, fill in `SEPOLIA_RPC` + `TEAM_MNEMONIC`, run `npm run migrate --network sepolia`. No code changes needed elsewhere.
 2. **Time-lock duration** — 48h or 72h for auto-release? Currently TBD (see `API_v1.md` when written).
-3. **Photo MIME types** — Express upload currently accepts whatever Multer defaults to; may need explicit `image/jpeg` + `image/png` allowlist.
+3. **Photo MIME types** — the frontend currently accepts `image/*`; production Storage policies should enforce an explicit allowlist and size limit.
 4. **Gas reporting** — Add `gas-reporter` plugin to Truffle for visibility into per-tx costs?
 5. **Sepolia as v1 chain** — could be promoted to active if tutor requests a public demo.
 
@@ -465,7 +466,7 @@ Hand-offs:
 |---|---|---|
 | `ab53a6c` | 2026-07-05 | Initial commit |
 | `c209cc0` | 2026-07-05 | Initial repo scaffold (CargoChain rename from LogiChain) |
-| `20e9573` | 2026-07-05 | docs(agents): remove redundant /uploads entry; add canonical repo path note |
+| `20e9573` | 2026-07-05 | docs(agents): remove redundant local-proof entry; add canonical repo path note |
 | `8abd696` | 2026-07-06 | **feat: add wallet connection and navigation components** — the React 18 + Vite + ethers v6 flip |
 | `8ac5ab9` | 2026-07-06 | chore: update README (stack flip + Ganache deep-dive section) |
 | *uncommitted* | 2026-07-06 | `SECURITY.md` (supported-versions + reporting + secret-handling) |

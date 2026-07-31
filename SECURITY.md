@@ -25,8 +25,8 @@ Please **do not** include working exploit code in public issues. A short descrip
 
 ## Secret handling
 
-- **`.env` is the only place secrets live.** Truffle, Vite, and the upload
-  server all read from it. `.env` is gitignored.
+- **`.env` is the only place secrets live.** Truffle, Vite, and the API
+  server read from it. `.env` is gitignored.
 - **`.env.example` is committed** and lists every variable the team may
   need. Copy it to `.env` and fill in real values. Placeholders only.
 - **Never commit a real key.** The repo's `.gitignore` covers `.env`,
@@ -36,7 +36,7 @@ Please **do not** include working exploit code in public issues. A short descrip
 - **No secrets in `localStorage`**, `sessionStorage`, React state, or any
   file under `src/`. The wallet address is fine to cache; nothing else.
 - **No secrets hardcoded in code** — including in `truffle-config.js`,
-  `server/upload-server.js`, or any `.js`/`.jsx` file. If you need a
+  server modules, or any `.js`/`.jsx` file. If you need a
   value at runtime, read it from `process.env` (Node) or a `VITE_*` var
   (browser).
 
@@ -54,13 +54,13 @@ Please **do not** include working exploit code in public issues. A short descrip
 
 ## Local-only by default
 
-All four services bind to `127.0.0.1` (loopback) by default. Nothing in
+All local services bind to `127.0.0.1` (loopback) by default. Nothing in
 the repo listens on a public interface unless you explicitly opt in.
 
 | Service          | Port | Default bind | Public-bind flag          |
 |------------------|------|--------------|---------------------------|
 | Ganache CLI      | 7545 | 127.0.0.1    | `--host 0.0.0.0`          |
-| Upload server    | 3000 | 127.0.0.1    | edit `server/upload-server.js` (not recommended) |
+| CargoChain API   | 3000 | 127.0.0.1    | source change required (not recommended) |
 | Vite dev server  | 5173 | 127.0.0.1    | `vite --host 0.0.0.0`     |
 | Vite preview     | 8080 | 127.0.0.1    | `vite preview --host 0.0.0.0` |
 
@@ -73,8 +73,8 @@ never accidentally exposes a port.
 
 - No `dangerouslySetInnerHTML` in any component. If you need to render
   user input, sanitise first.
-- No fetching of arbitrary URLs from user input. If we add S3 in a future
-  PR, the upload server validates the destination bucket, not the client.
+- No fetching of arbitrary URLs from user input. Proof uploads are restricted
+  to the configured Supabase project and `milestone-proofs` bucket.
 - No third-party CDN scripts loaded at runtime. All deps are in
   `package.json` and installed locally.
 
@@ -95,5 +95,5 @@ never accidentally exposes a port.
 - Production hardening (rate limiting, WAF, secrets manager).
 - Mobile wallet flows (WalletConnect, deep links) — MetaMask extension
   only.
-- IPFS / decentralised storage — the on-chain hash points to `/uploads/`
-  on the dev Express server. S3 hybrid is a future-PR conversation.
+- IPFS / decentralised storage. Proof images use Supabase Storage while their
+  SHA-256 content hashes and proof URIs are committed on-chain.

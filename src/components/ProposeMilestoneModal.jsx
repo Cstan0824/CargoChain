@@ -12,6 +12,12 @@ import { Button } from './Button.jsx';
 import { useToast } from '../hooks/useToast.js';
 import { useWallet } from '../hooks/useWallet.js';
 import { useContracts } from '../hooks/useContracts.js';
+import { useUserProfile } from '../hooks/useUserProfile.js';
+import {
+  formatWalletTransactionError,
+  resolveWalletSigner,
+  sendWalletContractTransaction,
+} from '../utils/walletTransaction.js';
 import styles from './ProposeMilestoneModal.module.css';
 
 const DEFAULT_MILESTONES = [
@@ -22,8 +28,9 @@ const DEFAULT_MILESTONES = [
 
 export function ProposeMilestoneModal({ isOpen, onClose, requestId, onSuccess }) {
   const { show } = useToast();
-  const { account, signer, provider, connect, busy: walletBusy } = useWallet();
+  const { signer, provider, connect, busy: walletBusy } = useWallet();
   const { contracts } = useContracts();
+  const { requireRegistration } = useUserProfile();
 
   const [milestones, setMilestones] = useState(DEFAULT_MILESTONES);
   const [submitting, setSubmitting] = useState(false);
@@ -73,10 +80,8 @@ export function ProposeMilestoneModal({ isOpen, onClose, requestId, onSuccess })
 
     setSubmitting(true);
     try {
-      if (!account) {
-        await connect();
-      }
-      const activeSigner = signer || await provider.getSigner();
+      const activeSigner = await resolveWalletSigner(signer, connect);
+      const activeSignerAddress = await activeSigner.getAddress();
 
       // Format input into [name, payoutPercentage] tuples for Solidity
       const contractMilestones = milestones.map((m) => [
@@ -84,10 +89,18 @@ export function ProposeMilestoneModal({ isOpen, onClose, requestId, onSuccess })
         BigInt(m.payoutPercentage),
       ]);
 
-      const tx = await contracts.deliveryEscrow.connect(activeSigner).proposeMilestones(
-        BigInt(requestId),
-        contractMilestones,
-      );
+      if (!await requireRegistration(
+        'Register your CargoChain profile to submit a milestone proposal.',
+        activeSignerAddress,
+      )) return;
+
+      const tx = await sendWalletContractTransaction({
+        contract: contracts.deliveryEscrow,
+        method: 'proposeMilestones',
+        args: [BigInt(requestId), contractMilestones],
+        signer: activeSigner,
+        provider,
+      });
 
       show('Submitting milestone proposal to blockchain...', 'info');
       await tx.wait();
@@ -100,7 +113,7 @@ export function ProposeMilestoneModal({ isOpen, onClose, requestId, onSuccess })
       show(
         message.includes('carrier already has active proposal')
           ? 'You already have an active proposal for this request. Open it to revoke or revise your plan.'
-          : message || 'Failed to submit proposal.',
+          : formatWalletTransactionError(e, message || 'Failed to submit proposal.'),
         'error',
       );
     } finally {

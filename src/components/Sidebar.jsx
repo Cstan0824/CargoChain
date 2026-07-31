@@ -8,6 +8,7 @@ import { useState } from 'react';
 import {
   HiOutlineShoppingCart,
   HiOutlineTruck,
+  HiOutlineChatBubbleLeftRight,
   HiOutlineUserCircle,
 } from 'react-icons/hi2';
 import { logoTextHorizontal } from '../assets';
@@ -25,6 +26,7 @@ const CHAIN_NAMES = { 1: 'Mainnet', 11155111: 'Sepolia', 1337: 'Ganache', 5777: 
 const NAV = [
   { to: '/',             label: 'Marketplace',  Icon: HiOutlineShoppingCart, end: true },
   { to: '/my-shipments', label: 'My Shipments', Icon: HiOutlineTruck },
+  { to: '/messages',     label: 'Messages',     Icon: HiOutlineChatBubbleLeftRight },
   { to: '/profile',      label: 'Profile',      Icon: HiOutlineUserCircle },
 ];
 

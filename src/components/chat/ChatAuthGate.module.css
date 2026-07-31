@@ -1,0 +1,58 @@
+.card {
+  width: min(100%, 520px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin: var(--s-12) auto;
+  padding: var(--s-8);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.icon {
+  width: 48px;
+  height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--s-5);
+  border-radius: var(--r-lg);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.icon svg { width: 24px; height: 24px; }
+.warning .icon { background: var(--warning-soft); color: var(--warning); }
+
+.eyebrow { margin: 0 0 var(--s-2); color: var(--primary); font-size: var(--fs-xs); font-weight: var(--fw-semibold); letter-spacing: 0.06em; text-transform: uppercase; }
+.warning .eyebrow { color: var(--warning); }
+.card h1 { margin: 0; color: var(--text-primary); font-size: var(--fs-2xl); letter-spacing: var(--tracking-tight); line-height: var(--lh-tight); text-wrap: balance; }
+.body { max-width: 420px; margin: var(--s-3) 0 0; color: var(--text-secondary); font-size: var(--fs-sm); line-height: 1.6; text-wrap: pretty; }
+.wallet { margin: var(--s-5) 0 0; padding: 8px 10px; border-radius: var(--r-md); background: var(--bg-subtle); color: var(--text-secondary); font-size: var(--fs-xs); }
+.wallet strong { color: var(--text-primary); font-family: var(--font-mono); }
+.error { width: 100%; margin: var(--s-4) 0 0; padding: 10px 12px; border-radius: var(--r-md); background: var(--danger-soft); color: var(--danger); font-size: var(--fs-xs); }
+
+.action {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: var(--s-6);
+  padding: 0 15px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--primary);
+  color: var(--text-inverse);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease), box-shadow var(--dur-1) var(--ease);
+}
+.action:hover:not(:disabled) { background: var(--primary-hover); box-shadow: var(--shadow-md); }
+.action:active:not(:disabled) { transform: scale(0.96); }
+.action:disabled { opacity: 0.6; cursor: not-allowed; }
+.action svg { width: 17px; height: 17px; }
+
+@media (max-width: 640px) { .card { margin: var(--s-6) auto; padding: var(--s-6); } }

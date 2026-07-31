@@ -77,6 +77,12 @@
   font-variant-numeric: tabular-nums;
 }
 
+.address {
+  max-width: 148px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .chain {
   color: var(--text-secondary);
   font-weight: var(--fw-medium);

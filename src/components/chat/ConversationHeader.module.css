@@ -1,0 +1,41 @@
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-4);
+  padding: var(--s-4) var(--s-5);
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.main { display: flex; align-items: center; gap: var(--s-3); min-width: 0; }
+.copy { min-width: 0; }
+.copy h1 { margin: 0; color: var(--text-primary); font-size: var(--fs-md); line-height: var(--lh-tight); }
+.copy p { overflow: hidden; margin: 4px 0 0; color: var(--text-secondary); font-size: var(--fs-xs); text-overflow: ellipsis; white-space: nowrap; }
+
+.participant { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 0; }
+.participant span { color: var(--text-muted); font-size: var(--fs-xs); }
+.participant strong { max-width: 180px; overflow: hidden; color: var(--text-primary); font-size: var(--fs-sm); text-overflow: ellipsis; white-space: nowrap; }
+
+.back {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease);
+}
+.back:hover { background: var(--bg-subtle); }
+.back:active { transform: scale(0.96); }
+.back svg { width: 18px; height: 18px; }
+
+@media (max-width: 640px) {
+  .header { padding: var(--s-3) var(--s-4); }
+  .participant strong { max-width: 110px; }
+}

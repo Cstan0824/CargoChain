@@ -3,6 +3,11 @@ pragma solidity ^0.8.0;
 
 import "./PaymentEvents.sol";
 
+/// @dev Minimal registry surface required by the escrow contract.
+interface IUserRegistry {
+    function isRegistered(address user) external view returns (bool);
+}
+
 /// @title CargoChain MVP delivery escrow
 /// @notice Single-contract MVP for request creation, carrier milestone proposal,
 /// escrow funding, proof submission, verification, payout, and unpaid refunds.
@@ -105,6 +110,12 @@ contract DeliveryEscrow is PaymentEvents {
         bool refundable;
     }
 
+    struct LockedEscrow {
+        uint256 totalLocked;
+        uint256 activeRequestCount;
+    }
+
+    IUserRegistry public immutable userRegistry;
     uint256 private nextRequestId = 1;
 
     mapping(uint256 => DeliveryRequest) private requests;
@@ -113,6 +124,7 @@ contract DeliveryEscrow is PaymentEvents {
     mapping(uint256 => CarrierProposal[]) private requestProposals;
     mapping(uint256 => mapping(uint256 => ProposedMilestone[])) private proposalMilestones;
     mapping(uint256 => mapping(address => uint256)) private activeProposalIndexPlusOne;
+    mapping(address => LockedEscrow) private lockedEscrowByShipper;
     uint256[] private allRequestIds;
     uint256[] private openRequestIds;
 
@@ -131,6 +143,16 @@ contract DeliveryEscrow is PaymentEvents {
     );
     event MilestoneRejected(uint256 indexed requestId, uint256 indexed milestoneId, string reason);
     event RequestCancelled(uint256 indexed requestId, address indexed shipper);
+
+    constructor(address registryAddress) {
+        require(registryAddress != address(0), "registry address required");
+        userRegistry = IUserRegistry(registryAddress);
+    }
+
+    modifier onlyRegistered() {
+        require(userRegistry.isRegistered(msg.sender), "caller is not registered");
+        _;
+    }
 
     modifier requestExists(uint256 requestId) {
         require(requestId > 0 && requestId < nextRequestId, "request does not exist");
@@ -154,7 +176,7 @@ contract DeliveryEscrow is PaymentEvents {
         uint256 deadline,
         uint256 proposedAmount,
         ItemInput[] calldata items
-    ) external returns (uint256 requestId) {
+    ) external onlyRegistered returns (uint256 requestId) {
         require(bytes(pickupLocation).length > 0, "pickup required");
         require(bytes(deliveryLocation).length > 0, "delivery required");
         require(deadline > block.timestamp, "deadline must be future");
@@ -193,7 +215,7 @@ contract DeliveryEscrow is PaymentEvents {
     function proposeMilestones(
         uint256 requestId,
         MilestoneInput[] calldata milestones
-    ) external requestExists(requestId) {
+    ) external onlyRegistered requestExists(requestId) {
         DeliveryRequest storage delivery = requests[requestId];
         require(delivery.status == RequestStatus.Open, "request is not open");
         require(msg.sender != delivery.shipper, "shipper cannot be carrier");
@@ -233,6 +255,7 @@ contract DeliveryEscrow is PaymentEvents {
 
     function revokeMilestoneProposal(uint256 requestId)
         external
+        onlyRegistered
         requestExists(requestId)
     {
         DeliveryRequest storage delivery = requests[requestId];
@@ -252,6 +275,7 @@ contract DeliveryEscrow is PaymentEvents {
 
     function rejectMilestoneProposal(uint256 requestId, uint256 proposalId)
         external
+        onlyRegistered
         requestExists(requestId)
         onlyShipper(requestId)
     {
@@ -271,6 +295,7 @@ contract DeliveryEscrow is PaymentEvents {
     function approveAndFund(uint256 requestId, uint256 proposalId)
         external
         payable
+        onlyRegistered
         requestExists(requestId)
         onlyShipper(requestId)
     {
@@ -320,6 +345,9 @@ contract DeliveryEscrow is PaymentEvents {
 
         delivery.totalAmount = msg.value;
         delivery.status = RequestStatus.Funded;
+        LockedEscrow storage lockedEscrow = lockedEscrowByShipper[delivery.shipper];
+        lockedEscrow.totalLocked += msg.value;
+        lockedEscrow.activeRequestCount += 1;
 
         uint256 allocated = 0;
         for (uint256 i = 0; i < milestones.length; i++) {
@@ -342,7 +370,7 @@ contract DeliveryEscrow is PaymentEvents {
         uint256 milestoneId,
         string[] calldata proofUris,
         string calldata remark
-    ) external requestExists(requestId) onlyCarrier(requestId) {
+    ) external onlyRegistered requestExists(requestId) onlyCarrier(requestId) {
         DeliveryRequest storage delivery = requests[requestId];
         require(
             delivery.status == RequestStatus.Funded || delivery.status == RequestStatus.InProgress,
@@ -350,8 +378,9 @@ contract DeliveryEscrow is PaymentEvents {
         );
         require(block.timestamp <= delivery.deadline, "request deadline has passed");
         require(proofUris.length > 0, "at least one proof uri required");
-        if(milestoneId > 0){
-            require(requestMilestones[requestId][milestoneId -1].status == MilestoneStatus.Paid, "previous milestone is not completed");
+        require(milestoneId < requestMilestones[requestId].length, "milestone does not exist");
+        if (milestoneId > 0) {
+            require(requestMilestones[requestId][milestoneId - 1].status == MilestoneStatus.Paid, "previous milestone is not completed");
         }
         Milestone storage milestone = requestMilestones[requestId][milestoneId];
         require(
@@ -379,7 +408,7 @@ contract DeliveryEscrow is PaymentEvents {
         uint256 milestoneId,
         bool approve,
         string calldata rejectionReason
-    ) external requestExists(requestId) onlyShipper(requestId) {
+    ) external onlyRegistered requestExists(requestId) onlyShipper(requestId) {
         require(milestoneId < requestMilestones[requestId].length, "milestone does not exist");
 
         Milestone storage milestone = requestMilestones[requestId][milestoneId];
@@ -403,6 +432,7 @@ contract DeliveryEscrow is PaymentEvents {
 
     function cancelRequest(uint256 requestId)
         external
+        onlyRegistered
         requestExists(requestId)
         onlyShipper(requestId)
     {
@@ -429,6 +459,7 @@ contract DeliveryEscrow is PaymentEvents {
 
     function refundRemaining(uint256 requestId)
         external
+        onlyRegistered
         requestExists(requestId)
         onlyShipper(requestId)
     {
@@ -535,6 +566,15 @@ contract DeliveryEscrow is PaymentEvents {
         return delivery.totalAmount - delivery.releasedAmount - delivery.refundedAmount;
     }
 
+    function getLockedEscrow(address shipper)
+        external
+        view
+        returns (uint256 totalLocked, uint256 activeRequestCount)
+    {
+        LockedEscrow storage lockedEscrow = lockedEscrowByShipper[shipper];
+        return (lockedEscrow.totalLocked, lockedEscrow.activeRequestCount);
+    }
+
     function getPaymentSummary(uint256 requestId)
         external
         view
@@ -568,8 +608,14 @@ contract DeliveryEscrow is PaymentEvents {
         require(escrowBalance(requestId) >= milestone.payoutAmount, "insufficient escrow");
 
         uint256 amount = milestone.payoutAmount;
+        uint256 remainingBeforePayment = escrowBalance(requestId);
         milestone.status = MilestoneStatus.Paid;
         delivery.releasedAmount += amount;
+        _decreaseLockedEscrow(
+            delivery.shipper,
+            amount,
+            remainingBeforePayment == amount
+        );
 
         if (_allMilestonesPaid(requestId)) {
             delivery.status = RequestStatus.Completed;
@@ -583,13 +629,31 @@ contract DeliveryEscrow is PaymentEvents {
 
     function _refund(uint256 requestId, uint256 amount) private {
         DeliveryRequest storage delivery = requests[requestId];
-        require(amount > 0 && amount <= escrowBalance(requestId), "invalid refund amount");
+        uint256 remainingBeforeRefund = escrowBalance(requestId);
+        require(amount > 0 && amount <= remainingBeforeRefund, "invalid refund amount");
         delivery.refundedAmount += amount;
         delivery.status = RequestStatus.Refunded;
+        _decreaseLockedEscrow(
+            delivery.shipper,
+            amount,
+            remainingBeforeRefund == amount
+        );
 
         (bool ok, ) = payable(delivery.shipper).call{value: amount}("");
         require(ok, "refund failed");
         emit RefundIssued(requestId, delivery.shipper, amount);
+    }
+
+    function _decreaseLockedEscrow(
+        address shipper,
+        uint256 amount,
+        bool requestSettled
+    ) private {
+        LockedEscrow storage lockedEscrow = lockedEscrowByShipper[shipper];
+        lockedEscrow.totalLocked -= amount;
+        if (requestSettled) {
+            lockedEscrow.activeRequestCount -= 1;
+        }
     }
 
     function _isRefundable(
@@ -600,15 +664,14 @@ contract DeliveryEscrow is PaymentEvents {
             return false;
         }
 
-        if (
-            delivery.status == RequestStatus.Funded ||
-            delivery.status == RequestStatus.Cancelled ||
-            delivery.status == RequestStatus.Expired
-        ) {
+        if (delivery.status == RequestStatus.Cancelled || delivery.status == RequestStatus.Expired) {
             return true;
         }
 
-        return delivery.status == RequestStatus.InProgress &&
+        return (
+            delivery.status == RequestStatus.Funded ||
+            delivery.status == RequestStatus.InProgress
+        ) &&
             block.timestamp > delivery.deadline;
     }
 

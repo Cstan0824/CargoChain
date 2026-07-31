@@ -7,9 +7,9 @@
 // even when no contracts have been compiled yet — the ContractsContext
 // surfaces a friendly "run `npm run migrate`" error in that case.
 //
-// For read calls, pass a `provider` (read-only). For write calls, the
-// page does `contract.connect(signer).method(...)` — we keep the base
-// instance read-only so a missing signer can't accidentally send a tx.
+// Contract instances stay read-only. All writes go through
+// sendWalletContractTransaction(), which prepares via the direct Ganache RPC
+// and uses MetaMask only for signing/broadcasting.
 
 import { Contract } from 'ethers';
 
@@ -51,10 +51,73 @@ export function getContract(providerOrSigner, name, networkId) {
 }
 
 // buildContractMap() — convenience used by ContractsContext.
-// V1 currently deploys the single-contract MVP only. Future module
-// contracts can be added here after their Solidity files and migrations land.
+// Keep keys camel-cased so contexts and components share one stable API.
 export function buildContractMap(provider, networkId) {
   return {
     deliveryEscrow: getContract(provider, 'DeliveryEscrow', networkId),
+    userRegistry: getContract(provider, 'UserRegistry', networkId),
   };
+}
+
+/**
+ * Confirm that the read RPC serves the current CargoChain contract surface.
+ * Chain ID alone is insufficient because multiple local Ganache networks can
+ * all report 1337 while containing different deployments.
+ */
+export async function validateContractMap(provider, contracts) {
+  try {
+    await retryTransientGanacheRead(() => Promise.all([
+        contracts.deliveryEscrow.getRequestCount(),
+        contracts.deliveryEscrow.getRequestIds(0n, 0n),
+        contracts.deliveryEscrow.getOpenRequests(0n, 0n),
+        contracts.userRegistry.getUser('0x0000000000000000000000000000000000000000'),
+      ]));
+  } catch (error) {
+    if (isMissingHeaderError(error)) {
+      throw new Error(
+        'Ganache returned a stale block header after several retries. ' +
+        'Restart npm run dev:all to recreate and redeploy the local chain.',
+      );
+    }
+    const mismatch = deploymentMismatchError('CargoChain', contracts.deliveryEscrow.target);
+    mismatch.cause = error;
+    throw mismatch;
+  }
+
+  return contracts;
+}
+
+async function retryTransientGanacheRead(operation, attempts = 4) {
+  let lastError;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!isMissingHeaderError(error) || attempt === attempts - 1) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 150 * (attempt + 1)));
+    }
+  }
+  throw lastError;
+}
+
+function isMissingHeaderError(error) {
+  const details = [
+    error?.message,
+    error?.shortMessage,
+    error?.info?.error?.message,
+    error?.info?.error?.data?.message,
+    error?.error?.message,
+    error?.error?.data?.message,
+  ].filter(Boolean).join(' ').toLowerCase();
+  return details.includes('header not found');
+}
+
+function deploymentMismatchError(name, address) {
+  const target = address ? ` at ${address}` : '';
+  return new Error(
+    `${name}${target} does not match the current CargoChain deployment. ` +
+    'In MetaMask, use RPC http://127.0.0.1:7545 with chain ID 1337, then refresh. ' +
+    'If that RPC is already selected, restart npm run dev:all to redeploy.',
+  );
 }

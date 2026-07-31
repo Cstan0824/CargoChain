@@ -1,11 +1,6 @@
-import {supabase} from '../lib/supabase.js';
+import { supabase } from '../lib/supabase.js';
 // src/utils/upload.js — CargoChain
-// Photo proof upload flow. Stays thin so the team can swap the storage
-// backend later (S3, IPFS, etc.) without touching page code.
-//
-// Browser-side: crypto.subtle.digest('SHA-256', ...) produces a 32-byte
-// hash. We send the file + the hash to the Express upload server, which
-// stores it as /uploads/{hashprefix}.jpg and echoes the hash back.
+// Photo proof upload flow using browser-side SHA-256 and Supabase Storage.
 
 /**
  * hashFile(file) — returns a 0x-prefixed hex SHA-256 hash of the file.
@@ -24,22 +19,32 @@ export async function hashFile(file) {
 }
 
 /**
- * uploadPhoto(file, hash) — POSTs the file + precomputed hash to the
- * upload server. Returns { hash, url, size } on success.
- *
- * In dev, Vite proxies /uploads → http://127.0.0.1:3000 (see
- * vite.config.js). In production, the same path is served by the same
- * Express server, or by a CDN in front of S3.
+ * Uploads immutable, content-addressed evidence to Supabase Storage.
  *
  * @param {File|Blob} file
  * @param {string} hash  0x-prefixed 32-byte hex (output of hashFile)
- * @returns {Promise<{hash: string, url: string, size: number}>}
+ * @returns {Promise<{hash: string, url: string, path: string, size: number}>}
  */
 
 const PROOF_BUCKET = 'milestone-proofs';
+const MAX_PROOF_BYTES = 10 * 1024 * 1024;
+const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
-export async function uploadPhoto(file, hash,requestId,milestoneId) {
-   const cleanHash = hash.replace(/^0x/, '');
+export async function uploadPhoto(file, hash, requestId, milestoneId) {
+  if (!file || typeof file.arrayBuffer !== 'function') throw new Error('A proof image is required.');
+  if (!SUPPORTED_IMAGE_TYPES.has(file.type)) {
+    throw new Error('Proof image must be JPEG, PNG, or WebP.');
+  }
+  if (file.size > MAX_PROOF_BYTES) throw new Error('Proof image must be 10 MB or smaller.');
+  if (!/^0x[0-9a-f]{64}$/i.test(String(hash || ''))) throw new Error('A valid SHA-256 proof hash is required.');
+  if (!Number.isInteger(Number(requestId)) || Number(requestId) <= 0) {
+    throw new Error('A valid request ID is required for proof upload.');
+  }
+  if (!Number.isInteger(Number(milestoneId)) || Number(milestoneId) < 0) {
+    throw new Error('A valid milestone ID is required for proof upload.');
+  }
+
+  const cleanHash = hash.replace(/^0x/, '');
   const extension = getImageExtension(file);
 
   const objectPath =
@@ -85,6 +90,7 @@ export async function uploadPhoto(file, hash,requestId,milestoneId) {
     url: data.publicUrl,
     path: objectPath,
     hash,
+    size: file.size,
   };
 }
 

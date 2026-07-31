@@ -7,7 +7,7 @@ Four pages, plus shared modules.
 | `index.html` | Vite's entry — the only HTML file, mounts `<div id="root">` |
 | `main.jsx` | React entry — wires `<ToastProvider>` → `<Web3Provider>` → `<ContractsProvider>` → `<App />` |
 | `App.jsx` | `<BrowserRouter>` with the 4 routes |
-| `context/Web3Context.jsx` | ethers v6 `BrowserProvider`, MetaMask events, `connect()` |
+| `context/Web3Context.jsx` | Direct Ganache `JsonRpcProvider` + MetaMask `BrowserProvider`, separate network state, `connect()` |
 | `context/ContractsContext.jsx` | Instantiates the 5 contract handles from `build/contracts/*.json` |
 | `context/ToastContext.jsx` | Minimal toast queue (`useToast().show(msg, kind)`) |
 | `hooks/useWallet.js` | Re-export of `Web3Context` |
@@ -38,9 +38,11 @@ If no contracts are deployed, `ContractsContext` surfaces a friendly
 
 1. User clicks **Connect Wallet** in the navbar.
 2. `Web3Context.connect()` calls `eth_requestAccounts` → MetaMask popup.
-3. On approval, `BrowserProvider.getSigner()` returns a signer; the page can
-   now call `contract.connect(signer).method(...)` for write operations.
-4. For read-only calls, use the base `contract.method(...)` — no signer needed.
+3. On approval, `BrowserProvider.getSigner()` returns a signer used only for
+   MetaMask signing and broadcasting.
+4. Reads use the direct Ganache `JsonRpcProvider`. Writes go through
+   `sendWalletContractTransaction()`, which queues per-wallet transactions and
+   prepares gas, fees, and nonce through the direct provider before signing.
 
 ## Why ethers v6 and not Web3.js
 

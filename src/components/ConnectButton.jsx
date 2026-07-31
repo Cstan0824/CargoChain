@@ -8,6 +8,7 @@ import {
   HiOutlineWallet,
 } from 'react-icons/hi2';
 import { useWallet } from '../hooks/useWallet.js';
+import { useUserProfile } from '../hooks/useUserProfile.js';
 import { shortAddress } from '../utils/format.js';
 import styles from './ConnectButton.module.css';
 
@@ -20,6 +21,7 @@ const CHAIN_NAMES = {
 
 export function ConnectButton() {
   const { account, chainId, error, busy, connect } = useWallet();
+  const { displayName, isRegistered, isProfileLoading } = useUserProfile();
   const expectedLocal = chainId === 1337 || chainId === 5777;
   const chainLabel = CHAIN_NAMES[chainId] || (chainId ? `Chain ${chainId}` : 'No network');
 
@@ -49,7 +51,9 @@ export function ConnectButton() {
       {expectedLocal
         ? <HiOutlineCheckCircle className={styles.icon} aria-hidden="true" />
         : <HiOutlineExclamationCircle className={styles.icon} aria-hidden="true" />}
-      <span className={styles.address}>{shortAddress(account)}</span>
+      <span className={styles.address} title={account}>
+        {isRegistered && displayName ? displayName : (isProfileLoading ? 'Loading…' : shortAddress(account))}
+      </span>
       <span className={styles.chain}>{chainLabel}</span>
     </button>
   );

@@ -14,6 +14,12 @@ import { Button } from './Button.jsx';
 import { useToast } from '../hooks/useToast.js';
 import { useWallet } from '../hooks/useWallet.js';
 import { useContracts } from '../hooks/useContracts.js';
+import { useUserProfile } from '../hooks/useUserProfile.js';
+import {
+  formatWalletTransactionError,
+  resolveWalletSigner,
+  sendWalletContractTransaction,
+} from '../utils/walletTransaction.js';
 import styles from './CreateRequestModal.module.css';
 
 const DEFAULT_ITEMS = [
@@ -22,8 +28,9 @@ const DEFAULT_ITEMS = [
 
 export function CreateRequestModal({ isOpen, onClose, onSuccess }) {
   const { show } = useToast();
-  const { account, signer, provider, connect, busy: walletBusy } = useWallet();
+  const { signer, provider, connect, busy: walletBusy } = useWallet();
   const { contracts, deployError } = useContracts();
+  const { requireRegistration } = useUserProfile();
 
   const [details, setDetails] = useState({
     from: '',
@@ -111,24 +118,33 @@ export function CreateRequestModal({ isOpen, onClose, onSuccess }) {
 
     setSubmitting(true);
     try {
-      if (!account) {
-        await connect();
-      }
-      const activeSigner = signer || await provider.getSigner();
+      const activeSigner = await resolveWalletSigner(signer, connect);
+      const activeSignerAddress = await activeSigner.getAddress();
       const contractItems = normalizedItems.map((it) => [
         it.itemName,
         it.itemDescription,
         BigInt(it.quantity),
       ]);
 
-      const tx = await contracts.deliveryEscrow.connect(activeSigner).createRequest(
-        pickupLocation,
-        deliveryLocation,
-        specialInstruction,
-        BigInt(deadlineUnix),
-        rewardWei,
-        contractItems,
-      );
+      if (!await requireRegistration(
+        'Register your CargoChain profile to publish a delivery request.',
+        activeSignerAddress,
+      )) return;
+
+      const tx = await sendWalletContractTransaction({
+        contract: contracts.deliveryEscrow,
+        method: 'createRequest',
+        args: [
+          pickupLocation,
+          deliveryLocation,
+          specialInstruction,
+          BigInt(deadlineUnix),
+          rewardWei,
+          contractItems,
+        ],
+        signer: activeSigner,
+        provider,
+      });
       const receipt = await tx.wait();
       const requestId = getRequestIdFromReceipt(contracts.deliveryEscrow, receipt);
 
@@ -353,12 +369,6 @@ function formatCreateRequestError(error) {
   }
 
   const message = error?.shortMessage || error?.reason || error?.message || '';
-  if (
-    message.includes('missing revert data') ||
-    (error?.code === 'CALL_EXCEPTION' && !error?.data)
-  ) {
-    return 'The deployed DeliveryEscrow contract is outdated. Restart Ganache and run npm run migrate, then try again.';
-  }
   if (message.includes('deadline must be future')) {
     return 'Delivery deadline must be later than the current time.';
   }
@@ -368,5 +378,5 @@ function formatCreateRequestError(error) {
   if (message.includes('insufficient funds')) {
     return 'The connected wallet does not have enough ETH to pay the transaction gas fee.';
   }
-  return message || 'Could not publish the request.';
+  return formatWalletTransactionError(error, message || 'Could not publish the request.');
 }

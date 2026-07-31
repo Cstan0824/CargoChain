@@ -182,23 +182,23 @@ event MilestoneVerified(uint256 indexed requestId, uint256 indexed milestoneId, 
 
 ### NOT responsible for
 - ETH handling directly (c owns all `payable` logic)
-- Photo storage (frontend + Express server)
+- Photo storage (frontend + Supabase Storage)
 
 ---
 
 ## e. Frontend & UI/UX — Cstan (Cs)
 
 ### Files owned
-- `src/index.html`, `src/shipper.html`, `src/carrier.html`, `src/track.html`
-- `src/css/style.css`
-- `src/js/web3-init.js`, `src/js/app.js`, `src/js/contracts.js`, `src/js/upload.js`
-- `server/upload-server.js` (Express)
+- `src/main.jsx`, `src/App.jsx`, `src/pages/*.jsx`
+- `src/css/style.css` and component CSS Modules
+- `src/context/Web3Context.jsx`, `src/contracts/index.js`, `src/utils/upload.js`
+- `src/lib/supabase.js` and Supabase Storage configuration
 
 ### Responsibilities
 - Wallet detection, MetaMask prompt, account-switch handling
-- ABIs loaded as static JSON (course-style, copied from `build/contracts/` after migrate)
+- ABIs and deployment addresses loaded from Truffle artifacts in `build/contracts/`
 - Form rendering for create request, browse marketplace, accept, upload photo, verify
-- Photo upload flow: `FileReader` → `crypto.subtle.digest('SHA-256', ...)` → POST to Express → call `submitProof`
+- Photo upload flow: `file.arrayBuffer()` → `crypto.subtle.digest('SHA-256', ...)` → Supabase Storage → call `submitProof`
 - Event listening (`RequestCreated`, `MilestoneVerified`, `PaymentReleased`, etc.) → UI refresh
 - Public tracker page reads `getRequestTimeline()` without a wallet
 

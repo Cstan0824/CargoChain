@@ -1,8 +1,18 @@
+const UserRegistry = artifacts.require('UserRegistry');
 const DeliveryEscrow = artifacts.require('DeliveryEscrow');
 
 contract('DeliveryEscrow', (accounts) => {
-  const [shipper, carrier, otherCarrier, stranger] = accounts;
+  const [shipper, carrier, otherCarrier, stranger, unregistered] = accounts;
   const oneEth = web3.utils.toWei('1', 'ether');
+  let registry;
+
+  beforeEach(async () => {
+    registry = await UserRegistry.new();
+    const registeredActors = [shipper, carrier, otherCarrier, stranger];
+    for (let i = 0; i < registeredActors.length; i++) {
+      await registry.registerUser(`Actor ${i + 1}`, { from: registeredActors[i] });
+    }
+  });
 
   async function futureDeadline() {
     const block = await web3.eth.getBlock('latest');
@@ -68,7 +78,7 @@ contract('DeliveryEscrow', (accounts) => {
   }
 
   it('shipper creates request with an advertised payment but without locking ETH', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     const tx = await createRequest(escrow);
 
     assert.equal(tx.logs[0].event, 'RequestCreated');
@@ -84,7 +94,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('keeps a request open while carriers submit separate milestone proposals', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createRequest(escrow);
 
     const firstReceipt = await escrow.proposeMilestones(
@@ -116,7 +126,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('shipper cannot propose milestones for their own request', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createRequest(escrow);
 
     await expectRevert(
@@ -126,7 +136,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('does not allow a carrier to keep two active proposals for the same request', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createRequest(escrow);
     await escrow.proposeMilestones(1, [['Delivery', 100]], { from: carrier });
 
@@ -140,7 +150,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('carrier can revoke a pending proposal and resubmit a new plan', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createProposedRequest(escrow);
 
     const tx = await escrow.revokeMilestoneProposal(1, { from: carrier });
@@ -154,7 +164,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('shipper can reject one proposal without closing the request', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createRequest(escrow);
     await escrow.proposeMilestones(1, [['Delivery', 100]], { from: carrier });
     await escrow.proposeMilestones(1, [['Alternative delivery', 100]], { from: otherCarrier });
@@ -170,7 +180,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('non-shipper cannot reject a milestone proposal', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createProposedRequest(escrow);
 
     await expectRevert(
@@ -180,7 +190,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('shipper approves and funds exact total amount', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createProposedRequest(escrow);
 
     await escrow.proposeMilestones(1, [['Alternative delivery', 100]], { from: otherCarrier });
@@ -210,7 +220,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('exposes an accurate funded payment summary', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createFundedRequest(escrow);
 
     const summary = await escrow.getPaymentSummary(1);
@@ -222,11 +232,11 @@ contract('DeliveryEscrow', (accounts) => {
     assert.equal(summary.remainingEscrow.toString(), oneEth);
     assert.equal(summary.fullyFunded, true);
     assert.equal(summary.fullyPaid, false);
-    assert.equal(summary.refundable, true);
+    assert.equal(summary.refundable, false);
   });
 
   it('non-shipper cannot approve and fund', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createProposedRequest(escrow);
 
     await expectRevert(
@@ -236,7 +246,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('shipper must fund the advertised payment amount exactly', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createProposedRequest(escrow);
 
     await expectRevert(
@@ -246,7 +256,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('cannot fund a request after its delivery deadline', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createProposedRequest(escrow);
     await advancePastDeadline(escrow);
 
@@ -257,7 +267,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('assigns payout rounding remainder to the final milestone', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await escrow.createRequest(
       'Kuala Lumpur',
       'Penang',
@@ -276,7 +286,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('non-carrier cannot submit proof', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createFundedRequest(escrow);
 
     await expectRevert(
@@ -285,8 +295,27 @@ contract('DeliveryEscrow', (accounts) => {
     );
   });
 
+  it('rejects proof submission for a milestone that does not exist', async () => {
+    const escrow = await DeliveryEscrow.new(registry.address);
+    await createFundedRequest(escrow);
+
+    await expectRevert(
+      escrow.submitProof(1, 99, ['0xhash'], 'Invalid milestone', { from: carrier }),
+      'milestone does not exist',
+    );
+  });
+
+  it('marks funded escrow refundable only after the deadline', async () => {
+    const escrow = await DeliveryEscrow.new(registry.address);
+    await createFundedRequest(escrow);
+
+    assert.equal((await escrow.getPaymentSummary(1)).refundable, false);
+    await advancePastDeadline(escrow);
+    assert.equal((await escrow.getPaymentSummary(1)).refundable, true);
+  });
+
   it('shipper verifies proof and payment releases', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createFundedRequest(escrow);
 
     await escrow.submitProof(1, 0, ['0xhash'], 'Picked up', { from: carrier });
@@ -308,7 +337,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('rejected proof can be resubmitted', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createFundedRequest(escrow);
 
     await escrow.submitProof(1, 0, ['bad-photo'], 'Unclear', { from: carrier });
@@ -328,7 +357,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('paid milestone cannot be paid twice', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createFundedRequest(escrow);
 
     await escrow.submitProof(1, 0, ['0xhash'], 'Picked up', { from: carrier });
@@ -341,7 +370,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('refund only returns unpaid remaining escrow', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createFundedRequest(escrow);
 
     await escrow.submitProof(1, 0, ['0xhash'], 'Picked up', { from: carrier });
@@ -371,7 +400,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('refunds all escrow after deadline when no milestone is reached', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createFundedRequest(escrow);
     await advancePastDeadline(escrow);
 
@@ -385,7 +414,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('shipper can cancel an open unfunded request without a refund', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createRequest(escrow);
 
     const receipt = await escrow.cancelRequest(1, { from: shipper });
@@ -397,7 +426,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('shipper can cancel and fully refund a funded request before work starts', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createFundedRequest(escrow);
 
     const receipt = await escrow.cancelRequest(1, { from: shipper });
@@ -411,7 +440,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('cannot cancel or refund an in-progress request before the deadline', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createFundedRequest(escrow);
     await escrow.submitProof(1, 0, ['pickup'], 'Picked up', { from: carrier });
 
@@ -426,7 +455,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('non-shipper cannot refund expired escrow', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createFundedRequest(escrow);
     await advancePastDeadline(escrow);
 
@@ -437,7 +466,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('cannot refund the same escrow twice', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createFundedRequest(escrow);
     await escrow.cancelRequest(1, { from: shipper });
 
@@ -448,7 +477,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('refunded request cannot accept carrier proof', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createFundedRequest(escrow);
     await escrow.cancelRequest(1, { from: shipper });
 
@@ -459,7 +488,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('carrier cannot submit proof after the delivery deadline', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createFundedRequest(escrow);
     await advancePastDeadline(escrow);
 
@@ -470,7 +499,7 @@ contract('DeliveryEscrow', (accounts) => {
   });
 
   it('completed paid milestones are never reversed', async () => {
-    const escrow = await DeliveryEscrow.new();
+    const escrow = await DeliveryEscrow.new(registry.address);
     await createFundedRequest(escrow);
 
     await escrow.submitProof(1, 0, ['pickup'], 'Picked up', { from: carrier });
@@ -486,9 +515,109 @@ contract('DeliveryEscrow', (accounts) => {
     assert.equal(summary.remainingEscrow.toString(), '0');
     assert.equal(summary.fullyPaid, true);
 
+    const locked = await escrow.getLockedEscrow(shipper);
+    assert.equal(locked.totalLocked.toString(), '0');
+    assert.equal(locked.activeRequestCount.toString(), '0');
+
     await expectRevert(
       escrow.refundRemaining(1, { from: shipper }),
       'completed request cannot be refunded',
     );
+  });
+
+  it('requires registration for every state-changing escrow action', async () => {
+    const escrow = await DeliveryEscrow.new(registry.address);
+
+    await expectRevert(
+      createRequest(escrow, unregistered),
+      'caller is not registered',
+    );
+
+    await createFundedRequest(escrow);
+    await expectRevert(
+      escrow.proposeMilestones(1, [['Delivery', 100]], { from: unregistered }),
+      'caller is not registered',
+    );
+    await expectRevert(
+      escrow.revokeMilestoneProposal(1, { from: unregistered }),
+      'caller is not registered',
+    );
+    await expectRevert(
+      escrow.rejectMilestoneProposal(1, 0, { from: unregistered }),
+      'caller is not registered',
+    );
+    await expectRevert(
+      escrow.approveAndFund(1, 0, { from: unregistered, value: oneEth }),
+      'caller is not registered',
+    );
+    await expectRevert(
+      escrow.submitProof(1, 0, ['proof'], 'Remark', { from: unregistered }),
+      'caller is not registered',
+    );
+    await expectRevert(
+      escrow.verifyMilestone(1, 0, true, '', { from: unregistered }),
+      'caller is not registered',
+    );
+    await expectRevert(
+      escrow.cancelRequest(1, { from: unregistered }),
+      'caller is not registered',
+    );
+    await expectRevert(
+      escrow.refundRemaining(1, { from: unregistered }),
+      'caller is not registered',
+    );
+  });
+
+  it('allows registered wallets to be shipper and carrier on different requests', async () => {
+    const escrow = await DeliveryEscrow.new(registry.address);
+
+    await createRequest(escrow, shipper);
+    await escrow.proposeMilestones(1, [['Deliver for shipper', 100]], { from: carrier });
+
+    await createRequest(escrow, carrier);
+    await escrow.proposeMilestones(2, [['Deliver for carrier', 100]], { from: shipper });
+
+    await escrow.approveAndFund(1, 0, { from: shipper, value: oneEth });
+    await escrow.approveAndFund(2, 0, { from: carrier, value: oneEth });
+
+    const firstRequest = await escrow.getRequest(1);
+    const secondRequest = await escrow.getRequest(2);
+    assert.equal(firstRequest.shipper, shipper);
+    assert.equal(firstRequest.carrier, carrier);
+    assert.equal(secondRequest.shipper, carrier);
+    assert.equal(secondRequest.carrier, shipper);
+  });
+
+  it('maintains each shipper locked total and contributing request count', async () => {
+    const escrow = await DeliveryEscrow.new(registry.address);
+    await createFundedRequest(escrow);
+
+    await createRequest(escrow);
+    await escrow.proposeMilestones(2, [['Second delivery', 100]], { from: otherCarrier });
+    await escrow.approveAndFund(2, 0, { from: shipper, value: oneEth });
+
+    let locked = await escrow.getLockedEscrow(shipper);
+    assert.equal(locked.totalLocked.toString(), web3.utils.toWei('2', 'ether'));
+    assert.equal(locked.activeRequestCount.toString(), '2');
+
+    await escrow.submitProof(1, 0, ['pickup'], 'Picked up', { from: carrier });
+    await escrow.verifyMilestone(1, 0, true, '', { from: shipper });
+
+    locked = await escrow.getLockedEscrow(shipper);
+    assert.equal(locked.totalLocked.toString(), web3.utils.toWei('1.6', 'ether'));
+    assert.equal(locked.activeRequestCount.toString(), '2');
+
+    await advancePastDeadline(escrow, 1);
+    await escrow.refundRemaining(1, { from: shipper });
+
+    locked = await escrow.getLockedEscrow(shipper);
+    assert.equal(locked.totalLocked.toString(), oneEth);
+    assert.equal(locked.activeRequestCount.toString(), '1');
+
+    await escrow.cancelRequest(2, { from: shipper });
+
+    locked = await escrow.getLockedEscrow(shipper);
+    assert.equal(locked.totalLocked.toString(), '0');
+    assert.equal(locked.activeRequestCount.toString(), '0');
   });
 });

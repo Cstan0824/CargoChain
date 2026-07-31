@@ -47,7 +47,7 @@ export function Marketplace() {
     setLoading(true);
     setError(null);
 
-    loadOpenRequests(contracts.deliveryEscrow)
+    loadOpenRequests(contracts.deliveryEscrow, account)
       .then((nextRows) => {
         if (!cancelled) setRows(nextRows);
       })
@@ -64,7 +64,7 @@ export function Marketplace() {
     return () => {
       cancelled = true;
     };
-  }, [contracts, refreshKey]);
+  }, [account, contracts, refreshKey]);
 
   const filtered = useMemo(() => {
     return rows.filter((r) => {
@@ -77,7 +77,13 @@ export function Marketplace() {
     });
   }, [rows, search]);
 
-  const openDetails = (id) => navigate(`/requests/${id}`);
+  const openDetails = (row) => {
+    if (row.hasOwnActiveProposal) {
+      navigate(`/shipments/${row.id}/propose`);
+      return;
+    }
+    navigate(`/requests/${row.id}`);
+  };
 
   return (
     <div className={styles.page}>
@@ -129,10 +135,8 @@ export function Marketplace() {
 
       {deployError && (
         <Card className={styles.notice}>
-          <strong>Contracts not deployed.</strong>{' '}
-          <span className={styles.muted}>
-            Run <code>npm run migrate</code> to populate the marketplace.
-          </span>
+          <strong>Contract connection unavailable.</strong>{' '}
+          <span className={styles.muted}>{deployError}</span>
         </Card>
       )}
 
@@ -148,7 +152,7 @@ export function Marketplace() {
               title={emptyTitle({ deployError, error, rows, search })}
               description={
                 deployError
-                  ? 'Run npm run migrate to deploy contracts and populate the marketplace.'
+                  ? deployError
                   : rows.length === 0
                     ? 'Published delivery requests will appear here after shipper wallets submit createRequest().'
                     : 'No open requests match your current filters. Try clearing the search or picking a different route.'
@@ -173,7 +177,7 @@ export function Marketplace() {
                 key={r.id}
                 type="button"
                 className={styles.jobCard}
-                onClick={() => openDetails(r.id)}
+                onClick={() => openDetails(r)}
               >
                 <div className={styles.cardTop}>
                   <span className={styles.cardId}>#{String(r.id).padStart(4, '0')}</span>
@@ -219,7 +223,7 @@ export function Marketplace() {
           </div>
         ) : (
           <Table
-            onRowClick={(row) => openDetails(row.id)}
+            onRowClick={openDetails}
             columns={[
               {
                 key: 'id',
@@ -289,24 +293,25 @@ export function Marketplace() {
   );
 }
 
-async function loadOpenRequests(deliveryEscrow) {
+async function loadOpenRequests(deliveryEscrow, account) {
   const ids = await deliveryEscrow.getOpenRequests(0n, 50n);
   const rows = await Promise.all(
     ids.map(async (idValue) => {
       const id = BigInt(idValue);
-      const [request, items, milestones] = await Promise.all([
+      const [request, items, milestones, proposals] = await Promise.all([
         deliveryEscrow.getRequest(id),
         deliveryEscrow.getItems(id),
         deliveryEscrow.getMilestones(id),
+        account ? deliveryEscrow.getProposals(id) : Promise.resolve([]),
       ]);
-      return mapMarketplaceRow(request, items, milestones);
+      return mapMarketplaceRow(request, items, milestones, proposals, account);
     }),
   );
 
   return rows.sort((a, b) => b.createdAt - a.createdAt);
 }
 
-function mapMarketplaceRow(request, items, milestones) {
+function mapMarketplaceRow(request, items, milestones, proposals, account) {
   const id = Number(request.requestId ?? request[0]);
   const shipper = request.shipper ?? request[1];
   const from = request.pickupLocation ?? request[3];
@@ -343,6 +348,12 @@ function mapMarketplaceRow(request, items, milestones) {
     proposedAmountWei,
     deadlineMs: deadline * 1000,
     createdAt,
+    hasOwnActiveProposal: Boolean(
+      account && Array.from(proposals || []).some((proposal) => (
+        Number(proposal.status ?? proposal[1]) === 0
+        && (proposal.carrier ?? proposal[0]).toLowerCase() === account.toLowerCase()
+      )),
+    ),
   };
 }
 
