@@ -18,6 +18,7 @@ import { Topbar } from '../components/Topbar.jsx';
 import { Card } from '../components/Card.jsx';
 import { Button } from '../components/Button.jsx';
 import { ChatButton } from '../components/chat/ChatButton.jsx';
+import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { useToast } from '../hooks/useToast.js';
 import { useWallet } from '../hooks/useWallet.js';
 import { useContracts } from '../hooks/useContracts.js';
@@ -28,6 +29,7 @@ import {
 } from '../utils/walletTransaction.js';
 import { useUserProfile } from '../hooks/useUserProfile.js';
 import { useWalletIdentities, walletIdentityLabel } from '../hooks/useWalletIdentities.js';
+import { useConfirmDialog } from '../hooks/useConfirmDialog.js';
 import {
   formatEth,
   formatDate,
@@ -71,6 +73,7 @@ export function ProposeMilestones() {
   const [draggedMilestoneIndex, setDraggedMilestoneIndex] = useState(null);
   const [dropTarget, setDropTarget] = useState(null);
   const [resubmissionSource, setResubmissionSource] = useState(null);
+  const { confirm: confirmAction, confirmation } = useConfirmDialog();
   const walletIdentities = useWalletIdentities([request?.shipper], contracts?.userRegistry);
 
   // Load request details to display context
@@ -360,7 +363,12 @@ export function ProposeMilestones() {
   const revokeProposal = async () => {
     if (revoking || !ownProposal || !provider || !contracts?.deliveryEscrow) return;
 
-    if (!window.confirm('Revoke your current proposal? You can submit a revised plan after it is confirmed.')) {
+    if (!await confirmAction({
+      title: 'Revoke this proposal?',
+      message: 'The submitted proposal will remain in the on-chain history as revoked. You can submit a revised plan after the transaction is confirmed.',
+      confirmLabel: 'Revoke proposal',
+      tone: 'danger',
+    })) {
       return;
     }
 
@@ -672,6 +680,7 @@ export function ProposeMilestones() {
           )}
         </div>
       </div>
+      {confirmation && <ConfirmDialog {...confirmation} />}
     </div>
   );
 }

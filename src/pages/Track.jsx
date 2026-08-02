@@ -1,18 +1,27 @@
 // src/pages/Track.jsx - Single shipment view backed by DeliveryEscrow.
 
-import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { parseEther } from 'ethers';
 import {
+  HiOutlineArrowRight,
+  HiOutlineArrowPath,
+  HiOutlineCalendarDays,
   HiOutlineCheck,
   HiOutlineCheckBadge,
+  HiOutlineChevronDown,
   HiOutlineChevronLeft,
   HiOutlineChevronRight,
   HiOutlineCreditCard,
   HiOutlineCube,
   HiOutlineExclamationCircle,
+  HiOutlineGift,
   HiOutlineInformationCircle,
   HiOutlineLockClosed,
+  HiOutlinePencilSquare,
   HiOutlinePhoto,
+  HiOutlinePlus,
+  HiOutlineTrash,
   HiOutlineXMark,
 } from 'react-icons/hi2';
 import { Topbar } from '../components/Topbar.jsx';
@@ -21,11 +30,13 @@ import { Badge } from '../components/Badge.jsx';
 import { Tabs } from '../components/Tabs.jsx';
 import { Button } from '../components/Button.jsx';
 import { ChatButton } from '../components/chat/ChatButton.jsx';
+import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { useContracts } from '../hooks/useContracts.js';
 import { useToast } from '../hooks/useToast.js';
 import { useWallet } from '../hooks/useWallet.js';
 import { useUserProfile } from '../hooks/useUserProfile.js';
 import { useWalletIdentities, walletIdentityLabel } from '../hooks/useWalletIdentities.js';
+import { useConfirmDialog } from '../hooks/useConfirmDialog.js';
 import {
   formatDate,
   formatEth,
@@ -43,6 +54,7 @@ import {
   formatWalletTransactionError,
   sendWalletContractTransaction,
 } from '../utils/walletTransaction.js';
+import { countWords, exceedsTextLimit } from '../utils/textLimits.js';
 
 const TAB_ITEMS = [
   { value: 'timeline', label: 'Timeline & Checkpoints' },
@@ -52,10 +64,24 @@ const TAB_ITEMS = [
 
 const MILESTONE_STATUS = ['Proposed', 'PendingProof', 'Submitted', 'Verified', 'Rejected', 'Paid'];
 const PROPOSAL_STATUS = ['Active', 'Revoked', 'Rejected', 'Accepted'];
+const CANCELLATION_STATUS = ['Pending', 'Accepted', 'Rejected', 'Withdrawn', 'Expired'];
+const AMENDMENT_STATUS = ['Pending', 'Accepted', 'Rejected', 'Withdrawn', 'Expired'];
+const MAX_PROPOSAL_REJECTION_NOTE_BYTES = 500;
+const MAX_CANCELLATION_NOTE_BYTES = 500;
+const MAX_AMENDMENT_NOTE_BYTES = 500;
+const MAX_PROPOSAL_REJECTION_NOTE_WORDS = 80;
+const MAX_CANCELLATION_NOTE_WORDS = 80;
+const MAX_AMENDMENT_NOTE_WORDS = 80;
+const MIN_ADDITIONAL_FUNDING_WEI = parseEther('0.01');
+const MIN_CANCELLATION_LEAD_SECONDS = 60 * 60;
+const MIN_AMENDMENT_LEAD_SECONDS = 60 * 60;
+const MIN_DEADLINE_CHANGE_SECONDS = 15 * 60;
+const APPEND_MILESTONE_ID = (1n << 256n) - 1n;
 
 export function Track() {
   const { id: idParam } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { contracts, deployError } = useContracts();
   const { account, signer, provider } = useWallet();
   const { show } = useToast();
@@ -71,7 +97,12 @@ export function Track() {
   const [paymentHistoryLoading, setPaymentHistoryLoading] = useState(false);
   const [paymentHistoryError, setPaymentHistoryError] = useState(null);
   const [proofViewerMilestone, setProofViewerMilestone] = useState(null);
+  const [tipScrollRequest, setTipScrollRequest] = useState(0);
+  const [focusedAgreement, setFocusedAgreement] = useState(null);
   const [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1000));
+  const { confirm: confirmAction, confirmation } = useConfirmDialog();
+  const amendmentSectionRef = useRef(null);
+  const cancellationSectionRef = useRef(null);
   const walletIdentities = useWalletIdentities([
     shipment?.shipper,
     shipment?.carrier,
@@ -86,7 +117,27 @@ export function Track() {
   }, []);
 
   useEffect(() => {
-    if (!idParam || !contracts?.deliveryEscrow) {
+    const focusTarget = new URLSearchParams(location.search).get('focus');
+    if (!shipment || !['amendment', 'cancellation'].includes(focusTarget)) return undefined;
+
+    const section = focusTarget === 'amendment'
+      ? amendmentSectionRef.current
+      : cancellationSectionRef.current;
+    if (!section) return undefined;
+
+    const frame = window.requestAnimationFrame(() => {
+      section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setFocusedAgreement(focusTarget);
+    });
+    const clearFocus = window.setTimeout(() => setFocusedAgreement(null), 1_800);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearTimeout(clearFocus);
+    };
+  }, [location.search, shipment]);
+
+  useEffect(() => {
+    if (!idParam || !contracts?.deliveryEscrow || !contracts?.lifecycleManager) {
       setShipment(null);
       return;
     }
@@ -95,7 +146,7 @@ export function Track() {
     setLoading(true);
     setError(null);
 
-    loadShipment(contracts.deliveryEscrow, idParam)
+    loadShipment(contracts.deliveryEscrow, contracts.lifecycleManager, idParam)
       .then((nextShipment) => {
         if (!cancelled) {
           setShipment(nextShipment);
@@ -193,10 +244,7 @@ export function Track() {
   );
   const canCancelRequest = Boolean(
     isShipper
-      && (
-        ['Open', 'PendingApproval'].includes(shipment?.status)
-        || (shipment?.status === 'Funded' && !deadlinePassed)
-      ),
+      && ['Open', 'PendingApproval'].includes(shipment?.status),
   );
   const canClaimRefund = Boolean(
     isShipper
@@ -210,6 +258,11 @@ export function Track() {
     isCarrier && ['Funded', 'InProgress'].includes(shipment?.status),
   );
   const busy = actionStage !== 'idle';
+
+  const openCompletionTip = () => {
+    setTipScrollRequest((value) => value + 1);
+    setTab('payments');
+  };
 
   useEffect(() => {
     if (!isShipper && tab === 'proposal-history') setTab('timeline');
@@ -262,8 +315,8 @@ export function Track() {
     }
   };
 
-  const rejectProposal = async (proposalId) => {
-    if (busy || !shipment || !signer || !contracts?.deliveryEscrow) return;
+  const rejectProposal = async (proposalId, rejectionNote = '') => {
+    if (busy || !shipment || !signer || !contracts?.deliveryEscrow) return false;
     setActionStage('rejecting');
 
     try {
@@ -271,12 +324,12 @@ export function Track() {
       if (!await requireRegistration(
         'Register your CargoChain profile to reject a milestone proposal.',
         activeSignerAddress,
-      )) return;
+      )) return false;
 
       const tx = await sendWalletContractTransaction({
         contract: contracts.deliveryEscrow,
         method: 'rejectMilestoneProposal',
-        args: [BigInt(shipment.id), BigInt(proposalId)],
+        args: [BigInt(shipment.id), BigInt(proposalId), rejectionNote.trim()],
         signer,
         provider,
       });
@@ -286,8 +339,67 @@ export function Track() {
 
       show(`Proposal rejected in block ${receipt.blockNumber}. Other proposals remain available.`, 'success');
       setRefreshKey((value) => value + 1);
+      return true;
     } catch (actionError) {
       show(formatActionError(actionError), 'error');
+      return false;
+    } finally {
+      setActionStage('idle');
+    }
+  };
+
+  const sendCarrierTip = async (tipAmountEth) => {
+    if (busy || !shipment || !signer || !contracts?.deliveryEscrow) return false;
+
+    let tipValue;
+    try {
+      tipValue = parseEther(tipAmountEth.trim());
+    } catch {
+      show('Enter a valid tip amount in ETH.', 'error');
+      return false;
+    }
+    if (tipValue <= 0n) {
+      show('Tip amount must be greater than zero.', 'error');
+      return false;
+    }
+
+    setActionStage('tipping');
+    try {
+      const activeSignerAddress = await signer.getAddress();
+      if (!await requireRegistration(
+        'Register your CargoChain profile to tip the carrier.',
+        activeSignerAddress,
+      )) return false;
+
+      const latest = await contracts.deliveryEscrow.getRequest(BigInt(shipment.id));
+      if ((latest.shipper ?? latest[1]).toLowerCase() !== activeSignerAddress.toLowerCase()) {
+        throw new Error('Only the request shipper can tip the carrier.');
+      }
+      if (requestStatus(latest.status ?? latest[9]) !== 'Completed') {
+        throw new Error('The delivery must be completed before sending a tip.');
+      }
+      if (BigInt(await contracts.deliveryEscrow.tipAmounts(BigInt(shipment.id))) > 0n) {
+        throw new Error('A tip has already been sent for this delivery.');
+      }
+
+      const tx = await sendWalletContractTransaction({
+        contract: contracts.deliveryEscrow,
+        method: 'tipCarrier',
+        args: [BigInt(shipment.id)],
+        overrides: { value: tipValue },
+        signer,
+        provider,
+      });
+      show(`Sending ${formatEth(tipValue)} directly to the carrier...`, 'info');
+      const receipt = await tx.wait();
+      if (!receipt || receipt.status !== 1) throw new Error('Tip transaction was not confirmed.');
+
+      show(`Carrier tipped in block ${receipt.blockNumber}.`, 'success');
+      setRefreshKey((value) => value + 1);
+      return true;
+    } catch (actionError) {
+      show(formatActionError(actionError), 'error');
+      return false;
     } finally {
       setActionStage('idle');
     }
@@ -299,17 +411,18 @@ export function Track() {
       return;
     }
 
-    const hasEscrow = shipment.remaining > 0n;
-    const confirmation = hasEscrow
-      ? `Cancel this request and refund ${formatEth(shipment.remaining)} to the shipper wallet?`
-      : 'Cancel this request? It has not funded escrow yet.';
-    if (!window.confirm(confirmation)) return;
+    if (!await confirmAction({
+      title: 'Cancel this request?',
+      message: 'This request has not been funded yet. Cancelling it will close the request and stop carriers from submitting proposals.',
+      confirmLabel: 'Cancel request',
+      tone: 'danger',
+    })) return;
 
     setActionStage('cancelling');
     try {
       const latest = await getLatestRequestForShipper(contracts.deliveryEscrow, signer, shipment.id);
       const latestStatus = requestStatus(latest.status ?? latest[9]);
-      if (!['Open', 'PendingApproval', 'Funded'].includes(latestStatus)) {
+      if (!['Open', 'PendingApproval'].includes(latestStatus)) {
         throw new Error('This request can no longer be cancelled from its current status.');
       }
 
@@ -326,16 +439,11 @@ export function Track() {
         signer,
         provider,
       });
-      show(hasEscrow ? 'Cancelling request and refunding escrow...' : 'Cancelling request...', 'info');
+      show('Cancelling request...', 'info');
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) throw new Error('Cancellation was not confirmed.');
 
-      show(
-        hasEscrow
-          ? `Request cancelled and ${formatEth(shipment.remaining)} refunded.`
-          : 'Request cancelled.',
-        'success',
-      );
+      show('Request cancelled.', 'success');
       setRefreshKey((value) => value + 1);
     } catch (actionError) {
       show(formatActionError(actionError), 'error');
@@ -344,13 +452,293 @@ export function Track() {
     }
   };
 
+  const sendCancellationTransaction = async ({
+    stage,
+    method,
+    args,
+    progressMessage,
+    successMessage,
+  }) => {
+    if (busy || !shipment || !signer || !contracts?.lifecycleManager) {
+      show('Connect a shipment participant wallet first.', 'error');
+      return false;
+    }
+
+    setActionStage(stage);
+    try {
+      const activeSignerAddress = await signer.getAddress();
+      if (!await requireRegistration(
+        'Register your CargoChain profile to manage a cancellation agreement.',
+        activeSignerAddress,
+      )) return false;
+
+      const isParticipant = [shipment.shipper, shipment.carrier]
+        .filter(Boolean)
+        .some((wallet) => wallet.toLowerCase() === activeSignerAddress.toLowerCase());
+      if (!isParticipant && method !== 'expireCancellation') {
+        throw new Error('Only the shipment participants can manage this cancellation.');
+      }
+
+      const tx = await sendWalletContractTransaction({
+        contract: contracts.lifecycleManager,
+        method,
+        args,
+        signer,
+        provider,
+      });
+      show(progressMessage, 'info');
+      const receipt = await tx.wait();
+      if (!receipt || receipt.status !== 1) {
+        throw new Error('The cancellation transaction was not confirmed.');
+      }
+
+      show(`${successMessage} Block ${receipt.blockNumber}.`, 'success');
+      setRefreshKey((value) => value + 1);
+      return true;
+    } catch (actionError) {
+      show(formatActionError(actionError), 'error');
+      return false;
+    } finally {
+      setActionStage('idle');
+    }
+  };
+
+  const requestMutualCancellation = async (note, responseDeadline) => {
+    const trimmedNote = note.trim();
+    const deadline = Math.floor(new Date(responseDeadline).getTime() / 1000);
+    if (!trimmedNote) {
+      show('Explain why you want to cancel the shipment.', 'error');
+      return false;
+    }
+    if (exceedsTextLimit(
+      trimmedNote,
+      MAX_CANCELLATION_NOTE_WORDS,
+      MAX_CANCELLATION_NOTE_BYTES,
+    )) {
+      show(`Cancellation note must be ${MAX_CANCELLATION_NOTE_WORDS} words or fewer.`, 'error');
+      return false;
+    }
+    if (shipment.deadline - nowSeconds <= MIN_CANCELLATION_LEAD_SECONDS) {
+      show('Cancellation requests close one hour before the shipment deadline.', 'error');
+      return false;
+    }
+    if (!Number.isFinite(deadline) || deadline <= nowSeconds) {
+      show('Choose a response deadline in the future.', 'error');
+      return false;
+    }
+    if (deadline > shipment.deadline) {
+      show('The response deadline cannot exceed the shipment deadline.', 'error');
+      return false;
+    }
+
+    return sendCancellationTransaction({
+      stage: 'requesting-cancellation',
+      method: 'requestCancellation',
+      args: [BigInt(shipment.id), trimmedNote, BigInt(deadline)],
+      progressMessage: 'Recording the cancellation request on-chain...',
+      successMessage: 'Cancellation request sent.',
+    });
+  };
+
+  const acceptMutualCancellation = async (cancellationId) => {
+    if (!await confirmAction({
+      title: 'Accept shipment cancellation?',
+      message: `${formatEth(shipment.released)} already released remains with the carrier. ${formatEth(shipment.remaining)} remaining escrow will return to the shipper.`,
+      confirmLabel: 'Accept cancellation',
+      tone: 'danger',
+    })) return false;
+    return sendCancellationTransaction({
+      stage: 'accepting-cancellation',
+      method: 'acceptCancellation',
+      args: [BigInt(shipment.id), BigInt(cancellationId)],
+      progressMessage: 'Finalizing the cancellation and remaining escrow refund...',
+      successMessage: 'Cancellation accepted and remaining escrow settled.',
+    });
+  };
+
+  const rejectMutualCancellation = (cancellationId, note) => {
+    const trimmedNote = note.trim();
+    if (exceedsTextLimit(
+      trimmedNote,
+      MAX_CANCELLATION_NOTE_WORDS,
+      MAX_CANCELLATION_NOTE_BYTES,
+    )) {
+      show(`Rejection note must be ${MAX_CANCELLATION_NOTE_WORDS} words or fewer.`, 'error');
+      return Promise.resolve(false);
+    }
+    return sendCancellationTransaction({
+      stage: 'rejecting-cancellation',
+      method: 'rejectCancellation',
+      args: [BigInt(shipment.id), BigInt(cancellationId), trimmedNote],
+      progressMessage: 'Recording the cancellation rejection...',
+      successMessage: 'Cancellation rejected; the shipment continues.',
+    });
+  };
+
+  const withdrawMutualCancellation = (cancellationId) => sendCancellationTransaction({
+    stage: 'withdrawing-cancellation',
+    method: 'withdrawCancellation',
+    args: [BigInt(shipment.id), BigInt(cancellationId)],
+    progressMessage: 'Withdrawing the cancellation request...',
+    successMessage: 'Cancellation request withdrawn.',
+  });
+
+  const expireMutualCancellation = (cancellationId) => sendCancellationTransaction({
+    stage: 'expiring-cancellation',
+    method: 'expireCancellation',
+    args: [BigInt(shipment.id), BigInt(cancellationId)],
+    progressMessage: 'Closing the expired cancellation request...',
+    successMessage: 'Cancellation request marked as expired.',
+  });
+
+  const sendAmendmentTransaction = async ({
+    stage,
+    method,
+    args,
+    value = 0n,
+    progressMessage,
+    successMessage,
+  }) => {
+    if (busy || !shipment || !signer || !contracts?.lifecycleManager) {
+      show('Connect a shipment participant wallet first.', 'error');
+      return false;
+    }
+
+    setActionStage(stage);
+    try {
+      const activeSignerAddress = await signer.getAddress();
+      if (!await requireRegistration(
+        'Register your CargoChain profile to manage shipment amendments.',
+        activeSignerAddress,
+      )) return false;
+
+      const isParticipant = [shipment.shipper, shipment.carrier]
+        .filter(Boolean)
+        .some((wallet) => wallet.toLowerCase() === activeSignerAddress.toLowerCase());
+      if (!isParticipant && method !== 'expireAmendment') {
+        throw new Error('Only the shipment participants can manage this amendment.');
+      }
+
+      const tx = await sendWalletContractTransaction({
+        contract: contracts.lifecycleManager,
+        method,
+        args,
+        overrides: value > 0n ? { value } : undefined,
+        signer,
+        provider,
+      });
+      show(progressMessage, 'info');
+      const receipt = await tx.wait();
+      if (!receipt || receipt.status !== 1) {
+        throw new Error('The amendment transaction was not confirmed.');
+      }
+
+      show(`${successMessage} Block ${receipt.blockNumber}.`, 'success');
+      setRefreshKey((current) => current + 1);
+      return true;
+    } catch (actionError) {
+      show(formatActionError(actionError), 'error');
+      return false;
+    } finally {
+      setActionStage('idle');
+    }
+  };
+
+  const submitAmendment = ({
+    proposedDeadline,
+    responseDeadline,
+    note,
+    existingFunding,
+    newMilestones,
+    additionalFunding,
+    directExtension,
+  }) => {
+    if (directExtension) {
+      return sendAmendmentTransaction({
+        stage: 'extending-deadline',
+        method: 'extendShipmentDeadline',
+        args: [BigInt(shipment.id), BigInt(proposedDeadline), note],
+        progressMessage: 'Extending the shipment deadline on-chain...',
+        successMessage: 'Shipment deadline extended.',
+      });
+    }
+
+    return sendAmendmentTransaction({
+      stage: 'requesting-amendment',
+      method: 'requestAmendment',
+      args: [
+        BigInt(shipment.id),
+        BigInt(proposedDeadline),
+        BigInt(responseDeadline),
+        note,
+        existingFunding,
+        newMilestones,
+      ],
+      value: isShipper ? additionalFunding : 0n,
+      progressMessage: isShipper && additionalFunding > 0n
+        ? `Staging ${formatEth(additionalFunding)} with the amendment request...`
+        : 'Recording the amendment request on-chain...',
+      successMessage: 'Amendment request sent.',
+    });
+  };
+
+  const acceptAmendment = async (amendment) => {
+    const shipperMustFund = amendment.requester.toLowerCase() !== shipment.shipper.toLowerCase();
+    if (!await confirmAction({
+      title: 'Accept this agreement change?',
+      message: shipperMustFund && amendment.additionalFunding > 0n
+        ? `${formatEth(amendment.additionalFunding)} will be added to escrow and the proposed agreement will take effect.`
+        : 'The proposed deadline and milestone funding plan will replace the current agreement terms.',
+      confirmLabel: shipperMustFund && amendment.additionalFunding > 0n
+        ? `Add ${formatEth(amendment.additionalFunding)} and accept`
+        : 'Accept agreement change',
+    })) return false;
+    return sendAmendmentTransaction({
+      stage: 'accepting-amendment',
+      method: 'acceptAmendment',
+      args: [BigInt(shipment.id), BigInt(amendment.id)],
+      value: shipperMustFund ? amendment.additionalFunding : 0n,
+      progressMessage: 'Applying the agreed shipment amendment...',
+      successMessage: 'Amendment accepted and applied.',
+    });
+  };
+
+  const rejectAmendment = (amendmentId, note) => sendAmendmentTransaction({
+    stage: 'rejecting-amendment',
+    method: 'rejectAmendment',
+    args: [BigInt(shipment.id), BigInt(amendmentId), note.trim()],
+    progressMessage: 'Recording the amendment rejection...',
+    successMessage: 'Amendment rejected; the existing agreement continues.',
+  });
+
+  const withdrawAmendment = (amendmentId) => sendAmendmentTransaction({
+    stage: 'withdrawing-amendment',
+    method: 'withdrawAmendment',
+    args: [BigInt(shipment.id), BigInt(amendmentId)],
+    progressMessage: 'Withdrawing the amendment request...',
+    successMessage: 'Amendment request withdrawn.',
+  });
+
+  const expireAmendment = (amendmentId) => sendAmendmentTransaction({
+    stage: 'expiring-amendment',
+    method: 'expireAmendment',
+    args: [BigInt(shipment.id), BigInt(amendmentId)],
+    progressMessage: 'Closing the expired amendment request...',
+    successMessage: 'Amendment request marked as expired.',
+  });
+
   const claimRefund = async () => {
     if (busy || !shipment || !signer || !provider || !contracts?.deliveryEscrow) {
       show('Connect the shipper wallet first.', 'error');
       return;
     }
 
-    if (!window.confirm(`Claim ${formatEth(shipment.remaining)} remaining escrow for this request?`)) return;
+    if (!await confirmAction({
+      title: 'Claim remaining escrow?',
+      message: `${formatEth(shipment.remaining)} will be returned to the shipper wallet. This refund cannot be reversed.`,
+      confirmLabel: 'Claim refund',
+      tone: 'danger',
+    })) return;
 
     setActionStage('refunding');
     try {
@@ -659,9 +1047,7 @@ export function Track() {
             <div>
               {canClaimRefund
                 ? `${formatEth(shipment.remaining)} can be returned to the shipper wallet.`
-                : shipment.status === 'Funded'
-                  ? `Cancel before work starts to return ${formatEth(shipment.remaining)}.`
-                  : 'Cancel the request before escrow is funded.'}
+                : 'Cancel the request before escrow is funded.'}
             </div>
           </div>
           <div className={styles.refundActions}>
@@ -673,9 +1059,7 @@ export function Track() {
               >
                 {actionStage === 'cancelling'
                   ? 'Cancelling...'
-                  : shipment.remaining > 0n
-                    ? 'Cancel & refund'
-                    : 'Cancel request'}
+                  : 'Cancel request'}
               </Button>
             )}
             {canClaimRefund && (
@@ -751,17 +1135,26 @@ export function Track() {
                 busy={busy}
                 onVerify={verifyMilestone}
                 onSubmitProof={submitMilestoneProof}
+                showCompletionCta={isShipper && shipment.status === 'Completed'}
+                tipSent={shipment.tipAmount > 0n}
+                onOpenTip={openCompletionTip}
               />
             )}
             {tab === 'proof' && <ProofPanel milestones={shipment.milestones} />}
             {tab === 'payments' && (
               <PaymentsPanel
                 shipment={shipment}
+                isShipper={isShipper}
+                busy={busy}
+                actionStage={actionStage}
                 history={paymentHistory}
                 historyLoading={paymentHistoryLoading}
                 historyError={paymentHistoryError}
                 onCopyHash={copyTransactionHash}
                 onRetry={() => setRefreshKey((value) => value + 1)}
+                onTip={sendCarrierTip}
+                tipScrollRequest={tipScrollRequest}
+                onTipScrollComplete={() => setTipScrollRequest(0)}
               />
             )}
             {tab === 'proposal-history' && isShipper && (
@@ -776,13 +1169,1400 @@ export function Track() {
           </div>
         </Card>
       )}
+
+      {(shipment.amendments.length > 0 || (
+        (isShipper || isCarrier)
+        && ['Funded', 'InProgress'].includes(shipment.status)
+        && !deadlinePassed
+      )) && (
+        <div
+          ref={amendmentSectionRef}
+          className={`${styles.agreementFocusTarget} ${
+            focusedAgreement === 'amendment' ? styles.agreementFocusTargetActive : ''
+          }`}
+        >
+          <AmendmentPanel
+            amendments={shipment.amendments}
+            shipment={shipment}
+            account={account}
+            isShipper={isShipper}
+            isParticipant={isShipper || isCarrier}
+            busy={busy}
+            actionStage={actionStage}
+            nowSeconds={nowSeconds}
+            walletIdentities={walletIdentities}
+            onRequest={submitAmendment}
+            onAccept={acceptAmendment}
+            onReject={rejectAmendment}
+            onWithdraw={withdrawAmendment}
+            onExpire={expireAmendment}
+          />
+        </div>
+      )}
+
+      {(shipment.cancellations.length > 0 || (
+        (isShipper || isCarrier)
+        && ['Funded', 'InProgress'].includes(shipment.status)
+        && !deadlinePassed
+      )) && (
+        <div
+          ref={cancellationSectionRef}
+          className={`${styles.agreementFocusTarget} ${
+            focusedAgreement === 'cancellation' ? styles.agreementFocusTargetActive : ''
+          }`}
+        >
+          <CancellationPanel
+            cancellations={shipment.cancellations}
+            shipment={shipment}
+            account={account}
+            isParticipant={isShipper || isCarrier}
+            busy={busy}
+            actionStage={actionStage}
+            nowSeconds={nowSeconds}
+            walletIdentities={walletIdentities}
+            onRequest={requestMutualCancellation}
+            onAccept={acceptMutualCancellation}
+            onReject={rejectMutualCancellation}
+            onWithdraw={withdrawMutualCancellation}
+            onExpire={expireMutualCancellation}
+          />
+        </div>
+      )}
+
       {proofViewerMilestone && (
         <ProofViewerModal
           milestone={proofViewerMilestone}
           onClose={() => setProofViewerMilestone(null)}
         />
       )}
+      {confirmation && <ConfirmDialog {...confirmation} />}
     </div>
+  );
+}
+
+function AmendmentPanel({
+  amendments,
+  shipment,
+  account,
+  isShipper,
+  isParticipant,
+  busy,
+  actionStage,
+  nowSeconds,
+  walletIdentities,
+  onRequest,
+  onAccept,
+  onReject,
+  onWithdraw,
+  onExpire,
+}) {
+  const pending = amendments.find((entry) => entry.status === 'Pending');
+  const history = [...amendments].filter((entry) => entry.status !== 'Pending').reverse();
+  const [formOpen, setFormOpen] = useState(false);
+  const [changeDeadline, setChangeDeadline] = useState(false);
+  const [note, setNote] = useState('');
+  const [rejectionNote, setRejectionNote] = useState('');
+  const [proposedDeadline, setProposedDeadline] = useState(() => (
+    suggestedExtendedDeadline(shipment.deadline)
+  ));
+  const [responseDeadline, setResponseDeadline] = useState(() => (
+    suggestedAmendmentResponseDeadline(shipment.deadline)
+  ));
+  const [existingAmounts, setExistingAmounts] = useState({});
+  const [newMilestones, setNewMilestones] = useState([]);
+  const [draggedNewMilestone, setDraggedNewMilestone] = useState(null);
+  const [amendmentDropTarget, setAmendmentDropTarget] = useState(null);
+  const [formError, setFormError] = useState('');
+  const [confirmationDraft, setConfirmationDraft] = useState(null);
+  const [fundingPlanOpen, setFundingPlanOpen] = useState(false);
+  const noteWordCount = countWords(note);
+  const rejectionWordCount = countWords(rejectionNote);
+  const noteTooLong = exceedsTextLimit(note, MAX_AMENDMENT_NOTE_WORDS, MAX_AMENDMENT_NOTE_BYTES);
+  const rejectionTooLong = exceedsTextLimit(
+    rejectionNote,
+    MAX_AMENDMENT_NOTE_WORDS,
+    MAX_AMENDMENT_NOTE_BYTES,
+  );
+  const shipmentActive = ['Funded', 'InProgress'].includes(shipment.status)
+    && nowSeconds < shipment.deadline;
+  const accountLower = account?.toLowerCase();
+  const isRequester = Boolean(pending && accountLower === pending.requester.toLowerCase());
+  const isResponder = Boolean(pending && accountLower === pending.responder.toLowerCase());
+  const responseExpired = Boolean(pending && nowSeconds > pending.responseDeadline);
+  const firstUnpaidIndex = shipment.milestones.findIndex(
+    (milestone) => milestone.status !== 'Paid',
+  );
+
+  const resetForm = () => {
+    setNote('');
+    setChangeDeadline(false);
+    setProposedDeadline(suggestedExtendedDeadline(shipment.deadline));
+    setResponseDeadline(suggestedAmendmentResponseDeadline(shipment.deadline));
+    setExistingAmounts({});
+    setNewMilestones([]);
+    setDraggedNewMilestone(null);
+    setAmendmentDropTarget(null);
+    setFormError('');
+    setConfirmationDraft(null);
+    setFundingPlanOpen(false);
+    setFormOpen(false);
+  };
+
+  const addNewMilestone = () => {
+    if (firstUnpaidIndex < 0) return;
+    setFundingPlanOpen(true);
+    setNewMilestones((current) => [...current, {
+      key: `${Date.now()}-${current.length}`,
+      name: '',
+      amount: '',
+      insertBefore: null,
+    }]);
+  };
+
+  const startNewMilestoneDrag = (event, key) => {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', key);
+    setDraggedNewMilestone(key);
+  };
+
+  const dragOverOriginalMilestone = (event, milestone) => {
+    if (!draggedNewMilestone) return;
+    event.preventDefault();
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const placement = event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after';
+    const nextUnpaid = shipment.milestones.find((entry) => (
+      entry.index > milestone.index && entry.status !== 'Paid'
+    ));
+    const blocked = milestone.status === 'Paid';
+    event.dataTransfer.dropEffect = blocked ? 'none' : 'move';
+    setAmendmentDropTarget({
+      type: 'original',
+      milestoneId: milestone.milestoneId,
+      placement,
+      insertBefore: placement === 'before'
+        ? milestone.milestoneId
+        : nextUnpaid
+          ? nextUnpaid.milestoneId
+          : null,
+      blocked,
+    });
+  };
+
+  const dropOnOriginalMilestone = (event) => {
+    event.preventDefault();
+    const target = amendmentDropTarget;
+    if (!draggedNewMilestone || !target || target.blocked) {
+      setDraggedNewMilestone(null);
+      setAmendmentDropTarget(null);
+      return;
+    }
+    setNewMilestones((current) => {
+      const moved = current.find((entry) => entry.key === draggedNewMilestone);
+      if (!moved) return current;
+      const remaining = current.filter((entry) => entry.key !== draggedNewMilestone);
+      const firstTargetIndex = remaining.findIndex(
+        (entry) => entry.insertBefore === target.insertBefore,
+      );
+      const insertionIndex = firstTargetIndex < 0 ? remaining.length : firstTargetIndex;
+      remaining.splice(insertionIndex, 0, { ...moved, insertBefore: target.insertBefore });
+      return remaining;
+    });
+    setDraggedNewMilestone(null);
+    setAmendmentDropTarget(null);
+  };
+
+  const dragOverNewMilestone = (event, targetKey) => {
+    if (!draggedNewMilestone) return;
+    if (draggedNewMilestone === targetKey) {
+      setAmendmentDropTarget(null);
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    const bounds = event.currentTarget.getBoundingClientRect();
+    setAmendmentDropTarget({
+      type: 'new',
+      key: targetKey,
+      placement: event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after',
+      blocked: false,
+    });
+  };
+
+  const dropOnNewMilestone = (event, targetKey) => {
+    event.preventDefault();
+    const sourceKey = draggedNewMilestone;
+    const placement = amendmentDropTarget?.placement || 'before';
+    if (!sourceKey || sourceKey === targetKey) {
+      finishNewMilestoneDrag();
+      return;
+    }
+    setNewMilestones((current) => {
+      const source = current.find((entry) => entry.key === sourceKey);
+      const target = current.find((entry) => entry.key === targetKey);
+      if (!source || !target) return current;
+      const next = current.filter((entry) => entry.key !== sourceKey);
+      let targetIndex = next.findIndex((entry) => entry.key === targetKey);
+      if (placement === 'after') targetIndex += 1;
+      next.splice(targetIndex, 0, { ...source, insertBefore: target.insertBefore });
+      return next;
+    });
+    setDraggedNewMilestone(null);
+    setAmendmentDropTarget(null);
+  };
+
+  const finishNewMilestoneDrag = () => {
+    setDraggedNewMilestone(null);
+    setAmendmentDropTarget(null);
+  };
+
+  const submitRequest = async (event) => {
+    event.preventDefault();
+    setFormError('');
+    const deadline = changeDeadline
+      ? Math.floor(new Date(proposedDeadline).getTime() / 1000)
+      : shipment.deadline;
+    const answerBy = Math.floor(new Date(responseDeadline).getTime() / 1000);
+    const trimmedNote = note.trim();
+    try {
+      if (!trimmedNote) throw new Error('Explain the requested agreement change.');
+      if (noteTooLong) {
+        throw new Error(`Reason for change must be ${MAX_AMENDMENT_NOTE_WORDS} words or fewer.`);
+      }
+      if (!Number.isFinite(deadline) || deadline <= nowSeconds) {
+        throw new Error('Choose a shipment deadline in the future.');
+      }
+      if (deadline !== shipment.deadline
+        && Math.abs(deadline - shipment.deadline) < MIN_DEADLINE_CHANGE_SECONDS) {
+        throw new Error('Deadline changes must be at least 15 minutes.');
+      }
+      if (!isShipper && deadline < shipment.deadline) {
+        throw new Error('A carrier can extend the deadline, but cannot shorten it.');
+      }
+      const existingFunding = shipment.milestones
+        .filter((milestone) => milestone.status !== 'Paid')
+        .map((milestone) => {
+          const value = existingAmounts[milestone.milestoneId]?.trim();
+          return value ? [BigInt(milestone.milestoneId), parsePositiveEth(value)] : null;
+        })
+        .filter(Boolean);
+      const additions = newMilestones.map((milestone) => {
+        if (!milestone.name.trim() || !milestone.amount.trim()) {
+          throw new Error('Each new milestone needs a name and funding amount.');
+        }
+        return [
+          milestone.name.trim(),
+          milestone.insertBefore == null
+            ? APPEND_MILESTONE_ID
+            : BigInt(milestone.insertBefore),
+          parsePositiveEth(milestone.amount),
+        ];
+      }).sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
+      const additionalFunding = [...existingFunding, ...additions]
+        .reduce((total, allocation) => total + allocation[allocation.length - 1], 0n);
+
+      if (additionalFunding > 0n && additionalFunding < MIN_ADDITIONAL_FUNDING_WEI) {
+        throw new Error('New amendment funding must total at least 0.01 ETH.');
+      }
+      if (deadline < shipment.deadline && additionalFunding < MIN_ADDITIONAL_FUNDING_WEI) {
+        throw new Error('A shorter deadline requires at least 0.01 ETH of new funding.');
+      }
+      if (deadline === shipment.deadline && additionalFunding === 0n) {
+        throw new Error('Change the deadline or add new escrow funding.');
+      }
+
+      const directExtension = isShipper
+        && deadline > shipment.deadline
+        && additionalFunding === 0n;
+      if (!directExtension && (!Number.isFinite(answerBy) || answerBy <= nowSeconds)) {
+        throw new Error('Choose a response deadline in the future.');
+      }
+      if (!directExtension && answerBy > shipment.deadline) {
+        throw new Error('The response deadline cannot exceed the current shipment deadline.');
+      }
+      if (!directExtension && deadline < shipment.deadline && answerBy > deadline) {
+        throw new Error('Answering a shortened deadline must happen before that proposed deadline.');
+      }
+      if (!directExtension
+        && shipment.deadline - nowSeconds <= MIN_AMENDMENT_LEAD_SECONDS) {
+        throw new Error('Mutual amendment requests close one hour before the shipment deadline.');
+      }
+      setConfirmationDraft({
+        proposedDeadline: deadline,
+        responseDeadline: answerBy,
+        note: trimmedNote,
+        existingFunding,
+        newMilestones: additions,
+        additionalFunding,
+        directExtension,
+      });
+    } catch (error) {
+      setFormError(error.message);
+    }
+  };
+
+  const confirmRequest = async () => {
+    if (!confirmationDraft) return;
+    const completed = await onRequest(confirmationDraft);
+    if (completed) resetForm();
+  };
+
+  const submitRejection = async (event) => {
+    event.preventDefault();
+    if (rejectionTooLong) return;
+    const completed = await onReject(pending.id, rejectionNote);
+    if (completed) setRejectionNote('');
+  };
+
+  const renderNewMilestoneCard = (newMilestone, placementLabel) => {
+    const newDropState = amendmentDropTarget?.type === 'new'
+      && amendmentDropTarget.key === newMilestone.key;
+    return (
+      <div key={newMilestone.key} className={styles.amendmentTimelineRow}>
+        <div className={styles.amendmentNewMarker}>+</div>
+        <div
+          className={`${styles.amendmentInputCard} ${styles.amendmentNewCard} ${draggedNewMilestone === newMilestone.key ? styles.amendmentCardDragging : ''} ${newDropState && amendmentDropTarget.placement === 'before' ? styles.amendmentDropBefore : ''} ${newDropState && amendmentDropTarget.placement === 'after' ? styles.amendmentDropAfter : ''}`}
+          draggable
+          onDragStart={(event) => startNewMilestoneDrag(event, newMilestone.key)}
+          onDragOver={(event) => dragOverNewMilestone(event, newMilestone.key)}
+          onDrop={(event) => dropOnNewMilestone(event, newMilestone.key)}
+          onDragEnd={finishNewMilestoneDrag}
+        >
+          <div className={styles.amendmentCardKicker}>New funded milestone</div>
+          <div className={styles.amendmentCardFields}>
+            <label>
+              <span>Milestone name</span>
+              <input
+                value={newMilestone.name}
+                onChange={(event) => setNewMilestones((current) => current.map(
+                  (entry) => entry.key === newMilestone.key
+                    ? { ...entry, name: event.target.value }
+                    : entry,
+                ))}
+                placeholder="e.g. Customs inspection"
+              />
+            </label>
+            <label>
+              <span>Funded ETH</span>
+              <div className={styles.amendmentEthInput}>
+                <input
+                  type="number"
+                  min="0.001"
+                  step="0.001"
+                  inputMode="decimal"
+                  value={newMilestone.amount}
+                  onChange={(event) => setNewMilestones((current) => current.map(
+                    (entry) => entry.key === newMilestone.key
+                      ? { ...entry, amount: event.target.value }
+                      : entry,
+                  ))}
+                  placeholder="0.00"
+                />
+                <span>ETH</span>
+              </div>
+            </label>
+            <button
+              type="button"
+              className={styles.amendmentRemoveButton}
+              onClick={() => setNewMilestones((current) => current.filter(
+                (entry) => entry.key !== newMilestone.key,
+              ))}
+              aria-label={`Remove ${newMilestone.name || 'new milestone'}`}
+            >
+              <HiOutlineTrash />
+            </button>
+          </div>
+          <small className={styles.amendmentPlacementNote}>{placementLabel}</small>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <Card className={styles.amendmentCard}>
+      <div className={styles.amendmentHeader}>
+        <div className={styles.amendmentIcon} aria-hidden="true">
+          <HiOutlinePencilSquare />
+        </div>
+        <div>
+          <h2>Shipment agreement changes</h2>
+          <p>
+            Extend or renegotiate the deadline, add funded checkpoints, or increase unpaid
+            milestone compensation without changing completed work.
+          </p>
+        </div>
+        {!pending && shipmentActive && isParticipant && !formOpen && (
+          <Button variant="secondary" onClick={() => setFormOpen(true)} disabled={busy}>
+            Request change
+          </Button>
+        )}
+      </div>
+
+      {pending ? (
+        <section className={styles.amendmentPending} aria-label="Pending shipment amendment">
+          <div className={styles.amendmentMetaGrid}>
+            <div>
+              <span>Requested by</span>
+              <strong>{walletIdentityLabel(pending.requester, walletIdentities)}</strong>
+            </div>
+            <div>
+              <span>Proposed deadline</span>
+              <strong>{formatDate(pending.proposedDeadline)}</strong>
+            </div>
+            <div>
+              <span>New escrow</span>
+              <strong>{formatEth(pending.additionalFunding)}</strong>
+            </div>
+            <div>
+              <span>Answer before</span>
+              <strong>{formatDate(pending.responseDeadline)}</strong>
+            </div>
+          </div>
+          <blockquote className={styles.amendmentNote}>{pending.requesterNote}</blockquote>
+          <AmendmentAllocations amendment={pending} milestones={shipment.milestones} />
+
+          <div className={styles.amendmentActions}>
+            {responseExpired ? (
+              <Button
+                variant="secondary"
+                onClick={() => onExpire(pending.id)}
+                disabled={busy}
+              >
+                {actionStage === 'expiring-amendment' ? 'Closing...' : 'Close expired request'}
+              </Button>
+            ) : (
+              <>
+                {isRequester && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => onWithdraw(pending.id)}
+                    disabled={busy}
+                  >
+                    {actionStage === 'withdrawing-amendment' ? 'Withdrawing...' : 'Withdraw'}
+                  </Button>
+                )}
+                {isResponder && (
+                  <Button onClick={() => onAccept(pending)} disabled={busy}>
+                    {actionStage === 'accepting-amendment' ? 'Accepting...' : 'Accept amendment'}
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
+
+          {isResponder && !responseExpired && (
+            <form className={styles.amendmentRejectForm} onSubmit={submitRejection}>
+              <label htmlFor="amendment-rejection-note">
+                Rejection note <span>Optional</span>
+              </label>
+              <textarea
+                id="amendment-rejection-note"
+                value={rejectionNote}
+                onChange={(event) => setRejectionNote(event.target.value)}
+                maxLength={500}
+                placeholder="Explain why the existing agreement should continue."
+              />
+              <div className={styles.amendmentFormFooter}>
+                <span className={rejectionTooLong ? styles.wordLimitError : ''}>
+                  {rejectionWordCount}/{MAX_AMENDMENT_NOTE_WORDS} words
+                </span>
+                <Button type="submit" variant="danger" disabled={busy || rejectionTooLong}>
+                  {actionStage === 'rejecting-amendment' ? 'Rejecting...' : 'Reject amendment'}
+                </Button>
+              </div>
+            </form>
+          )}
+        </section>
+      ) : formOpen ? (
+        <form className={styles.amendmentForm} onSubmit={submitRequest}>
+          <label className={styles.amendmentDeadlineToggle}>
+            <input
+              type="checkbox"
+              checked={changeDeadline}
+              onChange={(event) => setChangeDeadline(event.target.checked)}
+            />
+            <span>
+              <strong>Change shipment deadline</strong>
+              <small>Enable this only when the amendment needs a deadline change.</small>
+            </span>
+          </label>
+          <div className={styles.amendmentFormGrid}>
+            {changeDeadline && (
+              <label>
+                <span>Proposed shipment deadline</span>
+                <input
+                  type="datetime-local"
+                  value={proposedDeadline}
+                  min={toDateTimeLocal((nowSeconds + 60) * 1000)}
+                  onChange={(event) => setProposedDeadline(event.target.value)}
+                />
+                <small>{isShipper ? 'A later deadline is applied directly if nothing else changes.' : 'Carriers may only keep or extend the current deadline.'}</small>
+              </label>
+            )}
+            <label>
+              <span>Response deadline</span>
+              <input
+                type="datetime-local"
+                value={responseDeadline}
+                min={toDateTimeLocal((nowSeconds + 60) * 1000)}
+                max={toDateTimeLocal(Math.min(
+                  shipment.deadline * 1000,
+                  changeDeadline
+                    ? new Date(proposedDeadline).getTime() || shipment.deadline * 1000
+                    : shipment.deadline * 1000,
+                ))}
+                onChange={(event) => setResponseDeadline(event.target.value)}
+              />
+              <small>Must be no later than the current shipment deadline.</small>
+            </label>
+          </div>
+
+          <label className={styles.amendmentNoteField}>
+            <span>Reason for change</span>
+            <textarea
+              value={note}
+              onChange={(event) => setNote(event.target.value)}
+              maxLength={500}
+              placeholder="Describe what should change and why."
+            />
+            <small className={noteTooLong ? styles.wordLimitError : ''}>
+              {noteWordCount}/{MAX_AMENDMENT_NOTE_WORDS} words
+            </small>
+          </label>
+
+          <section className={styles.amendmentMilestoneEditor}>
+            <div className={styles.amendmentEditorHeader}>
+              <div>
+                <h3>
+                  <button
+                    type="button"
+                    className={styles.amendmentEditorTitleButton}
+                    aria-expanded={fundingPlanOpen}
+                    aria-controls="amendment-funding-plan"
+                    onClick={() => setFundingPlanOpen((current) => !current)}
+                  >
+                    Milestone funding plan
+                  </button>
+                </h3>
+                <p>
+                  {fundingPlanOpen
+                    ? 'Add ETH on top of unpaid payouts, insert a funded checkpoint, or append a new final checkpoint.'
+                    : 'Expand to review existing allocations or add newly funded milestones.'}
+                </p>
+              </div>
+              <div className={styles.amendmentEditorActions}>
+                <button
+                  type="button"
+                  className={styles.amendmentAddButton}
+                  onClick={addNewMilestone}
+                  disabled={firstUnpaidIndex < 0}
+                >
+                  <HiOutlinePlus /> Add funded milestone
+                </button>
+                <button
+                  type="button"
+                  className={styles.amendmentEditorChevron}
+                  aria-label={fundingPlanOpen ? 'Collapse milestone funding plan' : 'Expand milestone funding plan'}
+                  aria-expanded={fundingPlanOpen}
+                  aria-controls="amendment-funding-plan"
+                  onClick={() => setFundingPlanOpen((current) => !current)}
+                >
+                  <HiOutlineChevronDown
+                    className={fundingPlanOpen ? styles.amendmentEditorChevronOpen : ''}
+                    aria-hidden="true"
+                  />
+                </button>
+              </div>
+            </div>
+
+            {fundingPlanOpen && (
+              <div id="amendment-funding-plan" className={styles.amendmentEditorBody}>
+                <div className={styles.amendmentTimeline}>
+                  <div className={styles.amendmentStaticNode}>
+                    <span>A</span>
+                    <div>
+                      <small>Starting pickup point</small>
+                      <strong>{shipment.from}</strong>
+                    </div>
+                  </div>
+
+                  <div className={styles.amendmentTimelineLine} />
+
+                  {shipment.milestones.map((milestone) => {
+                    const stagedBefore = newMilestones.filter(
+                      (entry) => entry.insertBefore === milestone.milestoneId,
+                    );
+                    const oldFunding = milestone.payoutAmount + milestone.additionalPayoutAmount;
+                    const newFunding = parseEthInputOrZero(existingAmounts[milestone.milestoneId]);
+                    const combinedFunding = oldFunding + newFunding;
+                    const originalDropState = amendmentDropTarget?.type === 'original'
+                      && amendmentDropTarget.milestoneId === milestone.milestoneId;
+                    return (
+                      <div key={`amendment-segment-${milestone.milestoneId}`} className={styles.amendmentTimelineSegment}>
+                        {stagedBefore.map((newMilestone) => renderNewMilestoneCard(
+                          newMilestone,
+                          `Placed before #${milestone.index + 1} ${milestone.name}`,
+                        ))}
+
+                        <div className={styles.amendmentTimelineRow}>
+                          <div className={styles.amendmentOriginalMarker}>{milestone.index + 1}</div>
+                          <div
+                            className={`${styles.amendmentInputCard} ${styles.amendmentOriginalCard} ${milestone.status === 'Paid' ? styles.amendmentPaidCard : ''} ${originalDropState && amendmentDropTarget.blocked ? styles.amendmentDropBlocked : ''} ${originalDropState && !amendmentDropTarget.blocked && amendmentDropTarget.placement === 'before' ? styles.amendmentDropBefore : ''} ${originalDropState && !amendmentDropTarget.blocked && amendmentDropTarget.placement === 'after' ? styles.amendmentDropAfter : ''}`}
+                            onDragOver={(event) => dragOverOriginalMilestone(event, milestone)}
+                            onDrop={dropOnOriginalMilestone}
+                          >
+                            {originalDropState && amendmentDropTarget.blocked && (
+                              <span className={styles.amendmentDisabledDrop}>Drop disabled</span>
+                            )}
+                            <div className={styles.amendmentCardKicker}>
+                              Existing milestone
+                              <Badge tone={milestone.status === 'Paid' ? 'success' : 'neutral'}>
+                                {milestone.status === 'Paid' ? 'Paid' : 'Unpaid'}
+                              </Badge>
+                            </div>
+                            <div className={styles.amendmentCardFields}>
+                              <label>
+                                <span>Milestone name</span>
+                                <input value={milestone.name} disabled />
+                              </label>
+                              <label>
+                                <span>New added funds</span>
+                                <div className={styles.amendmentEthInput}>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.001"
+                                    inputMode="decimal"
+                                    value={existingAmounts[milestone.milestoneId] || ''}
+                                    onChange={(event) => setExistingAmounts((current) => ({
+                                      ...current,
+                                      [milestone.milestoneId]: event.target.value,
+                                    }))}
+                                    disabled={milestone.status === 'Paid'}
+                                    placeholder={milestone.status === 'Paid' ? 'Paid' : '0.00'}
+                                  />
+                                  <span>ETH</span>
+                                </div>
+                              </label>
+                            </div>
+                            <div className={styles.amendmentFundingEquation}>
+                              {milestone.status === 'Paid' ? (
+                                <strong>{formatEth(oldFunding)}</strong>
+                              ) : (
+                                <>
+                                  <span>{formatEth(oldFunding)}</span>
+                                  <span aria-hidden="true">+</span>
+                                  <span>{formatEth(newFunding)}</span>
+                                  <span aria-hidden="true">=</span>
+                                  <strong>{formatEth(combinedFunding)}</strong>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {newMilestones
+                    .filter((entry) => entry.insertBefore == null)
+                    .map((newMilestone) => renderNewMilestoneCard(
+                      newMilestone,
+                      'Placed as the new final milestone',
+                    ))}
+
+                  <div className={styles.amendmentTimelineLine} />
+                  <div className={styles.amendmentStaticNode}>
+                    <span>B</span>
+                    <div>
+                      <small>Final destination point</small>
+                      <strong>{shipment.to}</strong>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className={styles.amendmentBottomAddButton}
+                  onClick={addNewMilestone}
+                  disabled={firstUnpaidIndex < 0}
+                >
+                  <HiOutlinePlus aria-hidden="true" /> Add funded milestone
+                </button>
+
+                <p className={styles.amendmentDragHint}>
+                  Paid milestones are locked. New milestones can be dropped before an unpaid
+                  milestone or after the final unpaid milestone; invalid targets show a disabled cursor.
+                </p>
+              </div>
+            )}
+          </section>
+
+          {formError && <div className={styles.amendmentError} role="alert">{formError}</div>}
+          <div className={styles.amendmentFormFooter}>
+            <span>New funding is added on top; original payouts cannot be reduced.</span>
+            <div>
+              <Button type="button" variant="secondary" onClick={resetForm} disabled={busy}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={busy || noteTooLong}>
+                {actionStage === 'requesting-amendment' || actionStage === 'extending-deadline'
+                  ? 'Submitting...'
+                  : 'Submit agreement change'}
+              </Button>
+            </div>
+          </div>
+        </form>
+      ) : null}
+
+      {history.length > 0 && (
+        <details className={styles.amendmentHistory}>
+          <summary>
+            <span className={styles.amendmentHistoryTitle}>Previous agreement changes</span>
+            <span className={styles.amendmentHistorySummaryMeta}>
+              <span className={styles.amendmentHistoryCount}>{history.length}</span>
+              <HiOutlineChevronDown
+                className={styles.amendmentHistoryChevron}
+                aria-hidden="true"
+              />
+            </span>
+          </summary>
+          <div className={history.length > 3 ? styles.amendmentHistoryListScrollable : ''}>
+            {history.map((entry) => (
+              <article key={entry.id}>
+                <div className={styles.amendmentHistoryHeading}>
+                  <div>
+                    <strong>{entry.directExtension ? 'Direct deadline extension' : `Agreement change #${entry.id + 1}`}</strong>
+                    <small>
+                      {walletIdentityLabel(entry.requester, walletIdentities)} · {formatDate(entry.createdAt)}
+                    </small>
+                  </div>
+                  <Badge tone={cancellationStatusTone(entry.status)}>{entry.status}</Badge>
+                </div>
+                <p>
+                  <strong className={styles.amendmentReasonLabel}>Reason for change:</strong>{' '}
+                  {entry.requesterNote}
+                </p>
+                <AmendmentChangeSummary amendment={entry} milestones={shipment.milestones} />
+                {entry.rejectionNote && (
+                  <small className={styles.amendmentHistoryResponse}>
+                    Response: {entry.rejectionNote}
+                  </small>
+                )}
+              </article>
+            ))}
+          </div>
+        </details>
+      )}
+
+      {confirmationDraft && (
+        <AmendmentConfirmationModal
+          shipment={shipment}
+          draft={confirmationDraft}
+          isShipper={isShipper}
+          busy={busy}
+          actionStage={actionStage}
+          onClose={() => setConfirmationDraft(null)}
+          onConfirm={confirmRequest}
+        />
+      )}
+    </Card>
+  );
+}
+
+function milestoneReferenceLabel(milestoneId, milestones) {
+  const targetId = Number(milestoneId);
+  const index = milestones.findIndex((milestone) => milestone.milestoneId === targetId);
+  if (index < 0) return `Checkpoint ID ${milestoneId}`;
+  return `Checkpoint #${index + 1} · ${milestones[index].name}`;
+}
+
+function insertionReferenceLabel(milestoneId, milestones) {
+  if (milestoneId === APPEND_MILESTONE_ID) return 'New final checkpoint';
+  const targetId = Number(milestoneId);
+  const target = milestones.find((milestone) => milestone.milestoneId === targetId);
+  return target
+    ? `Before ${target.name}`
+    : `Before checkpoint ID ${milestoneId}`;
+}
+
+function AmendmentAllocations({ amendment, milestones }) {
+  if (amendment.existingFunding.length === 0 && amendment.newMilestones.length === 0) {
+    return <div className={styles.amendmentNoFunding}>Deadline change only — no new escrow requested.</div>;
+  }
+  return (
+    <div className={styles.amendmentAllocations}>
+      {amendment.existingFunding.map((allocation) => (
+        <div key={`existing-${allocation.milestoneId}`}>
+          <span>Extra for {milestoneReferenceLabel(allocation.milestoneId, milestones)}</span>
+          <strong>+{formatEth(allocation.amount)}</strong>
+        </div>
+      ))}
+      {amendment.newMilestones.map((milestone, index) => (
+        <div key={`new-${index}-${milestone.name}`}>
+          <span>New: {milestone.name} · {insertionReferenceLabel(milestone.insertBeforeMilestoneId, milestones)}</span>
+          <strong>{formatEth(milestone.amount)}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AmendmentChangeSummary({ amendment, milestones }) {
+  const deadlineChanged = amendment.previousDeadline > 0
+    && amendment.proposedDeadline !== amendment.previousDeadline;
+  const legacyDeadline = amendment.previousDeadline === 0 && amendment.proposedDeadline > 0;
+  const hasFunding = amendment.existingFunding.length > 0 || amendment.newMilestones.length > 0;
+
+  if (!deadlineChanged && !legacyDeadline && !hasFunding) {
+    return <div className={styles.amendmentNoFunding}>No deadline or funding allocation changed.</div>;
+  }
+
+  return (
+    <ul className={styles.amendmentChangeList}>
+      {deadlineChanged && (
+        <li>
+          <span>Deadline changed</span>
+          <strong>{formatDate(amendment.previousDeadline)} → {formatDate(amendment.proposedDeadline)}</strong>
+        </li>
+      )}
+      {legacyDeadline && (
+        <li>
+          <span>Resulting deadline</span>
+          <strong>{formatDate(amendment.proposedDeadline)}</strong>
+        </li>
+      )}
+      {amendment.existingFunding.map((allocation) => (
+        <li key={`history-existing-${allocation.milestoneId}`}>
+          <span>{milestoneReferenceLabel(allocation.milestoneId, milestones)} funding increased</span>
+          <strong>+{formatEth(allocation.amount)}</strong>
+        </li>
+      ))}
+      {amendment.newMilestones.map((milestone, index) => (
+        <li key={`history-new-${index}-${milestone.name}`}>
+          <span>
+            New milestone · {insertionReferenceLabel(milestone.insertBeforeMilestoneId, milestones)}
+          </span>
+          <strong>{milestone.name} · {formatEth(milestone.amount)}</strong>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function AmendmentConfirmationModal({
+  shipment,
+  draft,
+  isShipper,
+  busy,
+  actionStage,
+  onClose,
+  onConfirm,
+}) {
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape' && !busy) onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [busy, onClose]);
+
+  const existingFunding = new Map(
+    draft.existingFunding.map(([milestoneId, amount]) => [Number(milestoneId), amount]),
+  );
+  const additionsByMilestoneId = new Map();
+  const finalAdditions = [];
+  draft.newMilestones.forEach(([name, insertBeforeMilestoneId, amount], draftIndex) => {
+    const added = {
+      key: `${insertBeforeMilestoneId.toString()}-${draftIndex}-${name}`,
+      name,
+      amount,
+      isNew: true,
+    };
+    if (insertBeforeMilestoneId === APPEND_MILESTONE_ID) {
+      finalAdditions.push(added);
+      return;
+    }
+    const targetId = Number(insertBeforeMilestoneId);
+    const current = additionsByMilestoneId.get(targetId) || [];
+    current.push(added);
+    additionsByMilestoneId.set(targetId, current);
+  });
+  const afterMilestones = [];
+  shipment.milestones.forEach((milestone, index) => {
+    afterMilestones.push(...(additionsByMilestoneId.get(milestone.milestoneId) || []));
+    const added = existingFunding.get(milestone.milestoneId) || 0n;
+    afterMilestones.push({
+      key: `existing-${milestone.milestoneId}`,
+      name: milestone.name,
+      amount: milestone.payoutAmount + milestone.additionalPayoutAmount + added,
+      added,
+      status: milestone.status,
+    });
+  });
+  afterMilestones.push(...finalAdditions);
+  const resultingEscrow = shipment.escrow + draft.additionalFunding;
+
+  return (
+    <div className={styles.amendmentConfirmScrim} onMouseDown={() => !busy && onClose()}>
+      <section
+        className={styles.amendmentConfirmDialog}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="amendment-confirm-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className={styles.amendmentConfirmHeader}>
+          <div>
+            <span>Final review</span>
+            <h2 id="amendment-confirm-title">Confirm the full agreement change</h2>
+            <p>Compare every funded checkpoint and deadline before recording this request on-chain.</p>
+          </div>
+          <button type="button" onClick={onClose} disabled={busy} aria-label="Close confirmation">
+            <HiOutlineXMark aria-hidden="true" />
+          </button>
+        </header>
+
+        <div className={styles.amendmentConfirmRoute}>
+          <span>{shipment.from}</span>
+          <HiOutlineArrowRight aria-hidden="true" />
+          <span>{shipment.to}</span>
+        </div>
+
+        <div className={styles.amendmentComparisonGrid}>
+          <AgreementSnapshot
+            title="Before"
+            deadline={shipment.deadline}
+            escrow={shipment.escrow}
+            milestones={shipment.milestones.map((milestone) => ({
+              key: `before-${milestone.index}`,
+              name: milestone.name,
+              amount: milestone.payoutAmount + milestone.additionalPayoutAmount,
+              status: milestone.status,
+            }))}
+          />
+          <AgreementSnapshot
+            title="After"
+            deadline={draft.proposedDeadline}
+            escrow={resultingEscrow}
+            milestones={afterMilestones}
+            changed
+          />
+        </div>
+
+        <blockquote className={styles.amendmentConfirmNote}>
+          <strong>Reason for change:</strong> {draft.note}
+        </blockquote>
+        <div className={styles.amendmentConfirmFunding}>
+          <span>Additional escrow required</span>
+          <strong>{formatEth(draft.additionalFunding)}</strong>
+        </div>
+        <p className={styles.amendmentConfirmWarning}>
+          {draft.directExtension
+            ? 'This deadline-only extension is applied immediately by the shipper.'
+            : isShipper
+              ? 'The new ETH is staged with this request and only enters escrow if the carrier accepts.'
+              : 'If the shipper accepts, they must fund the new ETH allocation in the acceptance transaction.'}
+        </p>
+
+        <footer className={styles.amendmentConfirmFooter}>
+          <Button type="button" variant="secondary" onClick={onClose} disabled={busy}>Back to edit</Button>
+          <Button type="button" onClick={onConfirm} disabled={busy}>
+            {actionStage === 'requesting-amendment' || actionStage === 'extending-deadline'
+              ? 'Confirming...'
+              : draft.directExtension
+                ? 'Confirm and extend deadline'
+                : 'Confirm agreement change'}
+          </Button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function AgreementSnapshot({ title, deadline, escrow, milestones, changed = false }) {
+  return (
+    <section className={`${styles.agreementSnapshot} ${changed ? styles.agreementSnapshotAfter : ''}`}>
+      <div className={styles.agreementSnapshotHeader}>
+        <h3>{title}</h3>
+        {changed && <Badge tone="success">Proposed</Badge>}
+      </div>
+      <dl>
+        <div><dt>Deadline</dt><dd>{formatDate(deadline)}</dd></div>
+        <div><dt>Funded escrow</dt><dd>{formatEth(escrow)}</dd></div>
+      </dl>
+      <ol className={styles.agreementSnapshotMilestones}>
+        {milestones.map((milestone, index) => (
+          <li key={milestone.key}>
+            <span>{index + 1}</span>
+            <div>
+              <strong>{milestone.name}</strong>
+              <small>
+                {formatEth(milestone.amount)}
+                {milestone.isNew ? ' · New funded milestone' : milestone.added > 0n ? ` · +${formatEth(milestone.added)}` : ''}
+              </small>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function CancellationPanel({
+  cancellations,
+  shipment,
+  account,
+  isParticipant,
+  busy,
+  actionStage,
+  nowSeconds,
+  walletIdentities,
+  onRequest,
+  onAccept,
+  onReject,
+  onWithdraw,
+  onExpire,
+}) {
+  const pendingCancellation = cancellations.find((entry) => entry.status === 'Pending');
+  const history = [...cancellations]
+    .filter((entry) => entry.status !== 'Pending')
+    .sort((a, b) => b.createdAt - a.createdAt);
+  const shipmentActive = ['Funded', 'InProgress'].includes(shipment.status)
+    && nowSeconds <= shipment.deadline;
+  const cancellationWindowOpen = shipmentActive
+    && shipment.deadline - nowSeconds > MIN_CANCELLATION_LEAD_SECONDS;
+  const [requestFormOpen, setRequestFormOpen] = useState(false);
+  const [requestNote, setRequestNote] = useState('');
+  const [responseDeadline, setResponseDeadline] = useState(() => (
+    suggestedCancellationDeadline(shipment.deadline)
+  ));
+  const [rejectFormOpen, setRejectFormOpen] = useState(false);
+  const [rejectionNote, setRejectionNote] = useState('');
+
+  const sameWallet = (left, right) => Boolean(
+    left && right && left.toLowerCase() === right.toLowerCase()
+  );
+  const isRequester = sameWallet(account, pendingCancellation?.requester);
+  const isResponder = sameWallet(account, pendingCancellation?.responder);
+  const responseExpired = Boolean(
+    pendingCancellation && nowSeconds > pendingCancellation.responseDeadline
+  );
+  const proofAwaitingReview = shipment.milestones.some(
+    (milestone) => milestone.status === 'Submitted'
+  );
+  const requestWordCount = countWords(requestNote);
+  const rejectionWordCount = countWords(rejectionNote);
+  const requestTooLong = exceedsTextLimit(
+    requestNote,
+    MAX_CANCELLATION_NOTE_WORDS,
+    MAX_CANCELLATION_NOTE_BYTES,
+  );
+  const rejectionTooLong = exceedsTextLimit(
+    rejectionNote,
+    MAX_CANCELLATION_NOTE_WORDS,
+    MAX_CANCELLATION_NOTE_BYTES,
+  );
+  const parsedResponseDeadline = Math.floor(new Date(responseDeadline).getTime() / 1000);
+  const responseDeadlineAfterShipment = Number.isFinite(parsedResponseDeadline)
+    && parsedResponseDeadline > shipment.deadline;
+  const displayParticipant = (wallet) => {
+    const role = sameWallet(wallet, shipment.shipper) ? 'Shipper' : 'Carrier';
+    if (sameWallet(wallet, account)) return `You · ${role}`;
+    return `${role} · ${walletIdentityLabel(wallet, walletIdentities)}`;
+  };
+
+  const submitRequest = async (event) => {
+    event.preventDefault();
+    const sent = await onRequest(requestNote, responseDeadline);
+    if (sent) {
+      setRequestNote('');
+      setRequestFormOpen(false);
+    }
+  };
+
+  const submitRejection = async (event) => {
+    event.preventDefault();
+    const rejected = await onReject(pendingCancellation.id, rejectionNote);
+    if (rejected) {
+      setRejectionNote('');
+      setRejectFormOpen(false);
+    }
+  };
+
+  return (
+    <Card className={styles.cancellationCard}>
+      <div className={styles.cancellationHeader}>
+        <div className={styles.cancellationIcon} aria-hidden="true">
+          <HiOutlineArrowPath />
+        </div>
+        <div className={styles.cancellationHeading}>
+          <div className={styles.proposalKicker}>Two-party decision</div>
+          <h2>Cancellation agreement</h2>
+          <p>
+            Either participant may ask to stop an accepted shipment. Nothing is cancelled
+            until the other participant accepts on-chain.
+          </p>
+        </div>
+        {pendingCancellation ? (
+          <Badge tone={responseExpired ? 'danger' : 'warning'}>
+            {responseExpired ? 'Response overdue' : 'Awaiting response'}
+          </Badge>
+        ) : (
+          <Badge tone="neutral">No pending request</Badge>
+        )}
+      </div>
+
+      {pendingCancellation ? (
+        <section className={styles.cancellationPending} aria-label="Pending cancellation request">
+          <div className={styles.cancellationPendingTop}>
+            <div>
+              <span className={styles.cancellationMetaLabel}>Requested by</span>
+              <strong>{displayParticipant(pendingCancellation.requester)}</strong>
+            </div>
+            <div>
+              <span className={styles.cancellationMetaLabel}>Answer before</span>
+              <strong className={styles.tabularValue}>
+                {formatDate(pendingCancellation.responseDeadline)}
+              </strong>
+            </div>
+          </div>
+
+          <blockquote className={styles.cancellationNote}>
+            {pendingCancellation.requesterNote}
+          </blockquote>
+
+          <div className={styles.cancellationSettlement}>
+            <div>
+              <span>Already released</span>
+              <strong>{formatEth(shipment.released)}</strong>
+              <small>Remains with carrier</small>
+            </div>
+            <HiOutlineArrowRight aria-hidden="true" />
+            <div>
+              <span>Remaining escrow</span>
+              <strong>{formatEth(shipment.remaining)}</strong>
+              <small>Returns to shipper if accepted</small>
+            </div>
+          </div>
+
+          {proofAwaitingReview && (
+            <div className={styles.cancellationWarning} role="status">
+              <HiOutlineExclamationCircle aria-hidden="true" />
+              <span>
+                Acceptance is paused while milestone proof awaits verification. Approve or reject
+                that proof first; rejecting this cancellation is still available.
+              </span>
+            </div>
+          )}
+
+          {isParticipant && (
+            <div className={styles.cancellationActions}>
+              {responseExpired ? (
+                <Button
+                  variant="secondary"
+                  onClick={() => onExpire(pendingCancellation.id)}
+                  disabled={busy}
+                >
+                  {actionStage === 'expiring-cancellation' ? 'Closing...' : 'Close expired request'}
+                </Button>
+              ) : isResponder ? (
+                <>
+                  <Button
+                    onClick={() => onAccept(pendingCancellation.id)}
+                    disabled={busy || proofAwaitingReview}
+                  >
+                    <HiOutlineCheck aria-hidden="true" />
+                    {actionStage === 'accepting-cancellation' ? 'Accepting...' : 'Accept cancellation'}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={() => setRejectFormOpen((open) => !open)}
+                    disabled={busy}
+                  >
+                    <HiOutlineXMark aria-hidden="true" />
+                    Reject
+                  </Button>
+                </>
+              ) : isRequester ? (
+                <Button
+                  variant="secondary"
+                  onClick={() => onWithdraw(pendingCancellation.id)}
+                  disabled={busy}
+                >
+                  {actionStage === 'withdrawing-cancellation' ? 'Withdrawing...' : 'Withdraw request'}
+                </Button>
+              ) : null}
+            </div>
+          )}
+
+          {rejectFormOpen && isResponder && !responseExpired && (
+            <form className={styles.cancellationRejectForm} onSubmit={submitRejection}>
+              <label htmlFor="cancellation-rejection-note">
+                Rejection note <span>Optional</span>
+              </label>
+              <textarea
+                id="cancellation-rejection-note"
+                value={rejectionNote}
+                onChange={(event) => setRejectionNote(event.target.value)}
+                placeholder="Explain why the shipment should continue or suggest discussing an amendment."
+                rows={3}
+                disabled={busy}
+              />
+              <div className={styles.cancellationFormFooter}>
+                <span className={rejectionTooLong ? styles.wordLimitError : ''}>
+                  {rejectionWordCount}/{MAX_CANCELLATION_NOTE_WORDS} words
+                </span>
+                <Button
+                  variant="danger"
+                  type="submit"
+                  disabled={busy || rejectionTooLong}
+                >
+                  {actionStage === 'rejecting-cancellation' ? 'Rejecting...' : 'Confirm rejection'}
+                </Button>
+              </div>
+            </form>
+          )}
+        </section>
+      ) : shipmentActive && isParticipant ? (
+        cancellationWindowOpen ? (
+          requestFormOpen ? (
+          <form className={styles.cancellationRequestForm} onSubmit={submitRequest}>
+            <div className={styles.cancellationFormGrid}>
+              <label htmlFor="cancellation-request-note">
+                <span>Why should this shipment stop?</span>
+                <textarea
+                  id="cancellation-request-note"
+                  value={requestNote}
+                  onChange={(event) => setRequestNote(event.target.value)}
+                  placeholder="Give the other participant enough context to decide."
+                  rows={4}
+                  required
+                  disabled={busy}
+                />
+              </label>
+              <label htmlFor="cancellation-response-deadline">
+                <span>Response deadline</span>
+                <div className={styles.cancellationDateInput}>
+                  <HiOutlineCalendarDays aria-hidden="true" />
+                  <input
+                    id="cancellation-response-deadline"
+                    type="datetime-local"
+                    value={responseDeadline}
+                    min={toDateTimeLocal((nowSeconds + 60) * 1000)}
+                    max={toDateTimeLocal(shipment.deadline * 1000)}
+                    onChange={(event) => setResponseDeadline(event.target.value)}
+                    aria-invalid={responseDeadlineAfterShipment}
+                    required
+                    disabled={busy}
+                  />
+                </div>
+                {responseDeadlineAfterShipment ? (
+                  <small className={styles.deadlineError} role="alert">
+                    Response deadline cannot be after {formatDate(shipment.deadline)}.
+                  </small>
+                ) : (
+                  <small>
+                    New cancellation requests close 1 hour before the shipment deadline.
+                    The response deadline cannot be after that shipment deadline.
+                  </small>
+                )}
+              </label>
+            </div>
+            <div className={styles.cancellationFormFooter}>
+              <span className={requestTooLong ? styles.wordLimitError : ''}>
+                {requestWordCount}/{MAX_CANCELLATION_NOTE_WORDS} words
+              </span>
+              <div className={styles.cancellationFormActions}>
+                <Button
+                  variant="ghost"
+                  onClick={() => setRequestFormOpen(false)}
+                  disabled={busy}
+                >
+                  Keep shipment active
+                </Button>
+                <Button
+                  variant="danger"
+                  type="submit"
+                  disabled={
+                    busy
+                    || requestWordCount === 0
+                    || requestTooLong
+                    || responseDeadlineAfterShipment
+                  }
+                >
+                  {actionStage === 'requesting-cancellation'
+                    ? 'Requesting...'
+                    : 'Send cancellation request'}
+                </Button>
+              </div>
+            </div>
+            </form>
+          ) : (
+            <div className={styles.cancellationEmpty}>
+              <div>
+                <strong>Need to stop the shipment?</strong>
+                <span>
+                  Start a cancellation request with a note and response deadline. The shipment
+                  continues normally while the decision is pending.
+                </span>
+              </div>
+              <Button
+                variant="secondary"
+                className={styles.cancellationRequestButton}
+                onClick={() => {
+                  setResponseDeadline(suggestedCancellationDeadline(shipment.deadline));
+                  setRequestFormOpen(true);
+                }}
+                disabled={busy}
+              >
+                Request cancellation
+              </Button>
+            </div>
+          )
+        ) : (
+          <div className={styles.cancellationUnavailable} role="status">
+            <HiOutlineLockClosed aria-hidden="true" />
+            <div>
+              <strong>Cancellation request window closed</strong>
+              <span>
+                New cancellation requests are not allowed during the final hour before the
+                shipment deadline.
+              </span>
+            </div>
+          </div>
+        )
+      ) : null}
+
+      {history.length > 0 && (
+        <details className={styles.cancellationHistory}>
+          <summary>
+            <span>Previous cancellation requests</span>
+            <Badge tone="neutral">{history.length}</Badge>
+            <HiOutlineChevronRight aria-hidden="true" />
+          </summary>
+          <div className={styles.cancellationHistoryList}>
+            {history.map((entry) => (
+              <article key={entry.id} className={styles.cancellationHistoryItem}>
+                <div className={styles.cancellationHistoryHead}>
+                  <div>
+                    <strong>{displayParticipant(entry.requester)}</strong>
+                    <span>{formatDate(entry.createdAt)}</span>
+                  </div>
+                  <Badge tone={cancellationStatusTone(entry.status)}>{entry.status}</Badge>
+                </div>
+                <p>{entry.requesterNote}</p>
+                {entry.rejectionNote && (
+                  <div className={styles.cancellationHistoryResponse}>
+                    <strong>Response</strong>
+                    <span>{entry.rejectionNote}</span>
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+        </details>
+      )}
+    </Card>
   );
 }
 
@@ -1154,6 +2934,20 @@ function ProposalDetailModal({
   readOnly = false,
   onClose,
 }) {
+  const [showRejectForm, setShowRejectForm] = useState(false);
+  const [rejectionNote, setRejectionNote] = useState('');
+  const rejectionNoteWordCount = countWords(rejectionNote);
+  const rejectionNoteTooLong = exceedsTextLimit(
+    rejectionNote,
+    MAX_PROPOSAL_REJECTION_NOTE_WORDS,
+    MAX_PROPOSAL_REJECTION_NOTE_BYTES,
+  );
+
+  useEffect(() => {
+    setShowRejectForm(false);
+    setRejectionNote('');
+  }, [proposal.id]);
+
   useEffect(() => {
     const onKeyDown = (event) => {
       if (event.key === 'Escape') onClose();
@@ -1161,6 +2955,12 @@ function ProposalDetailModal({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
+
+  const confirmRejection = async () => {
+    if (busy || rejectionNoteTooLong) return;
+    const rejected = await onReject(proposal.id, rejectionNote);
+    if (rejected) onClose();
+  };
 
   return (
     <div className={styles.proposalModalOverlay} role="presentation" onMouseDown={onClose}>
@@ -1214,8 +3014,36 @@ function ProposalDetailModal({
               </li>
             ))}
           </ol>
+          {proposal.status === 'Rejected' && proposal.rejectionNote && (
+            <div className={styles.proposalRejectionRecord}>
+              <span>Rejection note</span>
+              <p>{proposal.rejectionNote}</p>
+            </div>
+          )}
+          {showRejectForm && (
+            <div className={styles.proposalRejectionForm}>
+              <label htmlFor={`proposal-rejection-note-${proposal.id}`}>
+                Rejection note <span>(optional)</span>
+              </label>
+              <p>Tell the carrier what could be changed before they submit another plan.</p>
+              <textarea
+                id={`proposal-rejection-note-${proposal.id}`}
+                value={rejectionNote}
+                onChange={(event) => setRejectionNote(event.target.value)}
+                placeholder="Explain what should be revised..."
+                rows={3}
+                autoFocus
+              />
+              <div className={styles.proposalRejectionMeta}>
+                <span className={rejectionNoteTooLong ? styles.proposalRejectionError : undefined}>
+                  {rejectionNoteTooLong ? 'Shorten the note before confirming.' : 'This note will be recorded on-chain.'}
+                </span>
+                <span>{rejectionNoteWordCount}/{MAX_PROPOSAL_REJECTION_NOTE_WORDS} words</span>
+              </div>
+            </div>
+          )}
         </div>
-        <div className={styles.proposalActions} style={{ display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'flex-end', marginTop: '16px' }}>
+        <div className={styles.proposalActions}>
           {isShipper && (
             <ChatButton
               requestId={requestId}
@@ -1232,14 +3060,25 @@ function ProposalDetailModal({
             />
           )}
           {isShipper && proposal.status === 'Active' && !readOnly && (
-            <>
-              <Button variant="danger" onClick={() => onReject(proposal.id)} disabled={busy}>
-                {actionStage === 'rejecting' ? 'Rejecting...' : 'Reject proposal'}
-              </Button>
-              <Button onClick={() => onAccept(proposal.id)} disabled={busy}>
-                {actionStage === 'accepting' ? 'Confirming...' : 'Accept & fund escrow'}
-              </Button>
-            </>
+            showRejectForm ? (
+              <>
+                <Button variant="secondary" onClick={() => setShowRejectForm(false)} disabled={busy}>
+                  Keep proposal
+                </Button>
+                <Button variant="danger" onClick={confirmRejection} disabled={busy || rejectionNoteTooLong}>
+                  {actionStage === 'rejecting' ? 'Rejecting...' : 'Confirm rejection'}
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="danger" onClick={() => setShowRejectForm(true)} disabled={busy}>
+                  Reject proposal
+                </Button>
+                <Button onClick={() => onAccept(proposal.id)} disabled={busy}>
+                  {actionStage === 'accepting' ? 'Confirming...' : 'Accept & fund escrow'}
+                </Button>
+              </>
+            )
           )}
         </div>
         {!isShipper && account && account.toLowerCase() === proposal.carrier.toLowerCase() && (
@@ -1262,12 +3101,15 @@ function TimelinePanel({
   onVerify,
   canSubmitProof,
   onSubmitProof,
+  showCompletionCta,
+  tipSent,
+  onOpenTip,
 }) {
   if (!events.length) return <div className={styles.tabEmpty}>No timeline entries yet.</div>;
   const selectedEvent = events[selectedIndex] || events[0];
   const selectedMilestone = selectedEvent.milestoneId == null
     ? null
-    : milestones[selectedEvent.milestoneId];
+    : milestones.find((milestone) => milestone.milestoneId === selectedEvent.milestoneId);
   const hasPhotoProof = selectedMilestone?.proofUris?.length > 0;
 
   return (
@@ -1303,6 +3145,28 @@ function TimelinePanel({
             })}
           </ol>
         </div>
+        {showCompletionCta && (
+          <section className={styles.timelineCompletionCta} aria-labelledby="timeline-completion-cta-title">
+            <div className={styles.timelineCompletionCtaIcon} aria-hidden="true">
+              <HiOutlineGift />
+            </div>
+            <div className={styles.timelineCompletionCtaCopy}>
+              <span>Delivery complete</span>
+              <strong id="timeline-completion-cta-title">
+                {tipSent ? 'Your carrier tip is recorded' : 'Want to thank the carrier?'}
+              </strong>
+              <p>
+                {tipSent
+                  ? 'Open Payments to review the completed tip transaction.'
+                  : 'Continue to Payments to send one optional tip directly to the carrier.'}
+              </p>
+            </div>
+            <Button variant={tipSent ? 'secondary' : 'primary'} onClick={onOpenTip}>
+              {tipSent ? 'View tip' : 'Leave a tip'}
+              <HiOutlineArrowRight aria-hidden="true" />
+            </Button>
+          </section>
+        )}
       </div>
 
       <div className={styles.timelineSidebar}>
@@ -1312,10 +3176,53 @@ function TimelinePanel({
             <h3 className={styles.sidebarTitle}>{selectedEvent.label}</h3>
           </div>
           <div className={styles.sidebarBody}>
-            <div className={styles.sidebarField}>
-              <span className={styles.sidebarLabel}>Checkpoint details</span>
-              <p className={styles.sidebarDesc}>{selectedEvent.details}</p>
-            </div>
+            {selectedMilestone ? (
+              <section
+                className={`${styles.sidebarCheckpoint} ${
+                  selectedMilestone.addedByAmendment
+                    ? styles.sidebarFundedCheckpoint
+                    : styles.sidebarOriginalCheckpoint
+                }`}
+              >
+                <div className={styles.sidebarCheckpointHeader}>
+                  <span className={styles.sidebarCheckpointIcon} aria-hidden="true">
+                    {selectedMilestone.addedByAmendment ? <HiOutlinePlus /> : <HiOutlineCube />}
+                  </span>
+                  <div>
+                    <span className={styles.sidebarLabel}>Checkpoint details</span>
+                    <strong>
+                      {selectedMilestone.addedByAmendment
+                        ? 'New funded checkpoint'
+                        : 'Original milestone checkpoint'}
+                    </strong>
+                  </div>
+                </div>
+                <p>
+                  {selectedMilestone.addedByAmendment
+                    ? 'Added through an accepted agreement change and funded separately from the original milestone plan.'
+                    : 'Part of the original accepted milestone plan and funded from the initial escrow.'}
+                </p>
+                <div className={styles.sidebarCheckpointAmount}>
+                  <span>Allocated payment</span>
+                  <strong>
+                    {formatEth(
+                      selectedMilestone.payoutAmount
+                        + selectedMilestone.additionalPayoutAmount,
+                    )}
+                  </strong>
+                </div>
+                <p className={styles.sidebarCheckpointUpdate}>
+                  {selectedMilestone.remark
+                    || selectedMilestone.rejectionReason
+                    || milestoneDescription(selectedMilestone.status)}
+                </p>
+              </section>
+            ) : (
+              <div className={styles.sidebarField}>
+                <span className={styles.sidebarLabel}>Checkpoint details</span>
+                <p className={styles.sidebarDesc}>{selectedEvent.details}</p>
+              </div>
+            )}
             {selectedEvent.actor && (
               <div className={styles.sidebarField}>
                 <span className={styles.sidebarLabel}>Actor</span>
@@ -1449,7 +3356,7 @@ function ProofPanel({ milestones }) {
         {withProof.flatMap((milestone) =>
           milestone.proofUris.map((proofUri, proofIndex) => (
             <ProofImageCard
-              key={`${milestone.index}-${proofIndex}`}
+              key={`${milestone.milestoneId}-${proofIndex}`}
               milestone={milestone}
               proofUri={proofUri}
               proofIndex={proofIndex}
@@ -1668,12 +3575,50 @@ function ProofViewerModal({ milestone, onClose }) {
 
 function PaymentsPanel({
   shipment,
+  isShipper,
+  busy,
+  actionStage,
   history,
   historyLoading,
   historyError,
   onCopyHash,
   onRetry,
+  onTip,
+  tipScrollRequest,
+  onTipScrollComplete,
 }) {
+  const [tipAmountEth, setTipAmountEth] = useState('');
+  const tipCardRef = useRef(null);
+  const tipInputRef = useRef(null);
+  const canTip = isShipper && shipment.status === 'Completed' && shipment.tipAmount === 0n;
+  const amendmentFunding = shipment.escrow > shipment.proposedAmount
+    ? shipment.escrow - shipment.proposedAmount
+    : 0n;
+
+  useEffect(() => {
+    if (!tipScrollRequest || !tipCardRef.current) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      tipCardRef.current?.scrollIntoView({
+        behavior: reduceMotion ? 'auto' : 'smooth',
+        block: 'center',
+      });
+      if (canTip) {
+        tipInputRef.current?.focus({ preventScroll: true });
+      } else {
+        tipCardRef.current?.focus({ preventScroll: true });
+      }
+      onTipScrollComplete();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [canTip, onTipScrollComplete, tipScrollRequest]);
+
+  const submitTip = async (event) => {
+    event.preventDefault();
+    const sent = await onTip(tipAmountEth);
+    if (sent) setTipAmountEth('');
+  };
+
   return (
     <div className={styles.paymentsPanel}>
       <div className={styles.paymentsHeader}>
@@ -1682,25 +3627,124 @@ function PaymentsPanel({
           <div className={styles.paymentsHeaderTitle}>Payment status</div>
           <div className={styles.paymentsHeaderBody}>
             {shipment.escrow > 0n
-              ? `${formatEth(shipment.escrow)} was locked after proposal approval.`
+              ? amendmentFunding > 0n
+                ? `${formatEth(shipment.escrow)} is funded, including ${formatEth(amendmentFunding)} added through agreement changes.`
+                : `${formatEth(shipment.escrow)} was locked after proposal approval.`
               : `${formatEth(shipment.proposedAmount)} is planned but not funded yet.`}
           </div>
         </div>
       </div>
-      <PaymentRow label="Planned payment" value={formatEth(shipment.proposedAmount)} />
-      <PaymentRow label="Locked in escrow" value={formatEth(shipment.escrow)} />
+      <PaymentRow
+        label={shipment.escrow > 0n ? 'Original escrow' : 'Planned payment'}
+        value={formatEth(shipment.proposedAmount)}
+      />
+      <PaymentRow label="Added through amendments" value={formatEth(amendmentFunding)} />
+      <PaymentRow label="Current funded escrow" value={formatEth(shipment.escrow)} />
       <PaymentRow label="Released so far" value={formatEth(shipment.released)} />
       <PaymentRow label="Refunded" value={formatEth(shipment.refunded)} />
       <PaymentRow label="Remaining escrow" value={formatEth(shipment.remaining)} />
+      {shipment.tipAmount > 0n && (
+        <PaymentRow label="Completion tip" value={formatEth(shipment.tipAmount)} />
+      )}
       <div className={styles.paymentNote}>
         Milestone payments are released by <code>verifyMilestone()</code> after the shipper approves submitted proof.
       </div>
+
+      <section className={styles.paymentAllocationSection} aria-labelledby="payment-allocation-title">
+        <div className={styles.paymentAllocationHeader}>
+          <div>
+            <h3 id="payment-allocation-title">Milestone escrow allocation</h3>
+            <p>Original and amendment funding currently assigned to each checkpoint.</p>
+          </div>
+          <Badge tone="neutral">{shipment.milestones.length} checkpoint{shipment.milestones.length === 1 ? '' : 's'}</Badge>
+        </div>
+        <ol className={styles.paymentAllocationList}>
+          {shipment.milestones.map((milestone) => {
+            const baseFunding = milestone.payoutAmount;
+            const addedFunding = milestone.additionalPayoutAmount;
+            return (
+              <li key={`payment-allocation-${milestone.milestoneId}`}>
+                <span className={styles.paymentAllocationIndex}>{milestone.index + 1}</span>
+                <div className={styles.paymentAllocationName}>
+                  <strong>{milestone.name}</strong>
+                  <span>
+                    {milestone.addedByAmendment ? 'Created by amendment' : milestone.status}
+                  </span>
+                </div>
+                <div className={styles.paymentAllocationEquation}>
+                  <span>{formatEth(baseFunding)}</span>
+                  <span aria-hidden="true">+</span>
+                  <span>{formatEth(addedFunding)}</span>
+                  <span aria-hidden="true">=</span>
+                  <strong>{formatEth(baseFunding + addedFunding)}</strong>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      </section>
+
+      {(canTip || shipment.tipAmount > 0n) && (
+        <section
+          id="carrier-tip-card"
+          ref={tipCardRef}
+          className={styles.tipCard}
+          aria-labelledby="carrier-tip-title"
+          tabIndex={shipment.tipAmount > 0n ? -1 : undefined}
+        >
+          <div className={styles.tipCardIcon} aria-hidden="true">
+            <HiOutlineGift />
+          </div>
+          <div className={styles.tipCardContent}>
+            <div className={styles.tipCardHeading}>
+              <div>
+                <h3 id="carrier-tip-title">
+                  {shipment.tipAmount > 0n ? 'Carrier thanked' : 'Thank the carrier'}
+                </h3>
+                <p>
+                  {shipment.tipAmount > 0n
+                    ? `${formatEth(shipment.tipAmount)} was sent directly to the carrier.`
+                    : 'Send one optional tip directly to the carrier after successful delivery.'}
+                </p>
+              </div>
+              {shipment.tipAmount > 0n && <Badge tone="success">Tip sent</Badge>}
+            </div>
+            {canTip && (
+              <form className={styles.tipForm} onSubmit={submitTip}>
+                <label htmlFor="carrier-tip-amount">Tip amount</label>
+                <div className={styles.tipInputRow}>
+                  <div className={styles.tipInputWrap}>
+                    <input
+                      id="carrier-tip-amount"
+                      ref={tipInputRef}
+                      type="text"
+                      inputMode="decimal"
+                      value={tipAmountEth}
+                      onChange={(event) => setTipAmountEth(event.target.value)}
+                      placeholder="0.01"
+                      aria-describedby="carrier-tip-help"
+                      disabled={busy}
+                    />
+                    <span>ETH</span>
+                  </div>
+                  <Button type="submit" disabled={busy || !tipAmountEth.trim()}>
+                    {actionStage === 'tipping' ? 'Sending tip...' : 'Send one-time tip'}
+                  </Button>
+                </div>
+                <p id="carrier-tip-help" className={styles.tipHelp}>
+                  This is a separate, irreversible wallet payment and does not enter escrow.
+                </p>
+              </form>
+            )}
+          </div>
+        </section>
+      )}
 
       <section className={styles.paymentHistorySection} aria-labelledby="payment-history-title">
         <div className={styles.paymentHistoryHeader}>
           <div>
             <h3 id="payment-history-title">On-chain history</h3>
-            <p>Funding, payouts, and refunds recorded by DeliveryEscrow.</p>
+            <p>Funding, payouts, refunds, and tips recorded by DeliveryEscrow.</p>
           </div>
           {!historyLoading && !historyError && (
             <Badge tone="neutral">{history.length} event{history.length === 1 ? '' : 's'}</Badge>
@@ -1755,13 +3799,24 @@ function PaymentRow({ label, value }) {
   );
 }
 
-async function loadShipment(deliveryEscrow, idParam) {
+async function loadShipment(deliveryEscrow, lifecycleManager, idParam) {
   const requestId = BigInt(idParam);
-  const [request, milestoneResult, proposalResult, itemResult] = await Promise.all([
+  const [
+    request,
+    milestoneResult,
+    proposalResult,
+    itemResult,
+    tipAmountResult,
+    cancellationResult,
+    amendmentResult,
+  ] = await Promise.all([
     deliveryEscrow.getRequest(requestId),
     deliveryEscrow.getMilestones(requestId),
     deliveryEscrow.getProposals(requestId),
     deliveryEscrow.getItems(requestId),
+    deliveryEscrow.tipAmounts(requestId),
+    lifecycleManager.getCancellationRequests(requestId),
+    lifecycleManager.getAmendmentRequests(requestId),
   ]);
 
   const shipper = request.shipper ?? request[1];
@@ -1775,6 +3830,7 @@ async function loadShipment(deliveryEscrow, idParam) {
   const createdAt = Number(request.createdAt ?? request[10] ?? 0n);
   const milestones = Array.from(milestoneResult || []).map((milestone, index) => ({
     index,
+    milestoneId: Number(milestone.milestoneId ?? milestone[11] ?? index),
     name: milestone.name ?? milestone[0],
     payoutPercentage: Number(milestone.payoutPercentage ?? milestone[1]),
     payoutAmount: BigInt(milestone.payoutAmount ?? milestone[2] ?? 0n),
@@ -1784,6 +3840,10 @@ async function loadShipment(deliveryEscrow, idParam) {
     status: MILESTONE_STATUS[Number(milestone.status ?? milestone[6])] || 'Unknown',
     submittedAt: Number(milestone.submittedAt ?? milestone[7] ?? 0n),
     verifiedAt: Number(milestone.verifiedAt ?? milestone[8] ?? 0n),
+    additionalPayoutAmount: BigInt(
+      milestone.additionalPayoutAmount ?? milestone[9] ?? 0n,
+    ),
+    addedByAmendment: Boolean(milestone.addedByAmendment ?? milestone[10] ?? false),
   }));
   const proposals = await Promise.all(Array.from(proposalResult || []).map(async (proposal, id) => {
     const proposalMilestoneResult = await deliveryEscrow.getProposalMilestones(requestId, id);
@@ -1793,6 +3853,7 @@ async function loadShipment(deliveryEscrow, idParam) {
       status: PROPOSAL_STATUS[Number(proposal.status ?? proposal[1])] || 'Unknown',
       createdAt: Number(proposal.createdAt ?? proposal[2] ?? 0n),
       updatedAt: Number(proposal.updatedAt ?? proposal[3] ?? 0n),
+      rejectionNote: proposal.rejectionNote ?? proposal[4] ?? '',
       milestones: Array.from(proposalMilestoneResult || []).map((milestone) => ({
         name: milestone.name ?? milestone[0],
         payoutPercentage: Number(milestone.payoutPercentage ?? milestone[1]),
@@ -1804,6 +3865,81 @@ async function loadShipment(deliveryEscrow, idParam) {
     description: item.itemDescription ?? item[1],
     quantity: Number(item.quantity ?? item[2] ?? 0),
   }));
+  const cancellations = Array.from(cancellationResult || []).map((cancellation, index) => ({
+    id: index,
+    requester: cancellation.requester ?? cancellation[0],
+    responder: cancellation.responder ?? cancellation[1],
+    requesterNote: cancellation.requesterNote ?? cancellation[2] ?? '',
+    rejectionNote: cancellation.rejectionNote ?? cancellation[3] ?? '',
+    responseDeadline: Number(cancellation.responseDeadline ?? cancellation[4] ?? 0n),
+    status: CANCELLATION_STATUS[Number(cancellation.status ?? cancellation[5])] || 'Unknown',
+    createdAt: Number(cancellation.createdAt ?? cancellation[6] ?? 0n),
+    resolvedAt: Number(cancellation.resolvedAt ?? cancellation[7] ?? 0n),
+  }));
+  const amendments = await Promise.all(Array.from(amendmentResult || []).map(
+    async (amendment, index) => {
+      const [existingResult, newResult] = await Promise.all([
+        lifecycleManager.getAmendmentExistingFunding(requestId, index),
+        lifecycleManager.getAmendmentNewMilestones(requestId, index),
+      ]);
+      const positional = Array.from(amendment || []);
+      const expandedDeadlineCandidate = Number(amendment[5] ?? 0n);
+      const expandedStatusCandidate = Number(amendment[8] ?? -1);
+      const expandedHistoryRecord = positional.length >= 12
+        && expandedDeadlineCandidate >= 1_000_000_000
+        && expandedDeadlineCandidate <= 10_000_000_000
+        && expandedStatusCandidate >= 0
+        && expandedStatusCandidate < AMENDMENT_STATUS.length;
+      return {
+        id: index,
+        requester: amendment.requester ?? amendment[0],
+        responder: amendment.responder ?? amendment[1],
+        requesterNote: amendment.requesterNote ?? amendment[2] ?? '',
+        rejectionNote: amendment.rejectionNote ?? amendment[3] ?? '',
+        previousDeadline: expandedHistoryRecord
+          ? Number(amendment.previousDeadline ?? amendment[4] ?? 0n)
+          : 0,
+        proposedDeadline: expandedHistoryRecord
+          ? Number(amendment.proposedDeadline ?? amendment[5] ?? 0n)
+          : Number(amendment[4] ?? 0n),
+        additionalFunding: expandedHistoryRecord
+          ? BigInt(amendment.additionalFunding ?? amendment[6] ?? 0n)
+          : BigInt(amendment[5] ?? 0n),
+        responseDeadline: expandedHistoryRecord
+          ? Number(amendment.responseDeadline ?? amendment[7] ?? 0n)
+          : Number(amendment[6] ?? 0n),
+        status: AMENDMENT_STATUS[Number(
+          expandedHistoryRecord
+            ? amendment.status ?? amendment[8]
+            : amendment[7],
+        )] || 'Unknown',
+        createdAt: Number(
+          expandedHistoryRecord
+            ? amendment.createdAt ?? amendment[9] ?? 0n
+            : amendment.createdAt ?? amendment[9] ?? amendment[8] ?? 0n,
+        ),
+        resolvedAt: Number(
+          expandedHistoryRecord
+            ? amendment.resolvedAt ?? amendment[10] ?? 0n
+            : amendment[9] ?? 0n,
+        ),
+        directExtension: expandedHistoryRecord
+          ? Boolean(amendment.directExtension ?? amendment[11] ?? false)
+          : false,
+        existingFunding: Array.from(existingResult || []).map((allocation) => ({
+          milestoneId: Number(allocation.milestoneId ?? allocation[0] ?? 0n),
+          amount: BigInt(allocation.amount ?? allocation[1] ?? 0n),
+        })),
+        newMilestones: Array.from(newResult || []).map((milestone) => ({
+          name: milestone.name ?? milestone[0] ?? '',
+          insertBeforeMilestoneId: BigInt(
+            milestone.insertBeforeMilestoneId ?? milestone[1] ?? 0n,
+          ),
+          amount: BigInt(milestone.amount ?? milestone[2] ?? 0n),
+        })),
+      };
+    },
+  ));
 
   return {
     id: Number(request.requestId ?? request[0]),
@@ -1820,11 +3956,68 @@ async function loadShipment(deliveryEscrow, idParam) {
     released,
     refunded,
     remaining: escrow - released - refunded,
+    tipAmount: BigInt(tipAmountResult ?? 0n),
     items,
     milestones,
     proposals,
+    cancellations,
+    amendments,
     events: buildTimelineEvents({ shipper, carrier, createdAt, proposedAmount, milestones }),
   };
+}
+
+function toDateTimeLocal(timestampMs) {
+  const date = new Date(timestampMs);
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return localDate.toISOString().slice(0, 16);
+}
+
+function suggestedCancellationDeadline(shipmentDeadline) {
+  const now = Date.now();
+  const threeDaysFromNow = now + 3 * 24 * 60 * 60 * 1000;
+  const shipmentDeadlineMs = shipmentDeadline * 1000;
+  const suggestedDeadline = shipmentDeadlineMs <= threeDaysFromNow
+    ? shipmentDeadlineMs - MIN_CANCELLATION_LEAD_SECONDS * 1000
+    : threeDaysFromNow;
+  return toDateTimeLocal(suggestedDeadline);
+}
+
+function suggestedAmendmentResponseDeadline(shipmentDeadline) {
+  const oneDayFromNow = Date.now() + 24 * 60 * 60 * 1000;
+  const oneHourBeforeShipment = (shipmentDeadline - MIN_AMENDMENT_LEAD_SECONDS) * 1000;
+  return toDateTimeLocal(Math.min(oneDayFromNow, oneHourBeforeShipment));
+}
+
+function suggestedExtendedDeadline(shipmentDeadline) {
+  return toDateTimeLocal((shipmentDeadline + 24 * 60 * 60) * 1000);
+}
+
+function parsePositiveEth(value) {
+  let parsed;
+  try {
+    parsed = parseEther(value);
+  } catch {
+    throw new Error('Enter valid funding amounts in ETH.');
+  }
+  if (parsed <= 0n) throw new Error('Funding amounts must be greater than zero.');
+  return parsed;
+}
+
+function parseEthInputOrZero(value) {
+  if (!value || !String(value).trim()) return 0n;
+  try {
+    const parsed = parseEther(String(value));
+    return parsed > 0n ? parsed : 0n;
+  } catch {
+    return 0n;
+  }
+}
+
+function cancellationStatusTone(status) {
+  if (status === 'Accepted') return 'success';
+  if (status === 'Rejected') return 'danger';
+  if (status === 'Expired') return 'warning';
+  return 'neutral';
 }
 
 function buildTimelineEvents({ shipper, carrier, createdAt, proposedAmount, milestones }) {
@@ -1840,8 +4033,9 @@ function buildTimelineEvents({ shipper, carrier, createdAt, proposedAmount, mile
   }];
 
   for (const milestone of milestones) {
-    const payout = milestone.payoutAmount > 0n
-      ? milestone.payoutAmount
+    const milestonePayout = milestone.payoutAmount + milestone.additionalPayoutAmount;
+    const payout = milestonePayout > 0n
+      ? milestonePayout
       : (proposedAmount * BigInt(milestone.payoutPercentage)) / 100n;
     events.push({
       eventType: milestone.status,
@@ -1850,8 +4044,10 @@ function buildTimelineEvents({ shipper, carrier, createdAt, proposedAmount, mile
       statusLabel: milestone.status,
       timestamp: milestone.verifiedAt || milestone.submittedAt || null,
       actor: carrier,
-      details: `${milestone.payoutPercentage}% payout (${formatEth(payout)}). ${milestone.remark || milestone.rejectionReason || milestoneDescription(milestone.status)}`,
-      milestoneId: milestone.index,
+      details: milestone.addedByAmendment
+        ? `${formatEth(payout)} funded through an accepted agreement change. ${milestone.remark || milestone.rejectionReason || milestoneDescription(milestone.status)}`
+        : `${milestone.payoutPercentage}% payout (${formatEth(payout)}). ${milestone.remark || milestone.rejectionReason || milestoneDescription(milestone.status)}`,
+      milestoneId: milestone.milestoneId,
     });
   }
 
@@ -1914,6 +4110,16 @@ function formatActionError(error) {
   if (message.includes('proposal is not active')) return 'This proposal is no longer active. Refresh the request and choose another plan.';
   if (message.includes('request is not open')) return 'This request is no longer open for proposal review.';
   if (message.includes('request cannot be cancelled')) return 'This request can no longer be cancelled.';
+  if (message.includes('another negotiation is pending')) return 'Another agreement change is already awaiting a response.';
+  if (message.includes('note exceeds')) return 'The note is too long. Shorten it and try again.';
+  if (message.includes('milestone proof is awaiting verification')) return 'Decide the pending milestone proof before accepting cancellation.';
+  if (message.includes('response deadline has passed')) return 'This cancellation response deadline has passed. Close it as expired.';
+  if (message.includes('response deadline exceeds shipment deadline')) return 'Choose a response deadline before the shipment deadline.';
+  if (message.includes('shipment deadline is within one hour')) return 'Cancellation requests close one hour before the shipment deadline.';
+  if (message.includes('cancellation is not pending')) return 'This cancellation request has already been resolved.';
+  if (message.includes('caller is not cancellation responder')) return 'Only the requested participant can answer this cancellation.';
+  if (message.includes('caller is not cancellation requester')) return 'Only the requester can withdraw this cancellation.';
+  if (message.includes('caller is not shipment participant')) return 'Only the shipper or assigned carrier can request cancellation.';
   if (message.includes('request is not refundable')) return 'This request is not currently eligible for a refund.';
   if (message.includes('request deadline has not passed')) return 'The request deadline has not passed yet.';
   if (message.includes('no escrow remaining')) return 'There is no remaining escrow to refund.';

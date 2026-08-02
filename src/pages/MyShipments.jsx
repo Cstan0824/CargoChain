@@ -312,6 +312,7 @@ async function loadWalletShipments(deliveryEscrow, account) {
             id: proposalId,
             status: PROPOSAL_STATUS[Number(proposal.status ?? proposal[1])] || 'Unknown',
             createdAt: Number(proposal.createdAt ?? proposal[2] ?? 0n),
+            rejectionNote: proposal.rejectionNote ?? proposal[4] ?? '',
           });
         }
         return result;
@@ -455,6 +456,12 @@ function CarrierProposalHistoryModal({ shipment, onResubmit, onClose }) {
                     </li>
                   ))}
                 </ol>
+                {proposal.status === 'Rejected' && proposal.rejectionNote && (
+                  <div className={styles.historyRejectionNote}>
+                    <span>Rejection note</span>
+                    <p>{proposal.rejectionNote}</p>
+                  </div>
+                )}
                 {shipment.status === 'Open' && !shipment.hasActiveProposal && proposal.status === 'Rejected' && (
                   <div className={styles.historyProposalActions}>
                     <Button size="sm" onClick={() => onResubmit(proposal)}>

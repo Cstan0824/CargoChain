@@ -6,6 +6,7 @@ import {
   HiOutlineClipboardDocumentCheck,
   HiOutlineDocumentText,
   HiOutlineExclamationTriangle,
+  HiOutlineArrowTopRightOnSquare,
   HiOutlinePhoto,
 } from 'react-icons/hi2';
 import { formatDate } from '../../utils/format';
@@ -20,7 +21,7 @@ const ICONS = {
   warning: HiOutlineExclamationTriangle,
 };
 
-export function BlockchainNoticeTile({ notice }) {
+export function BlockchainNoticeTile({ notice, onOpenTracking }) {
   const Icon = ICONS[notice.tone] || HiOutlineDocumentText;
   const date = notice.timestampMs ? formatDate(Math.floor(notice.timestampMs / 1000)) : '';
 
@@ -28,7 +29,13 @@ export function BlockchainNoticeTile({ notice }) {
     <div className={styles.wrap}>
       <div className={`${styles.tile} ${styles[notice.tone] || ''}`}>
         <Icon className={styles.icon} aria-hidden="true" />
-        <span>{notice.text}</span>
+        <span className={styles.copy}>{notice.text}</span>
+        {onOpenTracking && (
+          <button type="button" className={styles.reviewAction} onClick={onOpenTracking}>
+            Review
+            <HiOutlineArrowTopRightOnSquare aria-hidden="true" />
+          </button>
+        )}
       </div>
       {date && <time className={styles.time}>{date}</time>}
     </div>

@@ -111,12 +111,14 @@ Shipper                  Carrier                Smart Contract           Supabas
 
 ### Scenario C — Partial refund (deadline expired / cancelled / failed)
 
-1. Request reaches a terminal failure state: shipper cancels, deadline expires, or carrier abandons.
+1. Request reaches a terminal failure state: both participants accept mutual cancellation, or the delivery deadline expires.
 2. Smart contract allows `refundRemaining(requestId)` only when:
    - request.status ∈ {**Cancelled**, **Expired**}, **AND**
    - `remainingBalance > 0` (i.e. unpaid milestones exist).
 3. ETH balance = `totalAmount - releasedAmount` is sent back to `shipper`.
 4. Already-paid milestones (`releasedAmount`) are **not reversed** — this is the locked-in refund rule (decision #8).
+
+For an accepted shipment before its deadline, unilateral shipper cancellation is disabled. Either participant creates an on-chain cancellation request with a reason and response deadline. Work continues until the counterparty accepts; acceptance is blocked while milestone proof is awaiting verification.
 
 ### Scenario D — Delivery recovery / republish
 
@@ -137,7 +139,7 @@ Shipper                  Carrier                Smart Contract           Supabas
 | **DeliveryRequest** | `requestId`, `shipper`, `carrier`, `pickupLocation`, `deliveryLocation`, `totalAmount`, `releasedAmount`, `remainingBalance`, `deadline`, `specialInstruction`, `status`, `createdAt` | Marketplace list, My Shipments, request detail |
 | **Item** | `itemName`, `itemDescription`, `quantity` | Create Request form, request detail |
 | **Milestone** | `name`, `payoutPercentage`, `payoutAmount`, `proofUris[]`, `remark`, `rejectionReason`, `status`, `submittedAt`, `verifiedAt` | Track page, Verify/Reject modal, stepper |
-| **CarrierProposal** | `proposalId`, `carrier`, `status`, `createdAt`, `updatedAt`, `ProposedMilestone[]` | Track proposal review, carrier proposal page, on-chain audit trail |
+| **CarrierProposal** | `proposalId`, `carrier`, `status`, `createdAt`, `updatedAt`, `rejectionNote`, `ProposedMilestone[]` | Track proposal review, carrier proposal page, on-chain audit trail |
 | **TransactionRecord** *(optional, on-chain history)* | `transactionId`, `requestId`, `milestoneId`, `from`, `to`, `amount`, `action`, `txHash` (frontend-captured), `timestamp` | Wallet / history view |
 
 ### Status enums (must match exactly between contract, UI, and events)
@@ -148,7 +150,7 @@ Shipper                  Carrier                Smart Contract           Supabas
 | `RequestStatus` | `Open`, `PendingApproval`, `Funded`, `InProgress`, `Completed`, `Cancelled`, `Expired`, `Refunded` |
 | `MilestoneStatus` | `Proposed`, `PendingProof`, `Submitted`, `Verified`, `Rejected`, `Paid` |
 | `ProposalStatus` | `Active`, `Revoked`, `Rejected`, `Accepted` |
-| `TransactionAction` | `EscrowFunded`, `MilestonePayment`, `RefundIssued`, `RequestCancelled`, `RecoveryCreated` |
+| `TransactionAction` | `EscrowFunded`, `MilestonePayment`, `RefundIssued`, `CarrierTipped`, `RequestCancelled`, `RecoveryCreated` |
 
 ---
 
@@ -166,6 +168,7 @@ Shipper                  Carrier                Smart Contract           Supabas
 | `Wallet.jsx` | All (tx history) | Tx history view driven by `TransactionRecord` events. |
 | `Profile.jsx` | All (identity) | Show `role`, `displayName`, `isRegistered`. |
 | `MyShipments.jsx` | All (personal list) | List of requests where wallet is shipper or carrier; filter by status. |
+| `Messages.jsx` | A, B, C | Private shipper/carrier chat plus the filtered on-chain activity timeline; pending agreement notices open the exact Track agreement section. |
 
 ---
 

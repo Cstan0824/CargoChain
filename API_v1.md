@@ -1,18 +1,22 @@
 # CargoChain Smart Contract API v1
 
 > **Status:** Implemented contract surface.
-> All ETH amounts are in wei, timestamps are Unix seconds, request IDs start at 1, and milestone/proposal IDs are zero-indexed within a request.
+> All ETH amounts are in wei and timestamps are Unix seconds. Request IDs start at 1. Milestone IDs are stable, zero-indexed creation IDs within a request; their completion order is retrieved separately and may change when an amendment inserts a checkpoint.
 
 ## Deployment order
 
 1. Deploy `UserRegistry`.
-2. Deploy `DeliveryEscrow` with the deployed registry address.
+2. Deploy `LifecycleManager` without arguments.
+3. Deploy `DeliveryEscrow` with the registry and manager addresses.
+4. Call `LifecycleManager.initializeDeliveryEscrow` once with the escrow address.
 
 ```solidity
-new DeliveryEscrow(address(userRegistry))
+LifecycleManager manager = new LifecycleManager();
+DeliveryEscrow escrow = new DeliveryEscrow(address(userRegistry), address(manager));
+manager.initializeDeliveryEscrow(address(escrow));
 ```
 
-`DeliveryEscrow` rejects the zero address as its registry with `registry address required`.
+`DeliveryEscrow` rejects zero registry or manager addresses. `LifecycleManager` records its deployer as the one-time initializer and rejects a zero escrow link.
 
 ---
 
@@ -91,6 +95,85 @@ MAX_DISPLAY_NAME_BYTES() view returns (uint256) // 64
 
 ---
 
+## LifecycleManager.sol
+
+### Agreement changes and mutual cancellation
+
+```solidity
+constructor()
+initializer() view returns (address)
+deliveryEscrow() view returns (address)
+initializeDeliveryEscrow(address deliveryEscrowAddress)
+uint256 public constant MIN_ADDITIONAL_FUNDING = 0.01 ether;
+uint256 public constant MIN_CANCELLATION_LEAD_TIME = 1 hours;
+uint256 public constant MIN_AMENDMENT_LEAD_TIME = 1 hours;
+uint256 public constant MIN_DEADLINE_CHANGE = 15 minutes;
+uint256 public constant MAX_NOTE_BYTES = 500;
+
+enum NegotiationKind { None, Amendment, Cancellation }
+
+getActiveNegotiation(uint256 requestId)
+    view
+    returns (NegotiationKind kind, uint256 negotiationId, uint256 milestoneStateVersion)
+
+hasPendingNegotiation(uint256 requestId) view returns (bool)
+
+requestCancellation(uint256 requestId, string requesterNote, uint256 responseDeadline)
+    returns (uint256 cancellationId)
+acceptCancellation(uint256 requestId, uint256 cancellationId)
+rejectCancellation(uint256 requestId, uint256 cancellationId, string rejectionNote)
+withdrawCancellation(uint256 requestId, uint256 cancellationId)
+expireCancellation(uint256 requestId, uint256 cancellationId)
+getCancellationCount(uint256 requestId) view returns (uint256)
+getCancellationRequests(uint256 requestId) view returns (CancellationRequest[] memory)
+
+extendShipmentDeadline(uint256 requestId, uint256 newDeadline, string note)
+requestAmendment(
+    uint256 requestId,
+    uint256 proposedDeadline,
+    uint256 responseDeadline,
+    string requesterNote,
+    ExistingMilestoneFunding[] existingFunding,
+    NewMilestoneFunding[] newMilestones
+) payable returns (uint256 amendmentId)
+acceptAmendment(uint256 requestId, uint256 amendmentId) payable
+rejectAmendment(uint256 requestId, uint256 amendmentId, string rejectionNote)
+withdrawAmendment(uint256 requestId, uint256 amendmentId)
+expireAmendment(uint256 requestId, uint256 amendmentId)
+getAmendmentCount(uint256 requestId) view returns (uint256)
+getAmendmentRequests(uint256 requestId) view returns (AmendmentRequest[] memory)
+getAmendmentExistingFunding(uint256 requestId, uint256 amendmentId)
+    view returns (ExistingMilestoneFunding[] memory)
+getAmendmentNewMilestones(uint256 requestId, uint256 amendmentId)
+    view returns (NewMilestoneFunding[] memory)
+```
+
+- **Purpose:** Own post-acceptance agreement-change state without increasing the already-large escrow contract.
+- **Escrow relationship:** The one-time `deliveryEscrow` link identifies the authoritative request, milestone, and escrow contract. The manager does not duplicate shipment data.
+- **Negotiation lock:** A request can expose only one active `Amendment` or `Cancellation` record at a time. `None` means there is no pending workflow.
+- **Canonical request validation:** Negotiation getters validate request existence through `DeliveryEscrow`.
+- **Version snapshot:** Amendment requests capture the milestone version from `DeliveryEscrow.getLifecycleSnapshot`; acceptance reverts if proof submission or verification changed progress meanwhile.
+- **Direct extension:** The shipper may extend the deadline without carrier confirmation when no negotiation is pending. This path cannot shorten the deadline or alter funding, the extension must be at least 15 minutes, and the accepted change is retained in amendment history with its previous and resulting deadlines.
+- **Mutual amendments:** Either party may request a deadline/funding change. A carrier cannot shorten the deadline. Shipper shortening requires carrier approval and at least `0.01 ETH` of new funding.
+- **Funding:** The shipper stages ETH when requesting a funded amendment. A carrier requests an amount and the shipper supplies it when accepting. Allocations must exactly equal the new ETH and may only top up unpaid milestones or fund new milestones.
+- **Timing:** Mutual amendments close one hour before the current shipment deadline. The tracking form defaults responses to 24 hours, falling back to one hour before the shipment deadline, and defaults extensions to 24 hours after the current deadline.
+- **Insertion:** New milestones may be placed before an unpaid milestone or appended as the new final checkpoint. Paid checkpoints are locked drop targets. Original milestone names, payouts, completed work, and released funds remain unchanged.
+- **Resolution:** The responder accepts or rejects, the requester may withdraw, and anyone may expire an unanswered request. Rejection, withdrawal, and expiry refund shipper-staged ETH.
+- **Cancellation request:** Either assigned participant may open a request on a `Funded` or `InProgress` shipment while more than one hour remains before its deadline. The requester note is required, limited to 500 UTF-8 bytes, and the response deadline must not exceed the shipment deadline.
+- **Decision:** Only the stored responder may accept or reject. Rejection notes are optional and limited to 500 bytes. Only the requester may withdraw. Anyone may expire an unanswered request after its response deadline.
+- **Settlement:** Acceptance is blocked while any milestone proof awaits verification. Accepted cancellation calls the restricted escrow hook; released milestone payments remain with the carrier and only the remaining escrow is refunded to the shipper.
+- **Funding rule:** Newly added amendment funds must meet the public `0.01 ETH` minimum.
+- **Frontend:** `Track` displays the pending decision, settlement split, responder actions, withdrawal/expiry controls, and historical records.
+
+Events: `DeliveryEscrowInitialized`, `ShipmentDeadlineExtended`, `AmendmentRequested`,
+`AmendmentAccepted`, `AmendmentRejected`, `AmendmentWithdrawn`, `AmendmentExpired`,
+`CancellationRequested`, `CancellationAccepted`, `CancellationRejected`,
+`CancellationWithdrawn`, and `CancellationExpired`.
+
+The finalized workflow rules and phased implementation boundary are documented in `docs/Agreement-Changes.md`.
+
+---
+
 ## DeliveryEscrow.sol
 
 ### Registration rule
@@ -103,10 +186,32 @@ userRegistry.isRegistered(msg.sender) == true
 
 An unregistered caller reverts with `caller is not registered`. This applies to request creation, proposal submission/revocation/rejection, approval/funding, proof submission/verification, cancellation, and refunds. View functions remain public.
 
+### Lifecycle safety reads
+
+```solidity
+hasPendingMilestoneProof(uint256 requestId) view returns (bool)
+getMilestoneStateVersion(uint256 requestId) view returns (uint256)
+getLifecycleSnapshot(uint256 requestId)
+    view
+    returns (
+        address shipper,
+        address carrier,
+        RequestStatus status,
+        uint256 deadline,
+        uint256 milestoneStateVersion
+    )
+```
+
+- A funded milestone plan starts at version `1`.
+- Every proof submission and shipper verification decision increments the version.
+- `hasPendingMilestoneProof` is `true` while any milestone is `Submitted` and awaiting the shipper's decision.
+- `getLifecycleSnapshot` is the stable cross-contract read surface; it intentionally excludes dynamic cargo/request strings.
+- `LifecycleManager` consumes this snapshot; shipment and escrow ownership stays in `DeliveryEscrow`.
+
 ### Constructor and registry getter
 
 ```solidity
-constructor(address registryAddress)
+constructor(address registryAddress, address lifecycleManagerAddress)
 userRegistry() view returns (address)
 ```
 
@@ -150,11 +255,12 @@ function createRequest(
 - **Event:** `MilestonePlanRevoked(requestId, carrier, proposalId)`.
 - **Frontend:** `ProposeMilestones`.
 
-### `rejectMilestoneProposal(uint256 requestId, uint256 proposalId)`
+### `rejectMilestoneProposal(uint256 requestId, uint256 proposalId, string rejectionNote)`
 
 - **Purpose:** Reject one active proposal without closing the request.
 - **Caller:** Registered request shipper only.
-- **Effects:** Marks the proposal `Rejected` and clears that carrier's active-proposal slot.
+- **Parameters:** `rejectionNote` is optional and may contain at most 500 UTF-8 bytes.
+- **Effects:** Marks the proposal `Rejected`, stores the note on its historical record, and clears that carrier's active-proposal slot.
 - **Event:** `MilestonePlanRejected(requestId, carrier, proposalId)`.
 - **Frontend:** Request details / shipper proposal review.
 
@@ -166,7 +272,7 @@ function createRequest(
 - **Validation:** Request is `Open`, request deadline has not passed, proposal exists and is `Active`, and its plan is non-empty.
 - **Effects:**
   - Assigns the selected carrier and marks its proposal `Accepted`.
-  - Marks every other active proposal `Rejected`.
+  - Marks every other active proposal `Rejected` with the fixed note `Another carrier proposal was accepted.`.
   - Copies the selected milestones and calculates payout amounts; rounding remainder goes to the final milestone.
   - Removes the request from the open index and sets status to `Funded`.
   - Adds `msg.value` to the shipper's maintained locked total and increments the shipper's contributing request count.
@@ -186,7 +292,7 @@ function submitProof(
 
 - **Purpose:** Submit one or more proof URIs for a milestone.
 - **Caller:** Registered assigned carrier only.
-- **Validation:** Request is `Funded` or `InProgress`; deadline has not passed; at least one non-empty proof URI; previous milestone is `Paid`; target milestone is `PendingProof` or `Rejected`.
+- **Validation:** Request is `Funded` or `InProgress`; deadline has not passed; at least one non-empty proof URI; the previous checkpoint in the current execution order is `Paid`; target milestone is `PendingProof` or `Rejected`.
 - **Effects:** Replaces existing proof URIs, stores the remark, clears rejection reason, sets milestone to `Submitted`, and request to `InProgress`.
 - **Event:** `ProofSubmitted(requestId, milestoneId)`.
 - **Frontend:** Carrier proof submission.
@@ -204,7 +310,7 @@ function verifyMilestone(
 
 - **Purpose:** Approve or reject submitted milestone proof.
 - **Caller:** Registered request shipper only.
-- **Validation:** Milestone exists and is `Submitted`; a rejection requires a non-empty reason.
+- **Validation:** Milestone exists and is `Submitted`; its predecessor in the current execution order is `Paid`; a rejection requires a non-empty reason.
 - **Approval effects:** Marks the milestone `Verified`, then `Paid`; increments request `releasedAmount`; decreases the shipper's locked total; transfers the payout to the carrier; sets request to `Completed` after the final payout. The contributing request count decreases only when remaining escrow reaches zero.
 - **Rejection effects:** Marks the milestone `Rejected` and stores the reason for carrier resubmission.
 - **Approval events:** `MilestoneVerified`, `MilestonePaid`, `PaymentReleased`.
@@ -213,12 +319,32 @@ function verifyMilestone(
 
 ### `cancelRequest(uint256 requestId)`
 
-- **Purpose:** Cancel before work starts, or cancel an in-progress request after its deadline.
+- **Purpose:** Unilaterally cancel an unfunded request before a proposal is accepted.
 - **Caller:** Registered request shipper only.
-- **Allowed states:** `Open`, `PendingApproval`, `Funded`, or deadline-passed `InProgress`.
-- **Effects:** Removes an open request from the marketplace and emits cancellation. If escrow remains, refunds all remaining escrow, sets status to `Refunded`, decreases the shipper's locked total, and removes the request from the active locked count.
-- **Events:** `RequestCancelled`; `RefundIssued` when value is returned.
+- **Allowed states:** `Open` or `PendingApproval` only. A funded request must use the mutual-cancellation flow.
+- **Effects:** Removes an open request from the marketplace, sets it to `Cancelled`, and emits `RequestCancelled`. No escrow exists in these states.
+- **Event:** `RequestCancelled`.
 - **Frontend:** Shipper request cancellation.
+
+### `finalizeMutualCancellation(uint256 requestId)`
+
+- **Purpose:** Settle a cancellation already accepted by both shipment participants.
+- **Caller:** The configured `LifecycleManager` contract only.
+- **Allowed states:** `Funded` or `InProgress`.
+- **Effects:** Emits cancellation, refunds all remaining escrow to the shipper, and leaves already released milestone payouts unchanged.
+- **Events:** `RequestCancelled`, `RefundIssued`.
+- **Frontend:** Never called directly; triggered by `LifecycleManager.acceptCancellation`.
+
+### `finalizeAmendment(...) payable`
+
+- **Purpose:** Apply a shipment amendment already approved through `LifecycleManager`.
+- **Caller:** The configured `LifecycleManager` contract only.
+- **Parameters:** New shipment deadline, top-ups for existing unpaid stable milestone IDs, and fully funded new milestones with an `insertBeforeMilestoneId`. Use `APPEND_MILESTONE_ID` (`type(uint256).max`) to append a new final checkpoint.
+- **Value:** Must equal every supplied allocation exactly.
+- **Effects:** Updates the deadline, adds the new ETH to request/locked-escrow totals, records additional payouts separately from original payouts, inserts eligible new milestones, and increments the milestone-state version.
+- **Safety:** Paid, submitted, and verified milestones cannot be insertion targets. Paid milestones cannot receive new funds. Amendments reorder only a separate execution-order list: stable milestone records, proof references, payments, and emitted event IDs are never copied or rewritten.
+- **Event:** `RequestAmended` and, when value is added, `EscrowFunded`.
+- **Frontend:** Never called directly; triggered by amendment acceptance or a direct shipper extension in `LifecycleManager`.
 
 ### `refundRemaining(uint256 requestId)`
 
@@ -228,6 +354,16 @@ function verifyMilestone(
 - **Effects:** Adds the remaining value to `refundedAmount`, sets status to `Refunded`, decreases the shipper's locked total and active count, then transfers the remaining ETH to the shipper.
 - **Event:** `RefundIssued(requestId, shipper, amount)`.
 - **Frontend:** Shipper refund action.
+
+### `tipCarrier(uint256 requestId) payable`
+
+- **Purpose:** Send one optional post-completion tip directly to the accepted carrier.
+- **Caller:** Registered request shipper only.
+- **Value:** `msg.value` must be greater than zero.
+- **Allowed state:** `Completed` only, with no earlier tip recorded for the request.
+- **Effects:** Records the tip amount, transfers the full value directly to the carrier, and leaves escrow, milestone payouts, released totals, and refunds unchanged.
+- **Event:** `CarrierTipped(requestId, shipper, carrier, amount)`.
+- **Frontend:** Completed shipment Payments tab; profile transaction history and carrier earnings.
 
 ### Locked escrow aggregate
 
@@ -255,6 +391,10 @@ getMilestones(uint256 requestId) view returns (Milestone[])
 getProposals(uint256 requestId) view returns (CarrierProposal[])
 getProposalMilestones(uint256 requestId, uint256 proposalId) view returns (ProposedMilestone[])
 getMilestone(uint256 requestId, uint256 milestoneId) view returns (Milestone)
+getMilestoneCount(uint256 requestId) view returns (uint256)
+getMilestoneExecutionOrder(uint256 requestId) view returns (uint256[])
+getMilestoneExecutionIndex(uint256 requestId, uint256 milestoneId) view returns (uint256)
+getMilestoneStatus(uint256 requestId, uint256 milestoneId) view returns (MilestoneStatus)
 getProofUris(uint256 requestId, uint256 milestoneId) view returns (string[])
 ```
 
@@ -265,6 +405,7 @@ Pagination returns an empty array when `offset` is outside the collection or `li
 ```solidity
 escrowBalance(uint256 requestId) view returns (uint256)
 getPaymentSummary(uint256 requestId) view returns (PaymentSummary)
+tipAmounts(uint256 requestId) view returns (uint256)
 ```
 
 `escrowBalance` returns `totalAmount - releasedAmount - refundedAmount`.
@@ -282,7 +423,7 @@ struct PaymentSummary {
 }
 ```
 
-Transaction history is event-derived; there is no growing on-chain payment-record array.
+`tipAmounts` returns zero until the shipper sends the request's one permitted completion tip. Transaction history is event-derived; there is no growing on-chain payment-record array.
 
 ### Data structures and enums
 
@@ -357,6 +498,9 @@ struct Milestone {
     MilestoneStatus status;
     uint256 submittedAt;
     uint256 verifiedAt;
+    uint256 additionalPayoutAmount;
+    bool addedByAmendment;
+    uint256 milestoneId;
 }
 
 struct CarrierProposal {
@@ -364,6 +508,7 @@ struct CarrierProposal {
     ProposalStatus status;
     uint256 createdAt;
     uint256 updatedAt;
+    string rejectionNote;
 }
 
 struct ProposedMilestone {
@@ -372,7 +517,7 @@ struct ProposedMilestone {
 }
 ```
 
-Proposal records are retained for history. A carrier may have only one `Active` proposal per open request.
+Proposal records are retained for history, including an optional shipper rejection note or the fixed automatic-rejection reason. A carrier may have only one `Active` proposal per open request.
 
 ### Events
 
@@ -387,9 +532,11 @@ event MilestoneVerified(uint256 indexed requestId, uint256 indexed milestoneId, 
 event MilestonePaid(uint256 indexed requestId, uint256 indexed milestoneId, address indexed carrier, uint256 amount);
 event MilestoneRejected(uint256 indexed requestId, uint256 indexed milestoneId, string reason);
 event RequestCancelled(uint256 indexed requestId, address indexed shipper);
+event RequestAmended(uint256 indexed requestId, uint256 previousDeadline, uint256 newDeadline, uint256 additionalFunding, uint256 newMilestoneCount);
 event EscrowFunded(uint256 indexed requestId, uint256 amount);
 event PaymentReleased(uint256 indexed requestId, uint256 indexed milestoneId, uint256 amount, address indexed recipient);
 event RefundIssued(uint256 indexed requestId, address indexed to, uint256 amount);
+event CarrierTipped(uint256 indexed requestId, address indexed shipper, address indexed carrier, uint256 amount);
 ```
 
 ---
@@ -398,6 +545,13 @@ event RefundIssued(uint256 indexed requestId, address indexed to, uint256 amount
 
 | Date | Change |
 |---|---|
+| 2026-08-03 | Completed verification coverage for mutual cancellation, staged amendment refunds, response expiry, stable checkpoint ordering, tip limits, and lifecycle authorization. Documented the chat timeline's read-only use of escrow and lifecycle events. |
+| 2026-08-03 | Stabilised milestone identity: amendment insertions now alter a dedicated execution-order list, while each milestone keeps its original ID, proof/payment history, and event references. Added order views and `APPEND_MILESTONE_ID`. |
+| 2026-08-02 | Added Phase 5 shipment amendments: unilateral shipper extensions, mutually approved deadline/funding changes, milestone top-ups and insertion, staged-fund refunds, stale-progress protection, and tracking-page UI/history. |
+| 2026-08-02 | Added Phase 4 mutual cancellation: two-party request/decision flow, notes and response deadlines, pending-proof guard, remaining-escrow settlement, history UI, and restricted escrow finalization. |
+| 2026-08-02 | Added Phase 3 one-time completion tips, direct carrier transfer, payment-history integration, and carrier-earnings inclusion. |
+| 2026-08-02 | Added Phase 2 proposal rejection notes: optional manual notes, a 500-byte on-chain limit, and a fixed reason for proposals closed by another proposal's acceptance. |
+| 2026-08-02 | Added the Phase 1 `LifecycleManager` negotiation foundation and separated agreement-change state from `DeliveryEscrow` to preserve contract bytecode headroom. |
 | 2026-07-29 | Added role-free `UserRegistry`, mandatory escrow registration checks, registry-first deployment, and maintained per-shipper locked escrow totals/counts. Reconciled this document to the implemented API. |
 | 2026-07-21 | Documented proposal-based escrow, refund accounting, payment summary, and event-derived payment history. |
 | 2026-07-05 | Initial v1 draft; recipient QR remained out of scope. |

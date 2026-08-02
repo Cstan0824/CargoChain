@@ -15,4 +15,11 @@ abstract contract PaymentEvents {
     );
 
     event RefundIssued(uint256 indexed requestId, address indexed to, uint256 amount);
+
+    event CarrierTipped(
+        uint256 indexed requestId,
+        address indexed shipper,
+        address indexed carrier,
+        uint256 amount
+    );
 }
