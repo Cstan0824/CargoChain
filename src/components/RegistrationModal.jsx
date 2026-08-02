@@ -12,9 +12,11 @@ import {
   formatWalletTransactionError,
   sendWalletContractTransaction,
 } from '../utils/walletTransaction.js';
+import { countWords, utf8Length } from '../utils/textLimits.js';
 import styles from './RegistrationModal.module.css';
 
 const MAX_DISPLAY_NAME_BYTES = 64;
+const MAX_DISPLAY_NAME_WORDS = 8;
 
 export function RegistrationModal({
   isOpen,
@@ -39,8 +41,11 @@ export function RegistrationModal({
   const [transactionHash, setTransactionHash] = useState('');
 
   const trimmedName = useMemo(() => trimAsciiWhitespace(name), [name]);
-  const nameBytes = useMemo(() => utf8ByteLength(trimmedName), [trimmedName]);
-  const validationError = getNameValidationError(trimmedName, nameBytes);
+  const nameBytes = useMemo(() => utf8Length(trimmedName), [trimmedName]);
+  const nameWordCount = useMemo(() => countWords(trimmedName), [trimmedName]);
+  const validationError = getNameValidationError(trimmedName, nameBytes, nameWordCount);
+  const nameTooLong = nameBytes > MAX_DISPLAY_NAME_BYTES
+    || nameWordCount > MAX_DISPLAY_NAME_WORDS;
   const isSubmitting = stage === 'wallet' || stage === 'mining' || stage === 'refreshing';
 
   useEffect(() => {
@@ -206,14 +211,14 @@ export function RegistrationModal({
               <label className={styles.label} htmlFor={`${titleId}-display-name`}>
                 Display name
               </label>
-              <span className={`${styles.byteCount} ${nameBytes > MAX_DISPLAY_NAME_BYTES ? styles.byteCountError : ''}`}>
-                {nameBytes}/{MAX_DISPLAY_NAME_BYTES} bytes
+              <span className={`${styles.byteCount} ${nameTooLong ? styles.byteCountError : ''}`}>
+                {nameWordCount}/{MAX_DISPLAY_NAME_WORDS} words
               </span>
             </div>
             <input
               ref={inputRef}
               id={`${titleId}-display-name`}
-              className={`${styles.input} ${(touched && validationError) || nameBytes > MAX_DISPLAY_NAME_BYTES ? styles.inputError : ''}`}
+              className={`${styles.input} ${(touched && validationError) || nameTooLong ? styles.inputError : ''}`}
               type="text"
               value={name}
               onChange={(event) => {
@@ -279,14 +284,13 @@ function trimAsciiWhitespace(value) {
   return value.replace(/^[\x09-\x0d\x20]+|[\x09-\x0d\x20]+$/g, '');
 }
 
-function utf8ByteLength(value) {
-  return new TextEncoder().encode(value).length;
-}
-
-function getNameValidationError(name, byteLength) {
+function getNameValidationError(name, byteLength, wordCount) {
   if (!name) return 'Enter a display name.';
+  if (wordCount > MAX_DISPLAY_NAME_WORDS) {
+    return `Display name must be ${MAX_DISPLAY_NAME_WORDS} words or fewer.`;
+  }
   if (byteLength > MAX_DISPLAY_NAME_BYTES) {
-    return 'Display name must be 64 UTF-8 bytes or fewer.';
+    return 'Display name is too long. Shorten it and try again.';
   }
   return '';
 }
@@ -346,7 +350,7 @@ function formatRegistrationError(error) {
     return { text: 'Enter a display name.', alreadyRegistered: false };
   }
   if (normalized.includes('display name exceeds 64 bytes')) {
-    return { text: 'Display name must be 64 UTF-8 bytes or fewer.', alreadyRegistered: false };
+    return { text: 'Display name is too long. Shorten it and try again.', alreadyRegistered: false };
   }
   if (normalized.includes('insufficient funds')) {
     return { text: 'This wallet does not have enough ETH for the transaction fee.', alreadyRegistered: false };

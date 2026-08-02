@@ -2,7 +2,7 @@
 
 import { formatEther } from 'ethers';
 
-export const CHAT_EVENT_NAMES = [
+export const ESCROW_CHAT_EVENT_NAMES = [
   'RequestCreated',
   'MilestonePlanProposed',
   'MilestonePlanRevoked',
@@ -15,27 +15,58 @@ export const CHAT_EVENT_NAMES = [
   'MilestonePaid',
   'RequestCancelled',
   'RefundIssued',
+  'CarrierTipped',
 ];
+
+export const LIFECYCLE_CHAT_EVENT_NAMES = [
+  'ShipmentDeadlineExtended',
+  'AmendmentRequested',
+  'AmendmentAccepted',
+  'AmendmentRejected',
+  'AmendmentWithdrawn',
+  'AmendmentExpired',
+  'CancellationRequested',
+  'CancellationAccepted',
+  'CancellationRejected',
+  'CancellationWithdrawn',
+  'CancellationExpired',
+];
+
+export const CHAT_EVENT_NAMES = [...ESCROW_CHAT_EVENT_NAMES, ...LIFECYCLE_CHAT_EVENT_NAMES];
 
 const timestampCaches = new WeakMap();
 
-export async function fetchRequestNotices({ contract, provider, requestId, carrierWallet = '' }) {
-  if (!contract || !provider || requestId === undefined || requestId === null) return [];
+export async function fetchRequestNotices({
+  contract,
+  deliveryEscrow,
+  lifecycleManager,
+  provider,
+  requestId,
+  carrierWallet = '',
+}) {
+  const escrowContract = deliveryEscrow || contract;
+  if (!escrowContract || !provider || requestId === undefined || requestId === null) return [];
 
   const parsedRequestId = BigInt(requestId);
-  const results = await Promise.all(CHAT_EVENT_NAMES.map(async (eventName) => {
-    const filter = contract.filters[eventName](parsedRequestId);
-    const logs = await contract.queryFilter(filter, 0, 'latest');
-    return logs.map((log) => ({ log, eventName }));
-  }));
+  const [escrowEntries, lifecycleEntries, proposalNotes] = await Promise.all([
+    fetchContractEventEntries(escrowContract, ESCROW_CHAT_EVENT_NAMES, parsedRequestId, 'escrow'),
+    fetchContractEventEntries(lifecycleManager, LIFECYCLE_CHAT_EVENT_NAMES, parsedRequestId, 'lifecycle'),
+    fetchProposalRejectionNotes(escrowContract, parsedRequestId),
+  ]);
 
-  const logs = filterRequestNoticesForCarrier(results.flat(), carrierWallet);
+  const logs = filterRequestNoticesForCarrier(
+    [...escrowEntries, ...lifecycleEntries],
+    carrierWallet,
+  );
   const notices = await Promise.all(logs.map(async ({ log, eventName }) => {
     const timestampMs = (await getBlockTimestamp(provider, log.blockNumber)) * 1000;
-    return eventLogToNotice(log, timestampMs, eventName);
+    const notice = eventLogToNotice(log, timestampMs, eventName, { proposalNotes });
+    return notice ? { ...notice, requestId: Number(parsedRequestId) } : null;
   }));
 
-  return notices.filter(Boolean);
+  return notices
+    .filter(Boolean)
+    .sort((left, right) => left.blockNumber - right.blockNumber || left.logIndex - right.logIndex);
 }
 
 /**
@@ -58,27 +89,47 @@ export function filterRequestNoticesForCarrier(entries = [], carrierWallet = '')
       return normalizeAddress(log?.args?.carrier) === normalizedCarrier;
     }
 
-    // Publishing and cancellation are request-level context that both parties
-    // need to understand why a proposal conversation is open or closed.
-    if (eventName === 'RequestCreated' || eventName === 'RequestCancelled') {
+    if (eventName === 'RequestCreated') {
       return true;
+    }
+
+    // Lifecycle actions only exist after a carrier has been assigned. They
+    // belong to that carrier's conversation, never to a rejected proposal.
+    if (isLifecycleEvent(eventName)) {
+      return Boolean(acceptedCarrier && acceptedCarrier === normalizedCarrier);
+    }
+
+    // An open request can be cancelled before a carrier is selected. In that
+    // case it remains useful context for any proposal conversation; otherwise
+    // it belongs only to the selected carrier.
+    if (eventName === 'RequestCancelled') {
+      return !acceptedCarrier || acceptedCarrier === normalizedCarrier;
     }
 
     return Boolean(acceptedCarrier && acceptedCarrier === normalizedCarrier);
   });
 }
 
-export function subscribeToRequestNotices({ contract, requestId, onEvent }) {
-  if (!contract || requestId === undefined || requestId === null || typeof onEvent !== 'function') {
+export function subscribeToRequestNotices({
+  contract,
+  deliveryEscrow,
+  lifecycleManager,
+  requestId,
+  onEvent,
+}) {
+  const escrowContract = deliveryEscrow || contract;
+  if (!escrowContract || requestId === undefined || requestId === null || typeof onEvent !== 'function') {
     return () => undefined;
   }
 
-  const filters = CHAT_EVENT_NAMES.map((eventName) => contract.filters[eventName](BigInt(requestId)));
   const handler = () => onEvent();
-  filters.forEach((filter) => contract.on(filter, handler));
+  const subscriptions = [
+    ...subscribeToContractEvents(escrowContract, ESCROW_CHAT_EVENT_NAMES, requestId, handler),
+    ...subscribeToContractEvents(lifecycleManager, LIFECYCLE_CHAT_EVENT_NAMES, requestId, handler),
+  ];
 
   return () => {
-    filters.forEach((filter) => contract.off(filter, handler));
+    subscriptions.forEach(({ contract: sourceContract, filter }) => sourceContract.off(filter, handler));
   };
 }
 
@@ -111,7 +162,7 @@ export function mergeChatTimeline(messages = [], notices = []) {
   });
 }
 
-export function eventLogToNotice(log, timestampMs, eventNameOverride = '') {
+export function eventLogToNotice(log, timestampMs, eventNameOverride = '', context = {}) {
   const eventName = eventNameOverride || log?.eventName || log?.fragment?.name;
   const args = log?.args || {};
   const id = `chain:${log?.transactionHash || 'unknown'}:${log?.index ?? log?.logIndex ?? 0}:${eventName || 'event'}`;
@@ -131,30 +182,74 @@ export function eventLogToNotice(log, timestampMs, eventNameOverride = '') {
     case 'MilestonePlanRevoked':
       return { ...base, tone: 'proposal', text: `Carrier revoked proposal #${Number(args.proposalId) + 1}.` };
     case 'MilestonePlanRejected':
-      return { ...base, tone: 'warning', text: `Proposal #${Number(args.proposalId) + 1} was rejected.` };
+      return {
+        ...base,
+        tone: 'warning',
+        text: proposalRejectionText(args.proposalId, context.proposalNotes),
+      };
     case 'MilestonePlanAccepted':
       return { ...base, tone: 'success', text: `Proposal #${Number(args.proposalId) + 1} was accepted.` };
     case 'EscrowFunded':
       return { ...base, tone: 'payment', text: `Escrow funded with ${formatAmount(args.amount)} ETH.` };
     case 'ProofSubmitted':
-      return { ...base, tone: 'proof', text: `Photo proof submitted for milestone #${Number(args.milestoneId) + 1}.` };
+      return { ...base, tone: 'proof', text: `Photo proof submitted for checkpoint ID ${Number(args.milestoneId)}.` };
     case 'MilestoneVerified':
       if (args.approved === false) return null;
-      return { ...base, tone: 'success', text: `Milestone #${Number(args.milestoneId) + 1} was verified.` };
+      return { ...base, tone: 'success', text: `Checkpoint ID ${Number(args.milestoneId)} was verified.` };
     case 'MilestoneRejected':
       return {
         ...base,
         tone: 'warning',
         text: args.reason
-          ? `Milestone #${Number(args.milestoneId) + 1} was rejected: ${args.reason}`
-          : `Milestone #${Number(args.milestoneId) + 1} was rejected.`,
+          ? `Checkpoint ID ${Number(args.milestoneId)} was rejected: ${args.reason}`
+          : `Checkpoint ID ${Number(args.milestoneId)} was rejected.`,
       };
     case 'MilestonePaid':
-      return { ...base, tone: 'payment', text: `${formatAmount(args.amount)} ETH released for milestone #${Number(args.milestoneId) + 1}.` };
+      return { ...base, tone: 'payment', text: `${formatAmount(args.amount)} ETH released for checkpoint ID ${Number(args.milestoneId)}.` };
     case 'RequestCancelled':
       return { ...base, tone: 'warning', text: 'Delivery request cancelled.' };
     case 'RefundIssued':
       return { ...base, tone: 'payment', text: `${formatAmount(args.amount)} ETH refunded to the shipper.` };
+    case 'CarrierTipped':
+      return { ...base, tone: 'payment', text: `The shipper sent a ${formatAmount(args.amount)} ETH completion tip.` };
+    case 'ShipmentDeadlineExtended':
+      return {
+        ...base,
+        tone: 'success',
+        text: args.note ? `Shipment deadline extended. Note: ${args.note}` : 'Shipment deadline extended.',
+      };
+    case 'AmendmentRequested':
+      return {
+        ...base,
+        tone: 'request',
+        text: amendmentRequestText(args.additionalFunding),
+        actionable: true,
+        focusTarget: 'amendment',
+      };
+    case 'AmendmentAccepted':
+      return { ...base, tone: 'success', text: 'Agreement change accepted and applied.' };
+    case 'AmendmentRejected':
+      return { ...base, tone: 'warning', text: 'Agreement change rejected; the existing agreement continues.' };
+    case 'AmendmentWithdrawn':
+      return { ...base, tone: 'warning', text: 'Agreement change request withdrawn.' };
+    case 'AmendmentExpired':
+      return { ...base, tone: 'warning', text: 'Agreement change request expired without a response.' };
+    case 'CancellationRequested':
+      return {
+        ...base,
+        tone: 'request',
+        text: 'A cancellation request needs a response.',
+        actionable: true,
+        focusTarget: 'cancellation',
+      };
+    case 'CancellationAccepted':
+      return { ...base, tone: 'warning', text: 'Cancellation agreed; remaining escrow was returned to the shipper.' };
+    case 'CancellationRejected':
+      return { ...base, tone: 'success', text: 'Cancellation request rejected; the shipment continues.' };
+    case 'CancellationWithdrawn':
+      return { ...base, tone: 'warning', text: 'Cancellation request withdrawn.' };
+    case 'CancellationExpired':
+      return { ...base, tone: 'warning', text: 'Cancellation request expired without a response.' };
     default:
       return null;
   }
@@ -191,6 +286,61 @@ function isProposalEvent(eventName) {
     'MilestonePlanRejected',
     'MilestonePlanAccepted',
   ].includes(eventName);
+}
+
+function isLifecycleEvent(eventName) {
+  return LIFECYCLE_CHAT_EVENT_NAMES.includes(eventName);
+}
+
+async function fetchContractEventEntries(contract, eventNames, requestId, source) {
+  if (!contract) return [];
+  const results = await Promise.all(eventNames.map(async (eventName) => {
+    if (typeof contract.filters?.[eventName] !== 'function') return [];
+    const filter = contract.filters[eventName](requestId);
+    const logs = await contract.queryFilter(filter, 0, 'latest');
+    return logs.map((log) => ({ log, eventName, source }));
+  }));
+  return results.flat();
+}
+
+async function fetchProposalRejectionNotes(contract, requestId) {
+  if (typeof contract?.getProposals !== 'function') return new Map();
+  try {
+    const proposals = await contract.getProposals(requestId);
+    return new Map(Array.from(proposals || []).map((proposal, proposalId) => [
+      proposalId,
+      proposal.rejectionNote ?? proposal[4] ?? '',
+    ]));
+  } catch {
+    return new Map();
+  }
+}
+
+function subscribeToContractEvents(contract, eventNames, requestId, handler) {
+  if (!contract) return [];
+  return eventNames.flatMap((eventName) => {
+    if (typeof contract.filters?.[eventName] !== 'function') return [];
+    const filter = contract.filters[eventName](BigInt(requestId));
+    contract.on(filter, handler);
+    return [{ contract, filter }];
+  });
+}
+
+function proposalRejectionText(proposalId, proposalNotes) {
+  const note = proposalNotes?.get(Number(proposalId));
+  const prefix = `Proposal #${Number(proposalId) + 1} was rejected.`;
+  return note ? `${prefix} Note: ${note}` : prefix;
+}
+
+function amendmentRequestText(additionalFunding) {
+  try {
+    const amount = BigInt(additionalFunding ?? 0n);
+    return amount > 0n
+      ? `An agreement change needs a response and proposes ${formatAmount(amount)} ETH in additional escrow.`
+      : 'An agreement change needs a response.';
+  } catch {
+    return 'An agreement change needs a response.';
+  }
 }
 
 function compareLogs(left, right) {

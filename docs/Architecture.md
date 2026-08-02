@@ -69,17 +69,18 @@
        │           DeliveryEscrow              │  (b + c — GAN + Jeremy)
        │  - createRequest (msg.value)          │
        │  - acceptRequest (FCFS)               │
-       │  - cancelRequest                      │
+       │  - cancelRequest (unfunded only)      │
        │  - refundToShipper                    │
        │  - releaseStage ◄─────────────────────┼─── called by MilestoneVerifier
        └─────┬────────────────────┬────────────┘
              │                    │
-             │ resetCarrier()     │ reads deadline
+             │ lifecycle hooks    │ reads canonical shipment state
              ▼                    ▼
    ┌─────────────────────┐  ┌─────────────────────┐
    │  LifecycleManager   │  │  MilestoneVerifier  │  (d — Melissa)
-   │  - republishIfStuck │  │  - submitProof      │
-   │  - getRequestTimeline│  │  - verifyMilestone  │
+   │  - negotiation lock │  │  - submitProof      │
+   │  - mutual cancel    │  │  - verifyMilestone  │
+   │  - escrow finalize  │  │                     │
    └─────────────────────┘  └─────────────────────┘
 
    ┌─────────────────────┐
@@ -214,7 +215,31 @@
 
 ---
 
-## 5. Deployment topology (dev)
+## 5. Delivery chat and agreement notices
+
+Private messages and delivery activity deliberately use different data paths:
+
+```
+Wallet signs SIWE session ──► Express API ──► Supabase
+                                 │              │
+                                 │              └── private conversation rows and message text
+                                 │
+React Messages page ─────────────┼──► DeliveryEscrow + LifecycleManager event logs
+                                 │              │
+                                 │              └── proposals, proofs, payments, amendments,
+                                 │                  cancellations, deadline changes, and tips
+                                 ▼
+                         request participant check
+```
+
+- Message text is stored off-chain so it remains private and inexpensive.
+- The timeline is reconstructed from chain events, filtered to the selected request and its shipper/carrier pair. A rejected carrier cannot see activity from another carrier's proposal.
+- Pending amendment and cancellation notices link to the matching `Track.jsx` agreement section; the decision itself remains an on-chain transaction.
+- The server authorizes conversation access from current deployed-contract participants. It does not write delivery status or escrow state.
+
+---
+
+## 6. Deployment topology (dev)
 
 ```
 ┌────────────────────────────────────────────────────────┐
@@ -250,7 +275,7 @@
 
 ---
 
-## 6. Demo flow (the 20-minute presentation)
+## 7. Demo flow (the 20-minute presentation)
 
 ```
 00:00 - 02:00  Introduction: "This is CargoChain — trustless delivery escrow on Ethereum."
@@ -266,7 +291,7 @@
 
 ---
 
-## 7. Threat model (informal)
+## 8. Threat model (informal)
 
 | Threat | Mitigation |
 |---|---|

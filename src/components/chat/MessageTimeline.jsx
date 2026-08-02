@@ -1,6 +1,7 @@
 // src/components/chat/MessageTimeline.jsx — merged human and on-chain delivery activity stream.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { HiOutlineChatBubbleLeftRight } from 'react-icons/hi2';
 import { supabase } from '../../lib/supabaseClient';
 import { getConversationMessages } from '../../services/chatReadService';
@@ -22,12 +23,14 @@ export function MessageTimeline({
   requestId,
   carrierWallet,
   deliveryEscrow,
+  lifecycleManager,
   provider,
   initialMessages = [],
   appendedMessage = null,
   displayNames = {},
 }) {
   const { account } = useWallet();
+  const navigate = useNavigate();
   const currentWallet = account?.toLowerCase() || '';
   const [timelineState, setTimelineState] = useState(() => ({
     status: 'loading',
@@ -51,6 +54,7 @@ export function MessageTimeline({
     try {
       const nextNotices = await fetchRequestNotices({
         contract: deliveryEscrow,
+        lifecycleManager,
         provider,
         requestId,
         carrierWallet,
@@ -60,7 +64,7 @@ export function MessageTimeline({
     } catch {
       // Human messages remain usable if historical event logs are temporarily unavailable.
     }
-  }, [carrierWallet, deliveryEscrow, provider, requestId, scrollToBottom]);
+  }, [carrierWallet, deliveryEscrow, lifecycleManager, provider, requestId, scrollToBottom]);
 
   const loadTimeline = useCallback(async () => {
     if (!conversationId) return;
@@ -78,7 +82,13 @@ export function MessageTimeline({
     try {
       const [messageResult, noticeResult] = await Promise.allSettled([
         getConversationMessages(conversationId),
-        fetchRequestNotices({ contract: deliveryEscrow, provider, requestId, carrierWallet }),
+        fetchRequestNotices({
+          contract: deliveryEscrow,
+          lifecycleManager,
+          provider,
+          requestId,
+          carrierWallet,
+        }),
       ]);
 
       if (messageResult.status === 'rejected') throw messageResult.reason;
@@ -100,7 +110,7 @@ export function MessageTimeline({
         error: caughtError.message || 'Failed to load chat history.',
       });
     }
-  }, [carrierWallet, conversationId, deliveryEscrow, provider, requestId, scrollToBottom]);
+  }, [carrierWallet, conversationId, deliveryEscrow, lifecycleManager, provider, requestId, scrollToBottom]);
 
   useEffect(() => {
     loadTimeline();
@@ -120,10 +130,11 @@ export function MessageTimeline({
     if (!deliveryEscrow || requestId === undefined || requestId === null) return undefined;
     return subscribeToRequestNotices({
       contract: deliveryEscrow,
+      lifecycleManager,
       requestId,
       onEvent: refreshNotices,
     });
-  }, [deliveryEscrow, refreshNotices, requestId]);
+  }, [deliveryEscrow, lifecycleManager, refreshNotices, requestId]);
 
   useEffect(() => {
     if (!appendedMessage?.message_id || appendedMessage.conversation_id !== conversationId) return;
@@ -194,7 +205,17 @@ export function MessageTimeline({
 
         {!isLoading && !hasError && timeline.map((entry) => {
           if (entry.kind === 'blockchain_event') {
-            return <BlockchainNoticeTile key={entry.id} notice={entry.notice} />;
+            return (
+              <BlockchainNoticeTile
+                key={entry.id}
+                notice={entry.notice}
+                onOpenTracking={entry.notice.actionable
+                  ? () => navigate(
+                    `/track/${entry.notice.requestId ?? requestId}?focus=${entry.notice.focusTarget || 'amendment'}`,
+                  )
+                  : undefined}
+              />
+            );
           }
 
           const message = entry.message;

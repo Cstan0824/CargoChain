@@ -1,11 +1,12 @@
 import { requestStatus } from './format.js';
 
-const PAYMENT_EVENTS = ['EscrowFunded', 'PaymentReleased', 'RefundIssued'];
+const PAYMENT_EVENTS = ['EscrowFunded', 'PaymentReleased', 'RefundIssued', 'CarrierTipped'];
 
 export const PAYMENT_ACTION_TONE = {
   EscrowFunded: 'info',
   PaymentReleased: 'success',
   RefundIssued: 'warning',
+  CarrierTipped: 'success',
 };
 
 export function paymentActionLabel(action, milestoneId = null) {
@@ -13,9 +14,10 @@ export function paymentActionLabel(action, milestoneId = null) {
   if (action === 'PaymentReleased') {
     return milestoneId == null
       ? 'Payment released'
-      : `Milestone ${milestoneId + 1} paid`;
+      : `Checkpoint ID ${milestoneId} paid`;
   }
   if (action === 'RefundIssued') return 'Refund issued';
+  if (action === 'CarrierTipped') return 'Carrier tipped';
   return action;
 }
 
@@ -93,13 +95,19 @@ export async function loadPaymentHistory({
       const milestoneId = action === 'PaymentReleased'
         ? Number(log.args?.milestoneId ?? log.args?.[1])
         : null;
-      const amountIndex = action === 'EscrowFunded' ? 1 : 2;
+      const amountIndex = action === 'EscrowFunded'
+        ? 1
+        : action === 'CarrierTipped'
+          ? 3
+          : 2;
       const amount = BigInt(log.args?.amount ?? log.args?.[amountIndex] ?? 0n);
       const recipient = action === 'PaymentReleased'
         ? (log.args?.recipient ?? log.args?.[3])
         : action === 'RefundIssued'
           ? (log.args?.to ?? log.args?.[1])
-          : contract.target;
+          : action === 'CarrierTipped'
+            ? (log.args?.carrier ?? log.args?.[2])
+            : contract.target;
       const transactionHash = log.transactionHash;
       const logIndex = Number(log.index ?? log.logIndex ?? 0);
 

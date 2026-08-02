@@ -34,7 +34,7 @@ CargoChain is a DApp with four cooperating layers:
 |---|---|---|---|
 | `UserRegistry.sol` | a | ~80 | wx |
 | `DeliveryEscrow.sol` | b + c | ~250 | GAN + Jeremy |
-| `LifecycleManager.sol` | b | ~120 | GAN |
+| `LifecycleManager.sol` | b | agreement-change lifecycle | GAN |
 | `MilestoneVerifier.sol` | d | ~150 | Melissa |
 | `PaymentEvents.sol` | c | ~30 | Jeremy |
 
@@ -43,8 +43,8 @@ See `API_v1.md` for the full function reference.
 ### Cross-contract calls
 
 - `MilestoneVerifier.verifyMilestone()` → calls `DeliveryEscrow.releaseStage()`
-- `DeliveryEscrow.cancelRequest()` → emits `RequestCancelled` + (if escrowed) calls `refundToShipper()` internally
-- `LifecycleManager.republishIfStuck()` → calls `DeliveryEscrow.resetCarrier()` + handles partial payment
+- `DeliveryEscrow.cancelRequest()` → cancels an unfunded open request only
+- `LifecycleManager.acceptCancellation()` → verifies both-party agreement and calls the restricted `DeliveryEscrow.finalizeMutualCancellation()` settlement hook
 
 ### Events (must all be emitted)
 
@@ -55,6 +55,7 @@ See `API_v1.md` for the full function reference.
 - `PaymentReleased(requestId, milestoneId, amount, recipient)`
 - `RequestCancelled(requestId, by)`
 - `RefundIssued(requestId, to, amount)`
+- `CarrierTipped(requestId, shipper, carrier, amount)`
 - `RequestRepublished(requestId, previousCarrier)`
 
 ---

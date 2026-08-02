@@ -1,0 +1,97 @@
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: var(--s-4);
+  background: rgba(15, 23, 42, 0.58);
+  backdrop-filter: blur(4px);
+}
+
+.dialog {
+  position: relative;
+  width: min(440px, 100%);
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: var(--s-3);
+  padding: var(--s-5);
+  border-radius: calc(var(--r-lg) + var(--s-3));
+  background: var(--bg-surface);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.06),
+    0 24px 64px rgba(15, 23, 42, 0.24);
+}
+
+.iconWrap {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-lg);
+}
+
+.iconWrap svg { width: 24px; height: 24px; }
+.primaryIcon { color: var(--primary); background: var(--primary-soft); }
+.dangerIcon { color: var(--danger); background: var(--danger-soft); }
+
+.closeButton {
+  position: absolute;
+  top: var(--s-3);
+  right: var(--s-3);
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  transition-property: color, background-color, scale;
+  transition-duration: var(--dur-1);
+  transition-timing-function: var(--ease);
+}
+
+.closeButton:hover { color: var(--text-primary); background: var(--bg-subtle); }
+.closeButton:active { scale: 0.96; }
+.closeButton svg { width: 21px; height: 21px; }
+
+.content { min-width: 0; padding-right: var(--s-4); }
+.content h2 {
+  margin: 1px 0 var(--s-2);
+  color: var(--text-primary);
+  font-size: var(--fs-xl);
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+.content p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+
+.actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s-2);
+  padding-top: var(--s-2);
+}
+
+@media (max-width: 520px) {
+  .scrim { align-items: end; padding: var(--s-3); }
+  .dialog {
+    grid-template-columns: 42px minmax(0, 1fr);
+    padding: var(--s-4);
+    border-radius: calc(var(--r-lg) + var(--s-2));
+  }
+  .iconWrap { width: 42px; height: 42px; border-radius: var(--r-md); }
+  .content { padding-right: var(--s-3); }
+  .actions { align-items: stretch; flex-direction: column-reverse; }
+  .actions :global(button) { width: 100%; min-height: 42px; }
+}

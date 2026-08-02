@@ -33,6 +33,7 @@ import {
   PAYMENT_ACTION_TONE,
   shortTransactionHash,
 } from '../utils/paymentHistory.js';
+import { countWords, utf8Length } from '../utils/textLimits.js';
 import { pickAvatar } from '../utils/avatar.js';
 import {
   workerPackingInventory,
@@ -41,6 +42,8 @@ import {
 import styles from './Profile.module.css';
 
 const CHAIN_NAMES = { 1: 'Mainnet', 11155111: 'Sepolia', 1337: 'Ganache', 5777: 'Ganache' };
+const MAX_DISPLAY_NAME_BYTES = 64;
+const MAX_DISPLAY_NAME_WORDS = 8;
 
 export function Profile() {
   const navigate = useNavigate();
@@ -152,7 +155,7 @@ export function Profile() {
     if (!normalizedAccount) return [];
 
     return transactions.filter((transaction) => (
-      transaction.action === 'PaymentReleased'
+      ['PaymentReleased', 'CarrierTipped'].includes(transaction.action)
       && transaction.recipient?.toLowerCase() === normalizedAccount
     ));
   }, [account, transactions]);
@@ -472,8 +475,11 @@ function EditDisplayNameModal({
 
   const trimmedName = useMemo(() => trimAsciiWhitespace(newName), [newName]);
   const trimmedConfirmation = useMemo(() => trimAsciiWhitespace(confirmation), [confirmation]);
-  const nameBytes = useMemo(() => new TextEncoder().encode(trimmedName).length, [trimmedName]);
-  const nameError = getDisplayNameError(trimmedName, nameBytes);
+  const nameBytes = useMemo(() => utf8Length(trimmedName), [trimmedName]);
+  const nameWordCount = useMemo(() => countWords(trimmedName), [trimmedName]);
+  const nameError = getDisplayNameError(trimmedName, nameBytes, nameWordCount);
+  const nameTooLong = nameBytes > MAX_DISPLAY_NAME_BYTES
+    || nameWordCount > MAX_DISPLAY_NAME_WORDS;
   const confirmationError = getConfirmationError(trimmedConfirmation, trimmedName);
   const isSubmitting = stage === 'wallet' || stage === 'mining' || stage === 'refreshing';
 
@@ -607,7 +613,9 @@ function EditDisplayNameModal({
           <div className={styles.modalField}>
             <div className={styles.modalLabelRow}>
               <label htmlFor={`${titleId}-new-name`}>New display name</label>
-              <span className={nameBytes > 64 ? styles.byteCountError : styles.byteCount}>{nameBytes}/64 bytes</span>
+              <span className={nameTooLong ? styles.byteCountError : styles.byteCount}>
+                {nameWordCount}/{MAX_DISPLAY_NAME_WORDS} words
+              </span>
             </div>
             <input
               ref={inputRef}
@@ -776,9 +784,12 @@ function trimAsciiWhitespace(value) {
   return value.replace(/^[\x09-\x0d\x20]+|[\x09-\x0d\x20]+$/g, '');
 }
 
-function getDisplayNameError(name, byteLength) {
+function getDisplayNameError(name, byteLength, wordCount) {
   if (!name) return 'Enter a new display name.';
-  if (byteLength > 64) return 'Display name must be 64 UTF-8 bytes or fewer.';
+  if (wordCount > MAX_DISPLAY_NAME_WORDS) {
+    return `Display name must be ${MAX_DISPLAY_NAME_WORDS} words or fewer.`;
+  }
+  if (byteLength > MAX_DISPLAY_NAME_BYTES) return 'Display name is too long. Shorten it and try again.';
   return '';
 }
 
@@ -827,7 +838,7 @@ function formatDisplayNameUpdateError(error) {
   const normalized = message.toLowerCase();
 
   if (normalized.includes('display name required')) return 'The contract rejected the update because the display name is empty.';
-  if (normalized.includes('display name exceeds 64 bytes')) return 'The contract rejected the update because the display name exceeds 64 UTF-8 bytes.';
+  if (normalized.includes('display name exceeds 64 bytes')) return 'The contract rejected the update because the display name is too long.';
   if (normalized.includes('user is not registered')) return 'The contract rejected the update because this wallet is not registered.';
   if (normalized.includes('insufficient funds')) return 'This wallet does not have enough ETH for the transaction gas fee.';
   if (normalized.includes('active metamask account changed')) return message;

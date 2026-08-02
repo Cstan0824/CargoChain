@@ -157,6 +157,7 @@ export function Messages() {
                     requestId={selectedConversation.request_id}
                     carrierWallet={selectedConversation.carrier_wallet}
                     deliveryEscrow={contracts?.deliveryEscrow}
+                    lifecycleManager={contracts?.lifecycleManager}
                     provider={provider}
                     appendedMessage={deliveredMessage}
                     displayNames={displayNames}

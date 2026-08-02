@@ -334,6 +334,15 @@
 .historyMilestoneList li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: var(--s-2); color: var(--text-primary); font-size: var(--fs-sm); }
 .historyMilestoneList strong { font-variant-numeric: tabular-nums; }
 .historyMilestoneIndex { display: grid; width: 24px; height: 24px; place-items: center; border-radius: var(--r-pill); background: var(--bg-surface); color: var(--text-secondary); font-size: var(--fs-xs); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+.historyRejectionNote {
+  margin-top: var(--s-4);
+  padding: var(--s-3);
+  border-radius: var(--r-md);
+  background: var(--danger-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 24%, transparent);
+}
+.historyRejectionNote span { color: var(--danger); font-size: var(--fs-xs); font-weight: var(--fw-bold); letter-spacing: 0.04em; text-transform: uppercase; }
+.historyRejectionNote p { margin: var(--s-2) 0 0; color: var(--text-primary); font-size: var(--fs-sm); line-height: 1.5; overflow-wrap: anywhere; text-wrap: pretty; }
 .historyProposalActions { display: flex; justify-content: flex-end; margin-top: var(--s-4); padding-top: var(--s-3); border-top: 1px solid var(--border-soft); }
 
 @media (max-width: 560px) {

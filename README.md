@@ -17,7 +17,8 @@ A trustless delivery marketplace where:
 2. Carriers submit proposals and the **shipper chooses one**; the remaining active proposals are rejected on-chain.
 3. The accepted carrier uploads a **photo-proof** per milestone. The image is stored in Supabase Storage and its SHA-256 content hash and public URL are recorded with the on-chain proof.
 4. The **shipper verifies** the proof in the web UI, releasing that milestone's escrow allocation.
-5. Eligible cancelled, expired, or overdue requests can return their remaining escrow to the shipper.
+5. Either participant can request mutual cancellation after acceptance; if the other accepts, completed payouts stay with the carrier and remaining escrow returns to the shipper. Overdue requests retain a separate refund path.
+6. After completion, the shipper may send one optional tip directly to the carrier.
 
 This is the **assignment version** — built for clarity, demo, and grading — not a production logistics platform.
 
@@ -292,6 +293,7 @@ npm run preview   # serves dist/ on http://127.0.0.1:8080
 | File | Module | Owner |
 |---|---|---|
 | `DeliveryEscrow.sol` | request, proposal, escrow, proof, milestone, refund | team |
+| `LifecycleManager.sol` | amendment lock and mutual-cancellation workflow | GAN |
 | `UserRegistry.sol` | a | wx |
 | `PaymentEvents.sol` | payment event base inherited by `DeliveryEscrow` | Jeremy |
 
@@ -314,7 +316,7 @@ See `src/README.md` for the full structure and conventions.
 
 ### `server/` — CargoChain API
 
-The Express API verifies SIWE wallet sessions, authorizes request-scoped conversations against the deployed contract, and reads/writes private chat data in Supabase. Photo proofs do not pass through this API; the frontend uploads them directly to the configured Supabase Storage bucket.
+The Express API verifies SIWE wallet sessions, authorizes request-scoped conversations against the deployed contract, and reads/writes private chat data in Supabase. The chat timeline also reads verified `DeliveryEscrow` and `LifecycleManager` events directly from the chain, including proposals, amendments, cancellations, deadline extensions, and tips; pending agreement notices link back to tracking for decisions. Photo proofs do not pass through this API; the frontend uploads them directly to the configured Supabase Storage bucket.
 
 ### `test/` — Truffle tests
 
@@ -328,6 +330,7 @@ Mocha + Chai tests run via `npx truffle test`. Each major contract has at least 
 | `Spec.md` | Concise functional + technical spec — quick-reference for the team |
 | `Architecture.md` | Diagram-rich architecture overview |
 | `Module-Split.md` | Detailed responsibilities, dependencies, handoffs per module |
+| `Agreement-Changes.md` | Finalized amendment, mutual-cancellation, and completion-tip rules |
 
 ---
 
