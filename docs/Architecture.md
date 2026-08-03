@@ -1,304 +1,136 @@
 # CargoChain — Architecture Overview
 
-> Companion to `PRD.md` and `Spec.md`. Focus: how the pieces fit together.
+> Current v1 architecture. This project is designed for a local Ganache demonstration, not a public production deployment.
 
----
+## 1. System overview
 
-## 1. Three-tier system
+```mermaid
+flowchart LR
+  Browser[React + Vite browser app]
+  MetaMask[MetaMask]
+  Ganache[Ganache JSON-RPC<br/>127.0.0.1:7545 / chain 1337]
+  API[Express SIWE / chat API<br/>127.0.0.1:3000]
+  DB[Supabase Postgres + Realtime]
+  Storage[Supabase Storage<br/>milestone-proofs]
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                           USER BROWSER                              │
-│                                                                     │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌────────┐  │
-│  │ index.html   │  │ shipper.html │  │ carrier.html │  │track   │  │
-│  │ (marketplace)│  │ (dashboard)  │  │ (dashboard)  │  │.html   │  │
-│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └───┬────┘  │
-│         │                 │                 │              │       │
-│         └─────────────────┴────────┬────────┴──────────────┘       │
-│                                   │                                │
-│                          ┌────────▼─────────┐                      │
-│                          │ Web3Context.jsx  │                      │
-│                          │ (ethers v6)      │                      │
-│                          └────────┬─────────┘                      │
-│                                   │                                │
-│                          ┌────────▼─────────┐                      │
-│                          │  contracts.js    │                      │
-│                          │  (ABI + addresses)│                     │
-│                          └────────┬─────────┘                      │
-│                                   │                                │
-│                          ┌────────▼─────────┐                      │
-│                          │  app.js / page   │                      │
-│                          │  modules         │                      │
-│                          └────┬──────────┬──┘                      │
-└───────────────────────────────┼──────────┼─────────────────────────┘
-                                │          │
-                ethers.js      │          │  Supabase Storage upload
-                (read/write)   │          │
-                                │          │
-        ┌───────────────────────▼──┐    ┌──▼─────────────────┐
-        │   Ethereum (Ganache)     │    │  Supabase Storage  │
-        │                          │    │  milestone-proofs  │
-        │                          │    │  bucket            │
-        │  ┌──────────────────┐   │    │                    │
-        │  │ DeliveryEscrow   │   │    │  proof images +    │
-        │  ├──────────────────┤   │    │  public URLs       │
-        │  │ MilestoneVerifier│   │    │                    │
-        │  ├──────────────────┤   │    └────────────────────┘
-        │  │ LifecycleManager │   │
-        │  ├──────────────────┤   │
-        │  │ UserRegistry     │   │
-        │  ├──────────────────┤   │
-        │  │ PaymentEvents    │   │
-        │  └──────────────────┘   │
-        └──────────────────────────┘
+  Browser <-->|wallet signing and broadcast| MetaMask
+  Browser <-->|ethers reads / contract writes| Ganache
+  Browser <-->|SIWE auth + private chat API| API
+  API <-->|service-role validated reads/writes| DB
+  Browser <-->|chat realtime with SIWE JWT| DB
+  Browser -->|proof image upload| Storage
 ```
 
----
+The browser is the DApp. Ganache holds all delivery state and ETH accounting. Express is not a delivery authority: it only authenticates chat users and verifies that they are shipment participants before it accesses Supabase.
 
-## 2. Smart contract relationships
+## 2. Contract relationships
 
-```
-                ┌─────────────────────┐
-                │   UserRegistry      │  (a — wx)
-                │   address ↔ role    │
-                └──────────┬──────────┘
-                           │ reads role from msg.sender
-                           │
-       ┌───────────────────▼───────────────────┐
-       │           DeliveryEscrow              │  (b + c — GAN + Jeremy)
-       │  - createRequest (msg.value)          │
-       │  - acceptRequest (FCFS)               │
-       │  - cancelRequest (unfunded only)      │
-       │  - refundToShipper                    │
-       │  - releaseStage ◄─────────────────────┼─── called by MilestoneVerifier
-       └─────┬────────────────────┬────────────┘
-             │                    │
-             │ lifecycle hooks    │ reads canonical shipment state
-             ▼                    ▼
-   ┌─────────────────────┐  ┌─────────────────────┐
-   │  LifecycleManager   │  │  MilestoneVerifier  │  (d — Melissa)
-   │  - negotiation lock │  │  - submitProof      │
-   │  - mutual cancel    │  │  - verifyMilestone  │
-   │  - escrow finalize  │  │                     │
-   └─────────────────────┘  └─────────────────────┘
+```mermaid
+flowchart TB
+  Registry[UserRegistry<br/>display name / registration]
+  Escrow[DeliveryEscrow<br/>requests, proposals, escrow, proofs,<br/>checkpoints, refunds, tips]
+  Lifecycle[LifecycleManager<br/>amendments, cancellation,<br/>one-pending-negotiation lock]
+  Events[PaymentEvents<br/>event definitions]
 
-   ┌─────────────────────┐
-   │  PaymentEvents      │  (c — Jeremy, events only)
-   └─────────────────────┘
+  Registry -->|registration checks| Escrow
+  Events -->|inherited events| Escrow
+  Lifecycle -->|canonical shipment/progress reads| Escrow
+  Lifecycle -->|restricted finalisation calls| Escrow
 ```
 
----
+`DeliveryEscrow` is the canonical shipment state. `LifecycleManager` deliberately does not copy request/cargo/milestone state; it reads the lifecycle snapshot and can only apply a previously validated amendment or accepted cancellation through escrow-only hooks.
 
-## 3. Request lifecycle
+Deployment order is:
 
-```
-            ┌──────────────────────────────────────┐
-            │                                      │
-            ▼                                      │
-   ┌──────────────┐                                │
-   │     Open     │  shipper creates, ETH locked    │
-   │   (no        │                                │
-   │   carrier)   │                                │
-   └──────┬───────┘                                │
-          │                                        │
-   carrier│accepts                                 │
-   (FCFS) ▼                                        │
-   ┌──────────────┐                                │
-   │  Accepted    │                                │
-   │              │                                │
-   └──────┬───────┘                                │
-          │                                        │
-          ▼                                        │
-   ┌──────────────────────────────────┐            │
-   │   In progress (milestones loop)  │            │
-   │  ┌──────────────────────────┐    │            │
-   │  │ Milestone N:             │    │            │
-   │  │   Pending                │    │            │
-   │  │     │                    │    │            │
-   │  │     ▼ submitProof        │    │            │
-   │  │   AwaitingVerification   │    │            │
-   │  │     │                    │    │            │
-   │  │     ├── verify(true) ──► Verified ──► Paid │ ◄── disputes via timeout auto-release
-   │  │     │                    │    │            │
-   │  │     ├── verify(false)──► Rejected         │
-   │  │     │                    │    │            │
-   │  │     └── timeout + 72h ──► Verified         │
-   │  │                          │    │            │
-   │  │   OR markMilestoneComplete (no proof)      │
-   │  └──────────────────────────┘    │            │
-   └──────────────┬───────────────────┘            │
-                  │                                │
-        all       │                                │
-       milestones │                                │
-        paid      ▼                                │
-   ┌──────────────┐                                │
-   │  Completed   │                                │
-   └──────────────┘                                │
-                                                   │
-   ┌──────────────┐    deadline passes             │
-   │  Cancelled   │ ◄──── shipper cancels before accept
-   └──────────────┘                                │
-                                                   │
-   ┌──────────────┐                                │
-   │ Republished  │ ◄──────────────────────────────┘
-   │  (back to Open, optional partial pay)
-   └──────────────┘
+```text
+UserRegistry
+LifecycleManager
+DeliveryEscrow(registryAddress, lifecycleManagerAddress)
+LifecycleManager.initializeDeliveryEscrow(escrowAddress)
 ```
 
----
+The frontend creates read-only ethers contract instances from Truffle artifacts and validates that the manager's stored escrow address matches the artifact address. This catches a common local Ganache failure where MetaMask/RPC points to a stale deployment.
 
-## 4. Data flow — Photo-proof
+## 3. On-chain delivery flow
 
-```
-┌──────────────┐                            ┌─────────────┐
-│   Carrier    │                            │  Shipper    │
-│  (carrier    │                            │ (shipper    │
-│   .html)     │                            │  .html)     │
-└──────┬───────┘                            └──────┬──────┘
-       │                                           │
-       │ 1. Choose file                            │
-       ▼                                           │
-  FileReader.readAsArrayBuffer                     │
-       │                                           │
-       │ 2. SHA-256                                 │
-       ▼                                           │
-  crypto.subtle.digest('SHA-256', buffer)         │
-       │                                           │
-       │ 3. Upload to Supabase Storage             │
-       ▼                                           │
-  ┌──────────────┐                                 │
-  │  Supabase    │                                 │
-  │  Storage     │                                 │
-  │  bucket      │                                 │
-  │              │                                 │
-  │  stores in   │                                 │
-  │  milestone-  │                                 │
-  │  proofs      │                                 │
-  │              │                                 │
-  │  returns     │                                 │
-  │  public URL  │                                 │
-  └──────┬───────┘                                 │
-         │                                         │
-         │ 4. submitProof(requestId, msId, URL, hash)│
-         ▼                                         │
-  ┌────────────────────────────────────────────────▼─┐
-  │              MilestoneVerifier                    │
-  │  proofHashes[requestId][milestoneId] = hash       │
-  │  emits MilestoneSubmitted                         │
-  │  sets milestoneStatus = AwaitingVerification      │
-  └────────────────────────────────────────────────────┘
-                                                       │
-                              5. verifyMilestone(true)│
-                                                       ▼
-  ┌────────────────────────────────────────────────────┐
-  │  MilestoneVerifier                                  │
-  │  requires msg.sender == request.shipper             │
-  │  emits MilestoneVerified                            │
-  │  sets milestoneStatus = Verified                    │
-  │  calls DeliveryEscrow.releaseStage(...)             │
-  └─────────────────────────┬──────────────────────────┘
-                            │
-                            │ 6. releaseStage
-                            ▼
-  ┌────────────────────────────────────────────────────┐
-  │  DeliveryEscrow                                     │
-  │  transfers ETH to carrier                           │
-  │  emits PaymentReleased                              │
-  │  sets milestone.paid = true                         │
-  └────────────────────────────────────────────────────┘
-                            │
-                            │ 7. public track.html polls getRequestTimeline()
-                            ▼
-                     (timeline visible)
+```mermaid
+stateDiagram-v2
+  [*] --> Open: shipper creates request
+  Open --> Open: carriers propose / revoke / resubmit
+  Open --> Funded: shipper approves one proposal and funds exact ETH
+  Funded --> InProgress: carrier submits proof
+  InProgress --> InProgress: proof rejected / resubmitted
+  InProgress --> Completed: final proof verified and paid
+  Funded --> Refunded: allowed expiry or mutual cancellation settlement
+  InProgress --> Refunded: allowed expiry or mutual cancellation settlement
 ```
 
----
+### Stable checkpoint identity
 
-## 5. Delivery chat and agreement notices
+Every checkpoint receives an immutable `milestoneId`. The contract keeps a separate execution-order list. An accepted amendment that inserts a new checkpoint gives it a new ID and adjusts the execution order, so old proof URLs, payouts, event IDs, and historical UI references retain their meaning.
 
-Private messages and delivery activity deliberately use different data paths:
+## 4. Proof and payment data path
 
-```
-Wallet signs SIWE session ──► Express API ──► Supabase
-                                 │              │
-                                 │              └── private conversation rows and message text
-                                 │
-React Messages page ─────────────┼──► DeliveryEscrow + LifecycleManager event logs
-                                 │              │
-                                 │              └── proposals, proofs, payments, amendments,
-                                 │                  cancellations, deadline changes, and tips
-                                 ▼
-                         request participant check
+```text
+Carrier selects JPEG / PNG / WebP file
+  → browser computes SHA-256
+  → browser uploads file to Supabase Storage
+  → browser submits proof URL + remark to DeliveryEscrow
+  → shipper verifies/rejects proof
+  → verification transfers that checkpoint's payment to carrier
 ```
 
-- Message text is stored off-chain so it remains private and inexpensive.
-- The timeline is reconstructed from chain events, filtered to the selected request and its shipper/carrier pair. A rejected carrier cannot see activity from another carrier's proposal.
-- Pending amendment and cancellation notices link to the matching `Track.jsx` agreement section; the decision itself remains an on-chain transaction.
-- The server authorizes conversation access from current deployed-contract participants. It does not write delivery status or escrow state.
+The image is not written to the blockchain. The browser uses a SHA-256-derived object path, then the URL and proof metadata are recorded in the contract. The contract does not independently verify the file content, and Storage URLs are public in this assignment build.
 
----
+## 5. Negotiation architecture
 
-## 6. Deployment topology (dev)
+An accepted request has one shared lifecycle negotiation slot:
 
-```
-┌────────────────────────────────────────────────────────┐
-│  Developer machine                                     │
-│                                                        │
-│  ┌────────────────────────────────────────────────┐    │
-│  │  Ganache (port 7545)                            │    │
-│  │  10 pre-funded accounts                          │    │
-│  │  MNEMONIC shown in UI                           │    │
-│  └────────────────────────────────────────────────┘    │
-│                                                        │
-│  ┌────────────────────────────────────────────────┐    │
-│  │  Truffle (compile + migrate + test)            │    │
-│  │  contracts/  →  build/contracts/  →  deployed │    │
-│  └────────────────────────────────────────────────┘    │
-│                                                        │
-│  ┌────────────────────────────────────────────────┐    │
-│  │  Express SIWE/chat API (port 3000)              │    │
-│  │  Supabase Database + Storage                    │    │
-│  └────────────────────────────────────────────────┘    │
-│                                                        │
-│  ┌────────────────────────────────────────────────┐    │
-│  │  Vite React app (port 5173)                     │    │
-│  │  SPA routes + ethers.js v6                      │    │
-│  └────────────────────────────────────────────────┘    │
-│                                                        │
-│  MetaMask browser extension                            │
-│    → Custom RPC: http://127.0.0.1:7545                │
-│    → Chain ID: 1337                                    │
-│    → Import accounts from Ganache MNEMONIC             │
-└────────────────────────────────────────────────────────┘
+```text
+None ↔ Pending amendment
+None ↔ Pending cancellation
 ```
 
----
+Only one can be pending at a time. Amendment acceptance verifies that milestone progress has not changed since proposal. Cancellation settlement verifies that no proof is currently awaiting the shipper's decision. These checks prevent stale or exploitative post-acceptance changes.
 
-## 7. Demo flow (the 20-minute presentation)
+## 6. Chat architecture
 
+```mermaid
+sequenceDiagram
+  participant W as Wallet / MetaMask
+  participant B as React Messages page
+  participant A as Express API
+  participant E as DeliveryEscrow
+  participant S as Supabase
+
+  B->>A: request SIWE nonce
+  B->>W: sign SIWE message
+  B->>A: verify signed message
+  A->>E: verify request shipper/carrier participation
+  A->>S: create/read authorised conversation
+  B->>S: read/realtime messages with chat JWT
+  B->>E: read relevant escrow/lifecycle event history
 ```
-00:00 - 02:00  Introduction: "This is CargoChain — trustless delivery escrow on Ethereum."
-02:00 - 03:00  Show 3 contract files in Truffle build folder; explain 12 requirements.
-03:00 - 05:00  truffle test — run all tests, show green.
-05:00 - 08:00  Open marketplace in browser. Carrier account connected.
-08:00 - 11:00  Carrier accepts request #42.
-11:00 - 13:00  Carrier uploads photo for Milestone 1.
-13:00 - 16:00  Switch to shipper account. Verify milestone. Show PaymentReleased event.
-16:00 - 18:00  Show republish flow: skip deadline, anyone calls republishIfStuck, request returns to marketplace.
-18:00 - 20:00  Open track.html?id=42 in incognito. Full timeline visible. Q&A.
-```
 
----
+Conversation identity includes chain ID, deployed contract address, request ID, and carrier wallet. This prevents request-number collisions after contract redeployment. Chat text is private off-chain data; the delivery timeline is on-chain event-derived and filtered to the relevant shipper/carrier pair.
 
-## 8. Threat model (informal)
+## 7. Local deployment topology
 
-| Threat | Mitigation |
-|---|---|
-| Carrier uploads fake photo (not the actual package) | Shipper reviews photo in UI before verifying |
-| Shipper never verifies (holds ETH hostage) | Dispute-window auto-release after 72h |
-| Carrier disappears mid-delivery | Republish mechanism; partial pay to abandoned carrier |
-| Front-end hosted on phishing domain | Out of scope for v1; document for v2 |
-| Photo URL is mutable (S3) | SHA-256 hash on-chain = integrity anchor |
-| Reentrancy on `releaseStage` | `nonReentrant` modifier + Checks-Effects-Interactions |
-| Integer overflow | Solidity 0.8.x built-in overflow checks |
+| Service | Address | Notes |
+|---|---|---|
+| Ganache | `http://127.0.0.1:7545` | Chain/network ID `1337`; deterministic accounts in launcher mode. |
+| Vite | `http://127.0.0.1:5173` | Browser frontend. |
+| Express | `http://127.0.0.1:3000` | SIWE and chat API; needs Supabase env values. |
+| Vite preview | `http://127.0.0.1:8080` | Production-bundle inspection. |
+
+`npm run dev:all` starts Ganache, compiles, reset-migrates, then launches Express and Vite. A reset migration redeploys contracts and refreshes artifact addresses; it does not erase historical contracts from the local Ganache database.
+
+## 8. Security and scope boundaries
+
+- Private keys and service-role keys are only in `.env`; `VITE_*` variables are public browser values.
+- State-changing escrow actions require a registered wallet and role-specific shipment ownership checks.
+- Chat access is checked by the API and constrained by Supabase RLS.
+- Contract state is not updated by the chat server or Supabase.
+- v1 excludes Sepolia, QR verification, public general chat, reputation/staking, automatic dispute-window release, and recovery/republish.
+
+See [`README.md`](../README.md) for setup, [`BusinessFlow.md`](BusinessFlow.md) for user flow, and [`API_v1.md`](../API_v1.md) for the full contract surface.

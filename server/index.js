@@ -2,10 +2,11 @@
 // Primary modular backend server. Port 3000 by default.
 
 const express = require('express');
-const { config, validateConfig } = require('./config/environment');
+const { config, getCurrentContractAddress, validateConfig } = require('./config/environment');
 const { corsMiddleware } = require('./middleware/corsMiddleware');
 const { errorHandler } = require('./middleware/errorHandler');
 const { startAcceptedConversationProvisioner } = require('./services/acceptedConversationProvisioner');
+const chainReader = require('./services/chainReader');
 
 const app = express();
 
@@ -21,8 +22,8 @@ app.get('/api/health', (req, res) => {
     service: 'cargochain-api',
     chainId: config.chainId,
     clientOrigin: config.clientOrigin,
-    deliveryEscrowAddress: config.deliveryEscrowAddress,
-    userRegistryAddress: config.userRegistryAddress,
+    deliveryEscrowAddress: chainReader.getDeliveryEscrowAddress(),
+    userRegistryAddress: getCurrentContractAddress('UserRegistry', config.chainId).toLowerCase(),
     timestamp: new Date().toISOString(),
   });
 });

@@ -7,9 +7,9 @@ Current contract sources:
 | `Migrations.sol` | Truffle migration bookkeeping | — | ✅ implemented |
 | `UserRegistry.sol` | wallet identity/profile | wx | ✅ implemented |
 | `DeliveryEscrow.sol` | requests, proposals, escrow, milestones, proof, payment, refunds, completion tips | team | ✅ implemented |
-| `LifecycleManager.sol` | amendments, shared negotiation lock, and mutual cancellation | GAN | ✅ Phase 5 amendments implemented |
+| `LifecycleManager.sol` | amendments, shared negotiation lock, and mutual cancellation | GAN | ✅ implemented |
 | `PaymentEvents.sol` | payment event definitions inherited by `DeliveryEscrow` | Jeremy | ✅ implemented |
 
-Use Solidity `^0.8.0`. Run `npx truffle compile` to verify before committing.
+Use Solidity `0.8.x`. Run `npm run compile` to verify before committing.
 
 See `../API_v1.md` for the function reference and `../docs/Module-Split.md` for the full ownership matrix.

@@ -1,67 +1,58 @@
-# `src/` — React 18 + Vite frontend
+# `src/` — CargoChain frontend
 
-Four pages, plus shared modules.
+The browser application is React 18 + Vite in plain JavaScript. It uses ethers v6, reads contracts through the direct Ganache RPC, and sends wallet writes through MetaMask via the shared transaction executor.
 
-| File | Purpose |
+## Provider tree
+
+```text
+ToastProvider
+└─ Web3Provider
+   └─ ContractsProvider
+      └─ UserProfileProvider
+         └─ ChatAuthProvider
+            └─ App
+```
+
+- `Web3Context` maintains the direct RPC provider, MetaMask browser provider, signer, account, and chain state.
+- `ContractsContext` loads `DeliveryEscrow`, `LifecycleManager`, and `UserRegistry` from Truffle artifacts and validates their current deployment linkage.
+- `UserProfileContext` reads/refreshes the connected wallet's on-chain registration and owns the registration modal flow.
+- `ChatAuthContext` manages SIWE chat authentication and clears sessions when wallet account/network changes.
+
+## Routes
+
+| Route | Page |
 |---|---|
-| `index.html` | Vite's entry — the only HTML file, mounts `<div id="root">` |
-| `main.jsx` | React entry — wires `<ToastProvider>` → `<Web3Provider>` → `<ContractsProvider>` → `<App />` |
-| `App.jsx` | `<BrowserRouter>` with the 4 routes |
-| `context/Web3Context.jsx` | Direct Ganache `JsonRpcProvider` + MetaMask `BrowserProvider`, separate network state, `connect()` |
-| `context/ContractsContext.jsx` | Instantiates the 5 contract handles from `build/contracts/*.json` |
-| `context/ToastContext.jsx` | Minimal toast queue (`useToast().show(msg, kind)`) |
-| `hooks/useWallet.js` | Re-export of `Web3Context` |
-| `hooks/useContracts.js` | Re-export of `ContractsContext` |
-| `hooks/useToast.js` | Re-export of `ToastContext` |
-| `contracts/index.js` | `getContract(provider, name, networkId)` factory |
-| `components/Navbar.jsx` | Top nav with the 4 page links + Connect button |
-| `components/ConnectButton.jsx` | "Connect Wallet" / connected pill (chain badge + truncated address) |
-| `components/RequireWallet.jsx` | Wraps pages that need a connected MetaMask |
-| `pages/Marketplace.jsx` | Route `/` — open requests, accept button (stub) |
-| `pages/Shipper.jsx` | Route `/shipper` — create + verify (stub) |
-| `pages/Carrier.jsx` | Route `/carrier` — accept + submit proof (stub) |
-| `pages/Track.jsx` | Route `/track/:id?` — public timeline (works without wallet) |
-| `utils/format.js` | `formatEth`, `shortAddress`, `formatDate`, status labels |
-| `utils/upload.js` | `hashFile(file)` (SHA-256) + `uploadPhoto(file, hash)` |
-| `css/style.css` | Global stylesheet — layout, typography, navbar, toast, timeline |
+| `/` | `Marketplace.jsx` |
+| `/my-shipments` | `MyShipments.jsx` |
+| `/requests/:id` | `RequestDetail.jsx` |
+| `/shipments/:id/propose` | `ProposeMilestones.jsx` |
+| `/track/:id` | `Track.jsx` |
+| `/messages` and `/messages/:conversationId` | `Messages.jsx` |
+| `/profile` | `Profile.jsx` |
 
-## How ABIs land in the React app
+Legacy `/shipper` and `/carrier` paths redirect to `/my-shipments`.
 
-Vite reads `build/contracts/*.json` at import time via `import.meta.glob`. No
-copy step needed. After every `npx truffle compile` (which re-runs on Solidity
-changes), refresh the browser — Vite HMR picks up the new artifacts.
+## Key folders
 
-If no contracts are deployed, `ContractsContext` surfaces a friendly
-"run `npm run migrate`" error and every page renders it. The app still boots.
+| Folder | Responsibility |
+|---|---|
+| `components/` | Reusable application controls, dialogs, dashboard UI, registration, and chat components. |
+| `context/` | Wallet, read-only contract map, display-name profile, SIWE chat session, and toast state. |
+| `contracts/` | Artifact-based ethers contract factory and deployment-link validation. |
+| `hooks/` | Context helpers plus confirmation, chat presentation, and wallet-identity helpers. |
+| `lib/` | Supabase browser client and Express API client. |
+| `services/` | Read-oriented chat data service. |
+| `utils/` | Formatting, file hashing/upload, wallet transaction execution, payment history, text limits, and event-to-chat-timeline conversion. |
 
-## Wallet flow
+## Contract and wallet conventions
 
-1. User clicks **Connect Wallet** in the navbar.
-2. `Web3Context.connect()` calls `eth_requestAccounts` → MetaMask popup.
-3. On approval, `BrowserProvider.getSigner()` returns a signer used only for
-   MetaMask signing and broadcasting.
-4. Reads use the direct Ganache `JsonRpcProvider`. Writes go through
-   `sendWalletContractTransaction()`, which queues per-wallet transactions and
-   prepares gas, fees, and nonce through the direct provider before signing.
+- Do not instantiate `window.ethereum` directly inside pages; use `useWallet()` and `useContracts()`.
+- Contract map instances are read-only. Use `sendWalletContractTransaction()` for writes so Ganache handles preparation/estimation and MetaMask signs/broadcasts.
+- Built artifacts come from `build/contracts/*.json`. Run `npm run compile`, then `npm run migrate`, and refresh the browser after Solidity/deployment changes.
+- A local migration deploys new contracts. It does not delete old Ganache history, but the frontend will point at the new deployment and show fresh on-chain app state.
 
-## Why ethers v6 and not Web3.js
+## Proof upload and chat
 
-Project owner's decision (2026-07-06). The Truffle/MetaMask/Ganache stack
-is unchanged — only the client lib swapped. See `AGENTS.md` and `CLAUDE.md`
-for the rule update.
-
-## Conventions
-
-- `PascalCase.jsx` for components and pages
-- `camelCase.js` for utils, hooks, factories
-- Component-scoped styles use CSS Modules (`*.module.css`); the global
-  `style.css` is reserved for layout, typography, and shared elements
-  (navbar, toast, etc.)
-
-## Adding a new page
-
-1. Create `src/pages/<Name>.jsx` exporting a default function component.
-2. Register a route in `src/App.jsx`.
-3. Add a nav link in `src/components/Navbar.jsx`.
-4. If the page needs a connected wallet, wrap the body in
-   `<RequireWallet>`.
+- `utils/upload.js` accepts JPEG, PNG, and WebP proof files up to 10 MB, computes a SHA-256 hash, writes to Supabase Storage, and returns the public URL used for on-chain proof submission.
+- Chat message text is off-chain in Supabase. `utils/chatTimeline.js` separately reads filtered `DeliveryEscrow` / `LifecycleManager` events so the conversation also shows verified delivery activity.
+- Supabase values must be present in `.env`; see the root [`README.md`](../README.md) for setup.
