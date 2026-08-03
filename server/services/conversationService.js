@@ -40,7 +40,9 @@ async function ensureConversation(rawRequestId, rawCarrierWallet, options = {}) 
 
   // Trusted server configuration with optional overrides for testing multi-chain/multi-contract
   const chainId = options.chainIdOverride !== undefined ? Number(options.chainIdOverride) : Number(config.chainId);
-  const contractAddress = getAddress(options.contractAddressOverride || config.deliveryEscrowAddress).toLowerCase();
+  const contractAddress = getAddress(
+    options.contractAddressOverride || chainReader.getDeliveryEscrowAddress(),
+  ).toLowerCase();
 
   // 2. Verify on-chain blockchain state via chainReader
   const { request, proposals } = await chainReader.getContractState(requestId);

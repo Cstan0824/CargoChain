@@ -1,10 +1,10 @@
 # CargoChain Agreement Changes
 
-This document fixes the business rules for post-acceptance amendments, mutual cancellation, and completion tips. It is the implementation baseline for the phased agreement-change work.
+This document records the implemented business rules for post-acceptance amendments, mutual cancellation, and completion tips. For exact Solidity signatures and events, use [`API_v1.md`](../API_v1.md).
 
 ## Current implementation boundary
 
-Phase 1 adds shared contract safeguards:
+The implementation was delivered in these phases:
 
 - one negotiation slot per accepted shipment;
 - a milestone-state version snapshot for stale amendment detection;

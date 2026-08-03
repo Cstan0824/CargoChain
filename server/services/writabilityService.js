@@ -57,7 +57,7 @@ async function checkConversationAccess(conversationId, rawWalletAddress) {
 
   // 3. Confirm chain_id and contract_address configuration match
   const dbContractAddress = (conversation.contract_address || '').toLowerCase();
-  const expectedContractAddress = getAddress(config.deliveryEscrowAddress).toLowerCase();
+  const expectedContractAddress = chainReader.getDeliveryEscrowAddress();
 
   if (Number(conversation.chain_id) !== Number(config.chainId) || dbContractAddress !== expectedContractAddress) {
     const err = new Error('Forbidden: Chain or contract configuration mismatch');

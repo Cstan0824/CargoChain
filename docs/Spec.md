@@ -1,217 +1,149 @@
-# CargoChain — Technical Specification (concise)
+# CargoChain — Current Technical Specification
 
-> Quick-reference for the team. Full detail lives in `PRD.md`, `Architecture.md`, `Module-Split.md`, and `API_v1.md`.
+> Assignment implementation specification. This document reflects the deployed v1 architecture; [`API_v1.md`](../API_v1.md) is the authoritative function-level reference.
 
----
+## 1. Scope
 
-## 1. System overview
+CargoChain is a local-Ganache logistics DApp for milestone-based ETH escrow. A shipper creates a delivery request, carriers compete with milestone proposals, the shipper funds one proposal, the assigned carrier submits photo proof, and the shipper releases payment checkpoint by checkpoint.
 
-CargoChain is a DApp with four cooperating layers:
+The current build also supports wallet display names, request-scoped private chat, mutual cancellation, negotiated amendments, immutable checkpoint IDs, and a one-time completion tip.
 
-1. **Ethereum smart contracts** (Solidity 0.8.x) — the source of truth for request state, escrow, milestone status.
-2. **React 18 + Vite frontend** using **ethers.js v6** — calls contracts through MetaMask.
-3. **Node.js + Express API** — verifies SIWE sessions and enforces contract-backed private-chat authorization.
-4. **Supabase** — stores private chat records and milestone proof images; authoritative delivery and payment state remains on-chain.
+## 2. Stack
 
-```
-┌────────────┐    ethers.js     ┌────────────────┐
-│ React/Vite │◄───────────────►│ Ganache node   │
-│ + MetaMask │                 │ + contracts    │
-└─────┬──────┘                 └────────────────┘
-      │ HTTPS                         ▲
-      ├──────────────► Supabase       │ authorization reads
-      │                 Storage/DB    │
-      └──────────────► Express API ───┘
-```
+| Layer | Implementation |
+|---|---|
+| Blockchain | Ganache on `127.0.0.1:7545`, chain ID `1337` |
+| Contracts | Solidity `0.8.35`, Truffle, optimiser + Paris EVM target |
+| Browser app | React 18, Vite, JavaScript, ethers v6 |
+| Wallet | MetaMask browser extension |
+| Private chat | Express SIWE API + Supabase Postgres / Realtime |
+| Proof image storage | Supabase Storage `milestone-proofs` public bucket |
+| Tests | Truffle Mocha/Chai and Vitest |
 
----
+Sepolia, QR recipient confirmation, auto-release dispute windows, and carrier republishing are not part of v1.
 
-## 2. Smart contract summary
+## 3. Contracts
 
-5 contracts, all `^0.8.0`:
+| Contract | Responsibility |
+|---|---|
+| `UserRegistry.sol` | Wallet registration and display-name lookup/update. |
+| `DeliveryEscrow.sol` | Requests, proposals, accepted shipment state, proof state, milestone payment, refund accounting, stable checkpoint records, and tips. |
+| `LifecycleManager.sol` | Amendment/cancellation records, response deadlines, shared negotiation lock, and restricted calls to escrow finalisation hooks. |
+| `PaymentEvents.sol` | Payment-related events inherited by `DeliveryEscrow`. |
 
-| Contract | Module | Lines (target) | Owner |
-|---|---|---|---|
-| `UserRegistry.sol` | a | ~80 | wx |
-| `DeliveryEscrow.sol` | b + c | ~250 | GAN + Jeremy |
-| `LifecycleManager.sol` | b | agreement-change lifecycle | GAN |
-| `MilestoneVerifier.sol` | d | ~150 | Melissa |
-| `PaymentEvents.sol` | c | ~30 | Jeremy |
+Deployment order:
 
-See `API_v1.md` for the full function reference.
-
-### Cross-contract calls
-
-- `MilestoneVerifier.verifyMilestone()` → calls `DeliveryEscrow.releaseStage()`
-- `DeliveryEscrow.cancelRequest()` → cancels an unfunded open request only
-- `LifecycleManager.acceptCancellation()` → verifies both-party agreement and calls the restricted `DeliveryEscrow.finalizeMutualCancellation()` settlement hook
-
-### Events (must all be emitted)
-
-- `RequestCreated(requestId, shipper, reward)`
-- `RequestAccepted(requestId, carrier)`
-- `MilestoneSubmitted(requestId, milestoneId, hash)`
-- `MilestoneVerified(requestId, milestoneId, approved)`
-- `PaymentReleased(requestId, milestoneId, amount, recipient)`
-- `RequestCancelled(requestId, by)`
-- `RefundIssued(requestId, to, amount)`
-- `CarrierTipped(requestId, shipper, carrier, amount)`
-- `RequestRepublished(requestId, previousCarrier)`
-
----
-
-## 3. Data model
-
-### `Request` struct (DeliveryEscrow.sol)
-
-```solidity
-struct Milestone {
-    string name;
-    uint256 deadline;       // unix timestamp
-    bool requiresProof;
-    bool completed;
-    bool paid;
-}
-
-struct Request {
-    uint256 id;
-    address shipper;
-    address carrier;        // address(0) when open
-    string goodsInfo;
-    uint256 reward;         // total ETH in escrow (wei)
-    uint256 acceptDeadline; // unix timestamp; FCFS window
-    uint256 milestoneCount;
-    mapping(uint256 => Milestone) milestones;
-    RequestStatus status;   // Open, Accepted, Cancelled, Completed, Republished
-}
+```text
+UserRegistry → LifecycleManager → DeliveryEscrow(registry, manager)
+                                      ↓
+              LifecycleManager.initializeDeliveryEscrow(escrow)
 ```
 
-### `MilestoneVerifier` storage
+The frontend validates that the deployed manager points back to the current escrow address. A matching chain ID alone is not sufficient because local Ganache deployments can be stale.
 
-```solidity
-mapping(uint256 => mapping(uint256 => bytes32)) public proofHashes;
-mapping(uint256 => mapping(uint256 => MilestoneStatus)) public milestoneStatus;
+## 4. Core data and state
+
+### Request lifecycle
+
+```text
+Open → Funded → InProgress → Completed
+  │       │          │
+  └───────┴──────────┴── deadline / allowed settlement → Refunded
 ```
 
-### `UserRegistry` storage
+- `Open`: no accepted proposal; shipper may cancel without escrow.
+- `Funded`: shipper selected a proposal and locked exact ETH.
+- `InProgress`: a carrier has submitted milestone proof or work is ongoing.
+- `Completed`: every checkpoint was paid.
+- `Refunded`: remaining escrow was returned after deadline expiry or mutual cancellation.
 
-```solidity
-mapping(address => UserProfile) public users;
-mapping(address => bool) public registered;
+### Checkpoints
 
-struct UserProfile {
-    string displayName;
-    Role role;             // Shipper, Carrier, Both
-    uint256 registeredAt;
-}
+Each checkpoint has a stable `milestoneId`. The displayed/required completion sequence is a separate execution-order list. Amendments may insert a newly funded checkpoint before an eligible unpaid checkpoint or append it as final; they do not rewrite original checkpoint IDs, proof references, or payments.
+
+Checkpoint proof state is managed inside `DeliveryEscrow`:
+
+```text
+PendingProof / Rejected → Submitted → Paid
 ```
 
----
+The shipper can reject a submitted proof, returning it to `Rejected` for carrier resubmission. A checkpoint is paid only after shipper verification.
 
-## 4. State machine — Milestone
+## 5. Agreement rules
 
-```
-Pending ──submitProof──► AwaitingVerification ──verifyMilestone(true)──► Verified ──releaseStage──► Paid
-   │                              │                                          │
-   │                              └──verifyMilestone(false)──► Rejected ────┘
-   │                                                                          (back to AwaitingProof? — TBD)
-   │
-   └──markMilestoneComplete (no proof required)──► Verified ──releaseStage──► Paid
-```
+### Amendment
 
-**Dispute-window auto-release**: if `MilestoneStatus == AwaitingVerification` and `now > milestone.deadline + 72h`, anyone calls `confirmByTimeout(requestId, milestoneId)` → Verified → Paid.
+- One request may have only one pending amendment or cancellation.
+- A shipper can directly extend the deadline when no negotiation exists.
+- Either participant may request a mutually approved amendment before the final shipment hour.
+- A carrier cannot shorten a deadline. A shipper shortening a deadline requires at least `0.01 ETH` new funding and carrier acceptance.
+- New ETH may top up unpaid existing checkpoints or fully fund newly inserted checkpoints.
+- Shipper-requested funding is staged in `LifecycleManager`; rejection, withdrawal, and expiry refund it.
+- Carrier-requested funding is supplied by the shipper at acceptance.
+- Amendment acceptance checks the milestone-state version captured at request time; it fails if proof progress changed in the meantime.
 
----
+### Mutual cancellation
 
-## 5. Frontend pages
+- Either accepted participant supplies a required note and response deadline.
+- Only the counterparty accepts/rejects; only requester withdraws; anyone can expire an unanswered request after the deadline.
+- Finalisation is blocked while any proof is awaiting verification.
+- Released milestone payment remains with the carrier; only outstanding escrow returns to the shipper.
 
-| Page | URL | Connects to wallet? |
-|---|---|---|
-| `Marketplace.jsx` | `/` | Optional for browsing; required for actions |
-| `MyShipments.jsx` | `/my-shipments` | Required |
-| `ProposeMilestones.jsx` | `/shipments/:id/propose` | Required |
-| `Track.jsx` | `/track/:id` | Required for role-specific actions |
-| `Messages.jsx` | `/messages/:conversationId?` | Required + SIWE chat session |
+### Completion tip
 
-### ethers.js v6 initialisation pattern
+- Only the registered shipper can send it.
+- Shipment must be completed.
+- It must be non-zero and can occur once only.
+- It transfers directly to the carrier without entering or altering escrow.
 
-```javascript
-// src/context/Web3Context.jsx
-const readProvider = new JsonRpcProvider('http://127.0.0.1:7545', 1337, { staticNetwork: true });
-const walletProvider = new BrowserProvider(window.ethereum);
+## 6. Off-chain services
 
-async function connectWallet() {
-  if (!window.ethereum) {
-    alert('Please install MetaMask');
-    return;
-  }
-  await walletProvider.send('eth_requestAccounts', []);
-  const signer = await walletProvider.getSigner();
-  const network = await walletProvider.getNetwork();
-  return { account: await signer.getAddress(), signer, chainId: Number(network.chainId) };
-}
-```
+### Proof images
 
-### ABI and address loading
+The browser hashes a valid JPEG/PNG/WebP file, uploads it under a SHA-256-derived path in Supabase Storage, receives a public URL, and submits that URL with proof metadata to the contract. The upload path is content-derived and not overwritten by the app, but the current contract stores the URL/remark rather than independently verifying file content.
 
-```javascript
-// src/contracts/index.js
-const artifact = ARTIFACTS['../../build/contracts/DeliveryEscrow.json'];
-const address = artifact.networks[String(networkId)].address;
-const deliveryEscrow = new Contract(address, artifact.abi, provider);
-```
+### Private chat
 
----
+1. Wallet signs a SIWE authentication message.
+2. Express verifies it and issues a short-lived chat token.
+3. Express verifies request participants from the current `DeliveryEscrow` deployment before provisioning/serving a conversation.
+4. Supabase stores conversation/message text and Realtime delivers updates.
+5. The frontend separately reads escrow/lifecycle events for a filtered delivery timeline.
 
-## 6. Photo upload flow
+The conversation identity includes chain ID, contract address, request ID, and carrier wallet so contract redeployments cannot mix old and new chats.
 
-```
-Carrier page
-  ↓ [Choose file]
-FileReader.readAsArrayBuffer
-  ↓
-crypto.subtle.digest('SHA-256', buffer) → hex hash
-  ↓
-Upload to the Supabase `milestone-proofs` Storage bucket
-  ↓
-Receive the public proof URL
-  ↓
-submitProof(requestId, milestoneId, proofUrl, hash) → blockchain tx
-```
+## 7. Frontend routes
 
-The Express API is not in the proof-image data path. Supabase project and
-bucket access are configured through environment variables and Storage policies.
+| Route | Purpose |
+|---|---|
+| `/` | Browse open requests and create a new request. |
+| `/my-shipments` | Role-aware list of the connected wallet's requests/proposals. |
+| `/requests/:id` | Request details and proposal interaction. |
+| `/shipments/:id/propose` | Carrier proposal editor, active proposal, and history. |
+| `/track/:id` | Tracking, proof, payments, amendments, cancellation, and history. |
+| `/messages` | Request-scoped private conversations and activity timeline. |
+| `/profile` | Registered profile and payment/transaction presentation. |
 
----
-
-## 7. Local dev commands
+## 8. Local run and verification
 
 ```bash
-# Terminal 1 — Ganache
-ganache --deterministic
-
-# Terminal 2 — Compile + migrate + tests
-npx truffle compile
-npx truffle migrate --reset --network development
-npx truffle test
-
-# Terminal 3 — SIWE/chat API
-npm run server                   # http://127.0.0.1:3000
-
-# Terminal 4 — Frontend
-npm run dev                      # http://127.0.0.1:5173
+cp .env.example .env
+# configure Supabase values and SUPABASE_JWT_SECRET
+npm install
+npm run dev:all
 ```
 
-Or use `npm run dev:all`, `./start.sh`, or `start.cmd` to launch the local stack.
+Before using chat, run `scripts/apply-chat-schema.sql` in Supabase and create the `milestone-proofs` bucket. For manual Ganache GUI use, run `npm run compile`, `npm run migrate`, `npm run server`, and `npm run dev` separately.
 
----
+```bash
+npm test
+npm run test:frontend
+npm run build
+```
 
-## 8. Build / deploy to Sepolia
+## 9. Constraints
 
-(Out of scope for v1 dev — placeholder for demo)
-
-1. Get free Sepolia ETH from a faucet (https://sepoliafaucet.com/).
-2. Add a `sepolia` network in `truffle-config.js` using Infura or Alchemy RPC.
-3. `npx truffle migrate --network sepolia`
-4. Update `addresses` in `src/js/contracts.js` to point to the Sepolia addresses.
-5. Switch MetaMask to Sepolia and import the deployer account.
+- Local Ganache is the only v1 network; deployment addresses change after reset migration.
+- One carrier is accepted per request, but several can propose while it is open.
+- The assignment supports MetaMask extension flow only.
+- Chat is between request participants only; it is not a public marketplace messenger.

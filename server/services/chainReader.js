@@ -5,7 +5,7 @@
 const { JsonRpcProvider, Contract, getAddress } = require('ethers');
 const path = require('path');
 const fs = require('fs');
-const { config } = require('../config/environment');
+const { config, getCurrentContractAddress } = require('../config/environment');
 
 const REQUEST_STATUS_MAP = {
   0: 'Open',
@@ -27,6 +27,7 @@ const PROPOSAL_STATUS_MAP = {
 
 let providerInstance = null;
 let contractInstance = null;
+let contractInstanceAddress = '';
 
 function getProvider() {
   if (!providerInstance) {
@@ -36,8 +37,6 @@ function getProvider() {
 }
 
 function getDeliveryEscrowContract() {
-  if (contractInstance) return contractInstance;
-
   const buildPath = path.join(__dirname, '..', '..', 'build', 'contracts', 'DeliveryEscrow.json');
   if (!fs.existsSync(buildPath)) {
     throw new Error(`[chainReader error] Contract build artifact missing at ${buildPath}`);
@@ -45,16 +44,26 @@ function getDeliveryEscrowContract() {
 
   const artifact = JSON.parse(fs.readFileSync(buildPath, 'utf8'));
   const networkKey = String(config.chainId);
-  const deployedAddress = config.deliveryEscrowAddress ||
+  const deployedAddress = getCurrentContractAddress('DeliveryEscrow', config.chainId) ||
     (artifact.networks && artifact.networks[networkKey] ? artifact.networks[networkKey].address : '');
 
   if (!deployedAddress) {
     throw new Error(`[chainReader error] DeliveryEscrow contract address not found for chain ID ${config.chainId}`);
   }
 
+  const normalizedAddress = getAddress(deployedAddress).toLowerCase();
+  if (contractInstance && contractInstanceAddress === normalizedAddress) {
+    return contractInstance;
+  }
+
   const provider = getProvider();
   contractInstance = new Contract(deployedAddress, artifact.abi, provider);
+  contractInstanceAddress = normalizedAddress;
   return contractInstance;
+}
+
+function getDeliveryEscrowAddress() {
+  return getAddress(getCurrentContractAddress('DeliveryEscrow', config.chainId)).toLowerCase();
 }
 
 /**
@@ -167,6 +176,7 @@ async function getContractState(requestId) {
 
 module.exports = {
   getDeliveryRequest,
+  getDeliveryEscrowAddress,
   getDeliveryEscrowContract,
   getRequestIds,
   getProposals,

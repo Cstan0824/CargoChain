@@ -21,14 +21,22 @@ function getContractAddressFromBuild(contractName, chainId) {
   return '';
 }
 
+function getCurrentContractAddress(contractName, chainId) {
+  const explicitVariable = contractName === 'DeliveryEscrow'
+    ? process.env.DELIVERY_ESCROW_ADDRESS
+    : contractName === 'UserRegistry'
+      ? process.env.USER_REGISTRY_ADDRESS
+      : '';
+
+  return explicitVariable || getContractAddressFromBuild(contractName, chainId) || '';
+}
+
 const chainIdRaw = process.env.CHAIN_ID || process.env.VITE_CHAIN_ID || '1337';
 const chainId = parseInt(chainIdRaw, 10);
 const ganacheHost = process.env.GANACHE_HOST || '127.0.0.1';
 const ganachePort = process.env.GANACHE_PORT || '7545';
-const deliveryEscrowAddress = process.env.DELIVERY_ESCROW_ADDRESS ||
-  getContractAddressFromBuild('DeliveryEscrow', chainId);
-const userRegistryAddress = process.env.USER_REGISTRY_ADDRESS ||
-  getContractAddressFromBuild('UserRegistry', chainId);
+const deliveryEscrowAddress = getCurrentContractAddress('DeliveryEscrow', chainId);
+const userRegistryAddress = getCurrentContractAddress('UserRegistry', chainId);
 
 const config = Object.freeze({
   port: parseInt(process.env.PORT || '3000', 10),
@@ -81,5 +89,6 @@ function validateConfig({ requireAuth = false, requireDb = false, requireChain =
 
 module.exports = {
   config,
+  getCurrentContractAddress,
   validateConfig,
 };

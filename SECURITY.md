@@ -33,8 +33,12 @@ Please **do not** include working exploit code in public issues. A short descrip
   `.env.local`, and `.env.*.local`. If you accidentally commit one, rotate
   the key immediately and use `git filter-repo` (or rewrite history) to
   purge it from the repo. Treat the key as burned.
-- **No secrets in `localStorage`**, `sessionStorage`, React state, or any
-  file under `src/`. The wallet address is fine to cache; nothing else.
+- **Do not store long-lived secrets in browser storage.** The chat module keeps
+  only its short-lived SIWE chat JWT and associated wallet/expiry metadata in
+  `sessionStorage`, so it disappears when the browser session ends and is
+  cleared on wallet/network changes. Service-role keys, private keys, and
+  server signing secrets must never enter browser storage, React state, or any
+  file under `src/`.
 - **No secrets hardcoded in code** — including in `truffle-config.js`,
   server modules, or any `.js`/`.jsx` file. If you need a
   value at runtime, read it from `process.env` (Node) or a `VITE_*` var
@@ -64,10 +68,9 @@ the repo listens on a public interface unless you explicitly opt in.
 | Vite dev server  | 5173 | 127.0.0.1    | `vite --host 0.0.0.0`     |
 | Vite preview     | 8080 | 127.0.0.1    | `vite preview --host 0.0.0.0` |
 
-If a teammate needs LAN access (e.g., the shared-Ganache setup), they
-type the `--host 0.0.0.0` flag on the command line — **not** in
-`package.json`. The repo's defaults stay loopback-only so a fresh clone
-never accidentally exposes a port.
+The repository intentionally does not provide a shared-Ganache mode. Each
+developer normally runs an isolated local chain. Keep the defaults loopback-only
+so a fresh clone never accidentally exposes a wallet RPC, chat API, or dev UI.
 
 ## React hygiene
 
@@ -92,8 +95,8 @@ never accidentally exposes a port.
 
 ## Out of scope (intentionally)
 
-- Production hardening (rate limiting, WAF, secrets manager).
+- Production-grade abuse protection, managed secrets, and a public deployment.
 - Mobile wallet flows (WalletConnect, deep links) — MetaMask extension
   only.
-- IPFS / decentralised storage. Proof images use Supabase Storage while their
-  SHA-256 content hashes and proof URIs are committed on-chain.
+- IPFS / decentralised storage. Proof images use Supabase Storage; the browser
+  uses a SHA-256-derived object path and submits the resulting proof URI on-chain.
