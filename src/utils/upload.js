@@ -31,6 +31,9 @@ const MAX_PROOF_BYTES = 10 * 1024 * 1024;
 const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 export async function uploadPhoto(file, hash, requestId, milestoneId) {
+  if (!supabase) {
+    throw new Error('Photo proof upload is not configured. Add the Supabase frontend variables, then try again.');
+  }
   if (!file || typeof file.arrayBuffer !== 'function') throw new Error('A proof image is required.');
   if (!SUPPORTED_IMAGE_TYPES.has(file.type)) {
     throw new Error('Proof image must be JPEG, PNG, or WebP.');

@@ -205,6 +205,30 @@ export function Profile() {
   const totalEarnings = cumulativeEarnings.at(-1) ?? 0n;
   const fundsAreLoading = balanceLoading || lockedEscrowLoading;
 
+  if (!account) {
+    return (
+      <div className={styles.page}>
+        <Topbar
+          title="Profile"
+          subtitle="Connect your wallet when you are ready to manage your CargoChain identity and delivery activity."
+        />
+        <Card className={styles.setupCard}>
+          <p className={styles.setupEyebrow}>One wallet, both roles</p>
+          <h2>Set up your delivery identity in three short steps.</h2>
+          <p>
+            Your wallet can create delivery requests as a shipper and carry deliveries as a carrier. CargoChain does not lock you into one role.
+          </p>
+          <ol className={styles.setupSteps}>
+            <li><span>1</span>Connect MetaMask using the wallet button above.</li>
+            <li><span>2</span>Switch MetaMask to the local Ganache network.</li>
+            <li><span>3</span>Register a display name only when an on-chain action needs it.</li>
+          </ol>
+          <p className={styles.setupNote}>Wallet access is controlled in MetaMask. Your full address, balance, and history appear here after connection.</p>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.page}>
       <Topbar

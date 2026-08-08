@@ -302,6 +302,17 @@ export function ProposeMilestones() {
       return;
     }
 
+    if (!await confirmAction({
+      title: 'Send this checkpoint plan?',
+      message: 'The shipper will review the ordered checkpoints before selecting a carrier and locking escrow.',
+      details: [
+        { label: 'Checkpoints', value: `${milestones.length}` },
+        { label: 'Planned payment', value: formatEth(request.proposedAmountWei) },
+        { label: 'What happens next', value: 'The shipper reviews your plan' },
+      ],
+      confirmLabel: 'Send plan',
+    })) return;
+
     setSubmissionStage(account ? 'signing' : 'connecting');
     try {
       const activeSigner = await resolveWalletSigner(signer, connect);

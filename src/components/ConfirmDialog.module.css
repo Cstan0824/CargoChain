@@ -1,7 +1,7 @@
 .scrim {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: 1200;
   display: grid;
   place-items: center;
   padding: var(--s-4);
@@ -73,6 +73,29 @@
   line-height: 1.6;
   text-wrap: pretty;
 }
+
+.details {
+  display: grid;
+  gap: 1px;
+  margin: var(--s-4) 0 0;
+  overflow: hidden;
+  border-radius: var(--r-md);
+  background: var(--border-soft);
+}
+
+.details > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  background: var(--bg-subtle);
+  font-size: var(--fs-xs);
+}
+
+.details dt { color: var(--text-secondary); }
+.details dd { margin: 0; color: var(--text-primary); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; text-align: right; }
+.warning { margin-top: var(--s-3) !important; color: var(--danger) !important; font-weight: var(--fw-medium); }
 
 .actions {
   grid-column: 1 / -1;

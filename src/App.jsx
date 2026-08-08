@@ -7,21 +7,29 @@
 // list-page CTAs (MyShipments row click, Profile tx row, etc.) can
 // still navigate to them.
 
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout.jsx';
-import { Marketplace } from './pages/Marketplace.jsx';
-import { Track } from './pages/Track.jsx';
-import { MyShipments } from './pages/MyShipments.jsx';
-import { Profile } from './pages/Profile.jsx';
-import { Messages } from './pages/Messages.jsx';
-import { ProposeMilestones } from './pages/ProposeMilestones.jsx';
-import { RequestDetail } from './pages/RequestDetail.jsx';
+import { RouteLoading } from './components/RouteLoading.jsx';
+
+function lazyPage(loader, exportName) {
+  return lazy(() => loader().then((module) => ({ default: module[exportName] })));
+}
+
+const Marketplace = lazyPage(() => import('./pages/Marketplace.jsx'), 'Marketplace');
+const Track = lazyPage(() => import('./pages/Track.jsx'), 'Track');
+const MyShipments = lazyPage(() => import('./pages/MyShipments.jsx'), 'MyShipments');
+const Profile = lazyPage(() => import('./pages/Profile.jsx'), 'Profile');
+const Messages = lazyPage(() => import('./pages/Messages.jsx'), 'Messages');
+const ProposeMilestones = lazyPage(() => import('./pages/ProposeMilestones.jsx'), 'ProposeMilestones');
+const RequestDetail = lazyPage(() => import('./pages/RequestDetail.jsx'), 'RequestDetail');
 
 export function App() {
   return (
     <BrowserRouter>
       <Layout>
-        <Routes>
+        <Suspense fallback={<RouteLoading />}>
+          <Routes>
           {/* Top-level destinations (in sidebar) */}
           <Route path="/" element={<Marketplace />} />
           <Route path="/my-shipments" element={<MyShipments />} />
@@ -40,7 +48,8 @@ export function App() {
           <Route path="/carrier" element={<Navigate to="/my-shipments" replace />} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+          </Routes>
+        </Suspense>
       </Layout>
     </BrowserRouter>
   );

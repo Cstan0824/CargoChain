@@ -143,6 +143,119 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--s-3);
 }
+
+.workspaceOverview,
+.activityPanel {
+  display: grid;
+  gap: var(--s-5);
+}
+
+.workspaceIntro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s-4);
+}
+
+.workspaceIntro h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--fs-xl);
+  text-wrap: balance;
+}
+
+.workspaceIntro p {
+  max-width: 62ch;
+  margin: var(--s-1) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  text-wrap: pretty;
+}
+
+.workspaceFacts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  border-radius: var(--r-lg);
+  background: var(--border-soft);
+}
+
+.workspaceFacts > div {
+  min-width: 0;
+  padding: var(--s-4);
+  background: var(--bg-surface);
+}
+
+.workspaceFacts dt {
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.workspaceFacts dd {
+  margin: var(--s-1) 0 0;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  text-wrap: pretty;
+}
+
+.blockchainDetails,
+.activityDisclosure {
+  padding: var(--s-3) var(--s-4);
+  border-radius: var(--r-lg);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+
+.blockchainDetails summary,
+.activityDisclosure summary,
+.agreementSummary {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  color: var(--text-primary);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+}
+
+.blockchainDetails p { margin: var(--s-2) 0 0; text-wrap: pretty; }
+
+.activityList {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.activityList li {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  gap: var(--s-3);
+  align-items: start;
+  padding: var(--s-3) 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.activityList li:last-child { border-bottom: 0; }
+.activityMarker { width: 8px; height: 8px; margin-top: 6px; border-radius: var(--r-pill); background: var(--primary); }
+.activityList strong { color: var(--text-primary); font-size: var(--fs-sm); }
+.activityList p { margin: 2px 0 0; color: var(--text-secondary); font-size: var(--fs-sm); text-wrap: pretty; }
+.activityList time { color: var(--text-muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+@media (max-width: 640px) {
+  .workspaceIntro { flex-direction: column; }
+  .workspaceFacts { grid-template-columns: 1fr; }
+  .activityList li { grid-template-columns: 12px minmax(0, 1fr); }
+  .activityList time { grid-column: 2; }
+}
 @media (max-width: 800px) {
   .summaryGrid { grid-template-columns: repeat(2, 1fr); }
 }
@@ -2093,6 +2206,11 @@
   transition-property: box-shadow;
   transition-duration: var(--dur-3);
   transition-timing-function: var(--ease);
+}
+
+.agreementFocusTarget {
+  padding: 0 var(--s-4) var(--s-4);
+  background: var(--bg-subtle);
 }
 
 .agreementFocusTargetActive {

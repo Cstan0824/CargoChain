@@ -13,7 +13,7 @@ import { EmptyState } from '../components/EmptyState.jsx';
 import { ProgressLine } from '../components/ProgressLine.jsx';
 import { CreateRequestModal } from '../components/CreateRequestModal.jsx';
 import { clipboardRouteMap } from '../assets';
-import { HiOutlineChevronRight, HiOutlineXMark } from 'react-icons/hi2';
+import { HiOutlineXMark } from 'react-icons/hi2';
 import { useWallet } from '../hooks/useWallet.js';
 import { useContracts } from '../hooks/useContracts.js';
 import {
@@ -25,13 +25,20 @@ import {
 } from '../utils/format.js';
 import styles from './MyShipments.module.css';
 
-const STATUS_FILTERS = [
-  { value: 'all',        label: 'All' },
+const STATUS_OPTIONS = [
+  { value: 'all',        label: 'Any status' },
   { value: 'Open',       label: 'Open' },
   { value: 'Funded',     label: 'Funded' },
   { value: 'InProgress', label: 'In progress' },
   { value: 'Completed',  label: 'Completed' },
   { value: 'Refunded',   label: 'Refunded' },
+];
+
+const SHIPMENT_VIEWS = [
+  { value: 'attention', label: 'Needs attention' },
+  { value: 'all', label: 'All' },
+  { value: 'shipper', label: 'As shipper' },
+  { value: 'carrier', label: 'As carrier' },
 ];
 
 export function MyShipments() {
@@ -41,7 +48,8 @@ export function MyShipments() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState(null);
-  const [filter, setFilter] = useState('all');
+  const [view, setView] = useState('attention');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -76,23 +84,18 @@ export function MyShipments() {
     };
   }, [account, contracts, refreshKey]);
 
-  const counts = useMemo(() => {
-    const c = { all: rows.length };
-    for (const r of rows) c[r.status] = (c[r.status] || 0) + 1;
-    return c;
-  }, [rows]);
-
   const filtered = useMemo(() => {
     return rows.filter((r) => {
-      if (filter !== 'all' && r.status !== filter) return false;
+      if (!matchesShipmentView(r, view)) return false;
+      if (statusFilter !== 'all' && r.status !== statusFilter) return false;
       if (search) {
         const q = search.toLowerCase();
         const hay = `${r.id} ${r.from} ${r.to} ${r.status} ${r.relationship}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
-    });
-  }, [rows, filter, search]);
+    }).sort((left, right) => Number(Boolean(shipmentAttention(right))) - Number(Boolean(shipmentAttention(left))) || right.createdAt - left.createdAt);
+  }, [rows, view, statusFilter, search]);
 
   const openShipment = (row) => {
     if (row.hasActiveProposal) {
@@ -114,11 +117,24 @@ export function MyShipments() {
     <div className={styles.page}>
       <Topbar
         title="My Shipments"
-        subtitle="Requests you created or carry, loaded directly from DeliveryEscrow."
+        subtitle="See work you are shipping or carrying, and take the next step when it matters."
       />
 
       {/* ── Toolbar: search + filter pills + create button ── */}
       <div className={styles.toolbar}>
+        <div className={styles.viewTabs} aria-label="Shipment view">
+          {SHIPMENT_VIEWS.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              className={`${styles.viewTab} ${view === item.value ? styles.viewTabActive : ''}`}
+              onClick={() => setView(item.value)}
+              aria-pressed={view === item.value}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
         <div className={styles.searchWrap}>
           <SearchInput
             value={search}
@@ -128,21 +144,12 @@ export function MyShipments() {
             actionLabel="Search"
           />
         </div>
-        <div className={styles.filterPills}>
-          {STATUS_FILTERS.map((f) => (
-            <button
-              key={f.value}
-              type="button"
-              className={`${styles.pill} ${filter === f.value ? styles.pillActive : ''}`}
-              onClick={() => setFilter(f.value)}
-            >
-              {f.label}
-              {typeof counts[f.value] === 'number' && (
-                <span className={styles.pillCount}>{counts[f.value]}</span>
-              )}
-            </button>
-          ))}
-        </div>
+        <label className={styles.statusFilter}>
+          <span>Status</span>
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </label>
         <Button onClick={() => setIsCreateModalOpen(true)}>+ Create request</Button>
       </div>
 
@@ -173,11 +180,11 @@ export function MyShipments() {
                 ? 'Connect your wallet to see every request you are handling.'
                 : rows.length === 0
                   ? 'Requests you create or carry will appear here after their transactions are confirmed.'
-                  : 'No requests match the current filters. Try clearing the search or switching tabs.'
+                  : 'No requests match this view. Try a different view, status, or search term.'
             }
             action={!account
               ? undefined
-              : <Button variant="secondary" onClick={() => { setSearch(''); setFilter('all'); }}>Clear filters</Button>
+              : <Button variant="secondary" onClick={() => { setSearch(''); setStatusFilter('all'); setView('all'); }}>Clear filters</Button>
             }
           />
         ) : (
@@ -213,7 +220,7 @@ export function MyShipments() {
                           <span className={styles.routeArrow}>→</span>
                           <strong>{r.to}</strong>
                         </span>
-                        <span className={styles.relationship}>{r.relationship}</span>
+                        <span className={styles.relationship}>{shipmentRelationshipLabel(r)}</span>
                       </span>
                     </td>
                     <td>
@@ -237,7 +244,15 @@ export function MyShipments() {
                       </div>
                     </td>
                     <td onClick={(e) => e.stopPropagation()}>
-                      <div className={styles.actionCell} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <div className={styles.actionCell}>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className={styles.nextActionButton}
+                          onClick={() => openShipment(r)}
+                        >
+                          {shipmentActionLabel(r)}
+                        </Button>
                         {shouldShowShipmentChat(r) && (
                           <ChatButton
                             requestId={r.id}
@@ -247,15 +262,6 @@ export function MyShipments() {
                             size="sm"
                           />
                         )}
-                        <button
-                          type="button"
-                          className={`${styles.iconBtn} ${styles.chevBtn}`}
-                          onClick={() => openShipment(r)}
-                          title={shipmentActionLabel(r)}
-                          aria-label={`${shipmentActionLabel(r)} for shipment ${r.id}`}
-                        >
-                          <HiOutlineChevronRight size={15} />
-                        </button>
                       </div>
                     </td>
                   </tr>
@@ -339,6 +345,7 @@ async function loadWalletShipments(deliveryEscrow, account) {
 
       const milestones = await deliveryEscrow.getMilestones(id);
       const milestoneRows = Array.from(milestones || []);
+      const milestoneStatuses = milestoneRows.map((milestone) => Number(milestone.status ?? milestone[6]));
 
       return {
         id: Number(request.requestId ?? request[0]),
@@ -359,6 +366,8 @@ async function loadWalletShipments(deliveryEscrow, account) {
         hasActiveProposal,
         hasAnyActiveProposal,
         ownHistoricalProposals,
+        hasSubmittedProof: milestoneStatuses.includes(2),
+        hasCarrierCheckpointAction: milestoneStatuses.includes(1) || milestoneStatuses.includes(4),
       };
     }),
   );
@@ -382,9 +391,42 @@ function shouldShowShipmentChat(row) {
 }
 
 function shipmentActionLabel(row) {
+  const attention = shipmentAttention(row);
+  if (attention) return attention.label;
   if (row.hasActiveProposal) return 'Open active proposal';
   if (row.isShipper || row.isCarrier) return 'Open shipment timeline';
   return 'View proposal history';
+}
+
+function shipmentRelationshipLabel(row) {
+  if (row.isShipper && row.isCarrier) return 'You are the shipper and carrier';
+  if (row.isShipper) return 'You are the shipper';
+  if (row.isCarrier) return 'You are the carrier';
+  if (row.hasActiveProposal) return 'You proposed this delivery';
+  return 'Your proposal history';
+}
+
+function matchesShipmentView(row, view) {
+  if (view === 'attention') return Boolean(shipmentAttention(row));
+  if (view === 'shipper') return row.isShipper;
+  if (view === 'carrier') return row.isCarrier || row.hasActiveProposal || row.ownHistoricalProposals.length > 0;
+  return true;
+}
+
+function shipmentAttention(row) {
+  if (row.isShipper && row.status === 'Open' && row.hasAnyActiveProposal) {
+    return { label: 'Review proposals' };
+  }
+  if (row.isShipper && row.hasSubmittedProof) {
+    return { label: 'Review proof' };
+  }
+  if (row.isShipper && ['Funded', 'InProgress'].includes(row.status) && row.deadlineMs < Date.now()) {
+    return { label: 'Review refund' };
+  }
+  if (row.isCarrier && ['Funded', 'InProgress'].includes(row.status) && row.hasCarrierCheckpointAction) {
+    return { label: 'Submit proof' };
+  }
+  return null;
 }
 
 function shipmentStatus(row) {

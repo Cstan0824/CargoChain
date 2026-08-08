@@ -273,7 +273,9 @@ async function getBlockTimestamp(provider, blockNumber) {
 
 function formatAmount(value) {
   try {
-    return Number(formatEther(value)).toLocaleString(undefined, { maximumFractionDigits: 4 });
+    const [whole, fraction = ''] = formatEther(value).split('.');
+    const trimmedFraction = fraction.slice(0, 4).replace(/0+$/, '');
+    return trimmedFraction ? `${whole}.${trimmedFraction}` : whole;
   } catch {
     return '0';
   }

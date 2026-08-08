@@ -94,7 +94,7 @@ export function Messages() {
   useEffect(() => {
     const wallet = account?.toLowerCase();
     const contractAddress = contracts?.deliveryEscrow?.target?.toLowerCase();
-    if (!wallet || !isChatAuthenticated || !chainId || !contractAddress) return undefined;
+    if (!supabase || !wallet || !isChatAuthenticated || !chainId || !contractAddress) return undefined;
 
     const channel = supabase.channel(`realtime_conversations_${wallet}`);
     channel

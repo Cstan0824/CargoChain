@@ -10,6 +10,7 @@ import { supabase } from '../lib/supabaseClient';
  * Ordered by last_message_at DESC (nulls last), then created_at DESC.
  */
 export async function listConversations({ chainId, contractAddress }) {
+  if (!supabase) throw new Error('Private chat is not configured for this environment.');
   const activeChainId = Number(chainId);
   const activeContractAddress = String(contractAddress || '').toLowerCase();
   if (!Number.isInteger(activeChainId) || activeChainId <= 0 || !/^0x[0-9a-f]{40}$/.test(activeContractAddress)) {
@@ -36,6 +37,7 @@ export async function listConversations({ chainId, contractAddress }) {
  * Ordered by created_at ASC.
  */
 export async function getConversationMessages(conversationId) {
+  if (!supabase) throw new Error('Private chat is not configured for this environment.');
   if (!conversationId) return [];
 
   const { data, error } = await supabase
@@ -55,6 +57,7 @@ export async function getConversationMessages(conversationId) {
  * Retrieves a single conversation by ID if permitted by Supabase RLS.
  */
 export async function getConversationById(conversationId) {
+  if (!supabase) throw new Error('Private chat is not configured for this environment.');
   if (!conversationId) return null;
 
   const { data, error } = await supabase

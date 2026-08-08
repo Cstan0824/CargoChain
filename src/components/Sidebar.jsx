@@ -1,10 +1,9 @@
 // src/components/Sidebar.jsx — CargoChain
-// Persistent left rail. Contains the CargoChain logo, 6 nav items, a
-// Connected Wallet card pinned at the bottom, and a "Need help?" card.
+// Persistent left rail. Contains the CargoChain logo, four task-based nav
+// items, and a compact explanation of the two-sided delivery workflow.
 // On <768px the parent Layout collapses it into a drawer.
 
 import { NavLink } from 'react-router-dom';
-import { useState } from 'react';
 import {
   HiOutlineShoppingCart,
   HiOutlineTruck,
@@ -12,12 +11,7 @@ import {
   HiOutlineUserCircle,
 } from 'react-icons/hi2';
 import { logoTextHorizontal } from '../assets';
-import { useWallet } from '../hooks/useWallet.js';
-import { shortAddress } from '../utils/format.js';
-import { useToast } from '../hooks/useToast.js';
 import styles from './Sidebar.module.css';
-
-const CHAIN_NAMES = { 1: 'Mainnet', 11155111: 'Sepolia', 1337: 'Ganache', 5777: 'Ganache' };
 
 // Top-level destinations only. Track, Create Request, and Wallet are
 // reached through their list-page actions (My Shipments → Track, Profile
@@ -31,30 +25,6 @@ const NAV = [
 ];
 
 export function Sidebar({ onNavigate }) {
-  const { account, chainId } = useWallet();
-  const { show } = useToast();
-  const [copied, setCopied] = useState(false);
-
-  const chain = CHAIN_NAMES[chainId] || (chainId != null ? `Chain ${chainId}` : '—');
-
-  const handleCopy = async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!account) return;
-    try {
-      await navigator.clipboard.writeText(account);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
-    } catch {
-      show('Could not copy to clipboard', 'error');
-    }
-  };
-
-  const handleDisconnect = (e) => {
-    e.preventDefault();
-    show('Disconnect is a MetaMask-level action. Lock MetaMask to revoke access.', 'info');
-  };
-
   return (
     <aside className={styles.sidebar} aria-label="Primary navigation">
       <div className={styles.brand}>
@@ -79,52 +49,13 @@ export function Sidebar({ onNavigate }) {
       </nav>
 
       <div className={styles.bottomStack}>
-        <div className={styles.walletCard}>
-          <div className={styles.walletHeader}>
-            <span className={styles.walletLabel}>Connected Wallet</span>
-            {account && (
-              <button
-                type="button"
-                className={styles.copyBtn}
-                onClick={handleCopy}
-                title={copied ? 'Copied!' : 'Copy address'}
-                aria-label="Copy wallet address"
-              >
-                {/* Inline "two-rectangle" copy icon — no flipped-asset hack */}
-                <svg
-                  className={styles.copyIcon}
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  aria-hidden="true"
-                >
-                  <rect x="9" y="9" width="11" height="11" rx="2" />
-                  <path d="M5 15V6a2 2 0 0 1 2-2h9" />
-                </svg>
-              </button>
-            )}
-          </div>
-          <div className={styles.walletAddr}>
-            {account ? shortAddress(account) : 'Not connected'}
-          </div>
-          <div className={styles.networkRow}>
-            <span className={styles.networkLabel}>Network</span>
-            <span className={styles.networkPill}>
-              <span className={styles.networkDot} /> {chain}
-            </span>
-          </div>
-          <button type="button" className={styles.disconnectBtn} onClick={handleDisconnect}>
-            Disconnect
-          </button>
-        </div>
-
         <div className={styles.helpCard}>
-          <div className={styles.helpTitle}>Need help?</div>
+          <div className={styles.helpTitle}>How CargoChain works</div>
           <div className={styles.helpBody}>
-            Read our guide or <a href="#" className={styles.helpLink}>contact support</a>
+            Create a request as a shipper, or propose a delivery plan as a carrier. The same wallet can do both.
           </div>
         </div>
       </div>
     </aside>
   );
 }
-

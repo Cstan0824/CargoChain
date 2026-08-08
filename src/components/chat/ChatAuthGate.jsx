@@ -4,7 +4,6 @@ import {
   HiOutlineChatBubbleLeftRight,
   HiOutlineExclamationTriangle,
   HiOutlineLockClosed,
-  HiOutlineWallet,
 } from 'react-icons/hi2';
 import { useState } from 'react';
 import { useWallet } from '../../context/Web3Context';
@@ -16,7 +15,7 @@ import styles from './ChatAuthGate.module.css';
 const CONFIGURED_CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID || 1337);
 
 export function ChatAuthGate({ children }) {
-  const { account, walletChainId, connect, busy: walletBusy } = useWallet();
+  const { account, walletChainId, connect } = useWallet();
   const { authStatus, authError, authenticateChat } = useChatAuth();
   const { displayName, isRegistered } = useUserProfile();
   const [signing, setSigning] = useState(false);
@@ -40,11 +39,7 @@ export function ChatAuthGate({ children }) {
         icon={<HiOutlineChatBubbleLeftRight aria-hidden="true" />}
         eyebrow="CargoChain Messages"
         title="Delivery conversations, in one place"
-        body="Connect your wallet to view the conversations tied to your delivery proposals and shipments."
-        actionLabel={walletBusy ? 'Connecting wallet…' : 'Connect wallet'}
-        actionIcon={<HiOutlineWallet aria-hidden="true" />}
-        onAction={connect}
-        disabled={walletBusy}
+        body="Use the Connect Wallet button in the header to view the conversations tied to your delivery proposals and shipments."
       />
     );
   }

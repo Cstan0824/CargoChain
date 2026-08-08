@@ -95,7 +95,7 @@
   opacity: 1;
 }
 
-/* --- Bottom stack: wallet + help --- */
+/* --- Bottom guidance --- */
 .bottomStack {
   margin-top: auto;
   padding-top: var(--s-4);
@@ -104,125 +104,7 @@
   gap: var(--s-3);
 }
 
-/* --- Wallet card --- */
-.walletCard {
-  background: var(--bg-subtle);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--r-lg);
-  padding: var(--s-4);
-  display: flex;
-  flex-direction: column;
-  gap: var(--s-2);
-}
-
-.walletHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.walletLabel {
-  font-size: var(--fs-xs);
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-weight: var(--fw-semibold);
-}
-
-.copyBtn {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--r-sm);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  transition: background var(--dur-1) var(--ease), transform var(--dur-1) var(--ease);
-}
-.copyBtn:hover { background: var(--bg-surface); }
-.copyBtn:active:not(:disabled) { transform: scale(0.92); }
-/* Extend hit zone to 40x40 minimum without enlarging the visual button */
-.copyBtn::before {
-  content: '';
-  position: absolute;
-  inset: -6px;
-}
-
-.copyIcon {
-  width: 16px;
-  height: 16px;
-  opacity: 0.7;
-  color: var(--text-secondary);
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.walletAddr {
-  font-family: var(--font-mono);
-  font-size: var(--fs-sm);
-  color: var(--text-primary);
-  font-weight: var(--fw-semibold);
-  word-break: break-all;
-}
-
-.networkRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: var(--fs-xs);
-  color: var(--text-secondary);
-  margin-top: 2px;
-}
-
-.networkLabel {
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-weight: var(--fw-medium);
-}
-
-.networkPill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 8px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-pill);
-  font-size: var(--fs-xs);
-  font-weight: var(--fw-semibold);
-  color: var(--text-primary);
-}
-
-.networkDot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--success);
-  box-shadow: 0 0 0 2px var(--success-soft);
-}
-
-.disconnectBtn {
-  margin-top: 4px;
-  padding: 10px 12px;
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-medium);
-  cursor: pointer;
-  transition: background var(--dur-1) var(--ease), transform var(--dur-1) var(--ease);
-}
-.disconnectBtn:hover { background: var(--bg-subtle); }
-.disconnectBtn:active:not(:disabled) { transform: scale(0.96); }
-
-/* --- Help card --- */
+/* --- How it works card --- */
 .helpCard {
   background: var(--primary-soft);
   border-radius: var(--r-lg);
@@ -242,12 +124,6 @@
   line-height: 1.4;
 }
 
-.helpLink {
-  color: var(--primary);
-  font-weight: var(--fw-semibold);
-  text-decoration: none;
-}
-.helpLink:hover { text-decoration: underline; }
 
 /* --- Responsive: drawer --- */
 @media (max-width: 900px) {

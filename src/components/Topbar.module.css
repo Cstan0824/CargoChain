@@ -50,42 +50,6 @@
   margin-right: var(--s-2);
 }
 
-.bellBtn {
-  width: 40px;
-  height: 40px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-pill);
-  cursor: pointer;
-  transition: background var(--dur-1) var(--ease), transform var(--dur-1) var(--ease), box-shadow var(--dur-1) var(--ease);
-}
-.bellBtn:hover {
-  background: var(--bg-subtle);
-  box-shadow: var(--shadow-sm);
-}
-.bellBtn:active:not(:disabled) { transform: scale(0.96); }
-
-.bellIcon {
-  width: 18px;
-  height: 18px;
-}
-
-.avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-  background: var(--bg-subtle);
-  object-fit: cover;
-  cursor: pointer;
-  transition: transform var(--dur-1) var(--ease), box-shadow var(--dur-1) var(--ease);
-}
-.avatar:hover { transform: scale(1.05); box-shadow: var(--shadow-sm); }
-.avatar:active { transform: scale(0.96); }
-
 @media (max-width: 640px) {
   .topbar { flex-direction: column; align-items: flex-start; }
   .right { width: 100%; justify-content: flex-end; }

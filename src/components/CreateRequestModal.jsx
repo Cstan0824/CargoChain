@@ -11,10 +11,12 @@ import {
   HiOutlineTruck,
 } from 'react-icons/hi2';
 import { Button } from './Button.jsx';
+import { ConfirmDialog } from './ConfirmDialog.jsx';
 import { useToast } from '../hooks/useToast.js';
 import { useWallet } from '../hooks/useWallet.js';
 import { useContracts } from '../hooks/useContracts.js';
 import { useUserProfile } from '../hooks/useUserProfile.js';
+import { useConfirmDialog } from '../hooks/useConfirmDialog.js';
 import {
   formatWalletTransactionError,
   resolveWalletSigner,
@@ -31,6 +33,7 @@ export function CreateRequestModal({ isOpen, onClose, onSuccess }) {
   const { signer, provider, connect, busy: walletBusy } = useWallet();
   const { contracts, deployError } = useContracts();
   const { requireRegistration } = useUserProfile();
+  const { confirm: confirmAction, confirmation } = useConfirmDialog();
 
   const [details, setDetails] = useState({
     from: '',
@@ -116,6 +119,17 @@ export function CreateRequestModal({ isOpen, onClose, onSuccess }) {
       return;
     }
 
+    if (!await confirmAction({
+      title: 'Publish this delivery request?',
+      message: 'Carriers can see the route and submit a checkpoint plan. Your ETH is not locked until you select a plan.',
+      details: [
+        { label: 'Planned payment', value: `${reward} ETH` },
+        { label: 'Escrow now', value: '0 ETH' },
+        { label: 'Next step', value: 'Review carrier plans' },
+      ],
+      confirmLabel: 'Publish request',
+    })) return;
+
     setSubmitting(true);
     try {
       const activeSigner = await resolveWalletSigner(signer, connect);
@@ -166,7 +180,14 @@ export function CreateRequestModal({ isOpen, onClose, onSuccess }) {
   if (!isOpen) return null;
 
   return (
-    <div className={styles.overlay} onClick={onClose} aria-modal="true" role="dialog">
+    <div
+      className={styles.overlay}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      aria-modal="true"
+      role="dialog"
+    >
       <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}>
 
         {/* ── Header ── */}
@@ -320,6 +341,7 @@ export function CreateRequestModal({ isOpen, onClose, onSuccess }) {
           </div>
         </div>
       </div>
+      {confirmation && <ConfirmDialog {...confirmation} />}
     </div>
   );
 }

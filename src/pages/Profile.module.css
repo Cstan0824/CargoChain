@@ -8,6 +8,73 @@
   -webkit-font-smoothing: antialiased;
 }
 
+.setupCard {
+  max-width: 820px;
+  display: grid;
+  gap: var(--s-4);
+  background: linear-gradient(135deg, var(--bg-surface), var(--primary-soft));
+}
+
+.setupEyebrow {
+  margin: 0;
+  color: var(--primary);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.setupCard h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--fs-xl);
+  text-wrap: balance;
+}
+
+.setupCard > p:not(.setupEyebrow) {
+  max-width: 64ch;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  text-wrap: pretty;
+}
+
+.setupSteps {
+  display: grid;
+  gap: var(--s-3);
+  margin: 0;
+  padding: var(--s-4);
+  list-style: none;
+  border-radius: var(--r-lg);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+
+.setupSteps li {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: var(--s-2);
+  align-items: center;
+  text-wrap: pretty;
+}
+
+.setupSteps span {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: var(--r-pill);
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+.setupNote { padding-top: var(--s-3); border-top: 1px solid var(--border-soft); }
+
 /* --- Identity --- */
 .identityGrid {
   display: grid;

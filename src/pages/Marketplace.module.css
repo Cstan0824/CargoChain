@@ -7,6 +7,73 @@
   padding-bottom: var(--s-8);
 }
 
+.startCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(260px, 0.65fr);
+  gap: var(--s-6);
+  align-items: center;
+  background: linear-gradient(135deg, var(--bg-surface), var(--primary-soft));
+}
+
+.startEyebrow {
+  margin: 0 0 var(--s-1);
+  color: var(--primary);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.startCard h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--fs-xl);
+  line-height: var(--lh-tight);
+  text-wrap: balance;
+}
+
+.startCard p:not(.startEyebrow) {
+  max-width: 62ch;
+  margin: var(--s-2) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  text-wrap: pretty;
+}
+
+.startSteps {
+  display: grid;
+  gap: var(--s-2);
+  margin: 0;
+  padding: var(--s-4);
+  list-style: none;
+  border-radius: var(--r-lg);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+
+.startSteps li {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: var(--s-2);
+  align-items: center;
+  text-wrap: pretty;
+}
+
+.startSteps span {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: var(--r-pill);
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  font-variant-numeric: tabular-nums;
+}
+
 /* --- Filter bar --- */
 .filterBar {
   padding: var(--s-3);
@@ -477,6 +544,8 @@
 }
 
 @media (max-width: 640px) {
+  .startCard { grid-template-columns: 1fr; gap: var(--s-4); }
+
   .filterRow {
     align-items: stretch;
   }

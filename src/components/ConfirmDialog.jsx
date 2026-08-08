@@ -10,6 +10,8 @@ import styles from './ConfirmDialog.module.css';
 export function ConfirmDialog({
   title,
   message,
+  details = [],
+  warning,
   confirmLabel = 'Confirm',
   cancelLabel = 'Go back',
   tone = 'primary',
@@ -55,6 +57,17 @@ export function ConfirmDialog({
         <div className={styles.content}>
           <h2 id="confirm-dialog-title">{title}</h2>
           <p id="confirm-dialog-message">{message}</p>
+          {details.length > 0 && (
+            <dl className={styles.details}>
+              {details.map((detail) => (
+                <div key={detail.label}>
+                  <dt>{detail.label}</dt>
+                  <dd>{detail.value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+          {warning && <p className={styles.warning}>{warning}</p>}
         </div>
         <div className={styles.actions}>
           <Button ref={cancelButtonRef} variant="secondary" onClick={onCancel}>{cancelLabel}</Button>

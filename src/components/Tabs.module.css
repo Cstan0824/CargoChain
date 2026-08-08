@@ -14,6 +14,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-height: 40px;
   padding: 10px 4px;
   margin-right: var(--s-5);
   background: transparent;

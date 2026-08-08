@@ -93,6 +93,23 @@ export function Marketplace() {
         actions={<Button onClick={() => setIsCreateModalOpen(true)}>Create request</Button>}
       />
 
+      {!account && (
+        <Card className={styles.startCard}>
+          <div>
+            <p className={styles.startEyebrow}>Getting started</p>
+            <h2>Browse first. Connect only when you are ready to act.</h2>
+            <p>
+              Use the wallet button above to connect MetaMask, switch to Ganache, and choose a display name before publishing a request or sending a delivery plan.
+            </p>
+          </div>
+          <ol className={styles.startSteps}>
+            <li><span>1</span>Browse jobs and delivery details.</li>
+            <li><span>2</span>Connect your wallet when you want to act.</li>
+            <li><span>3</span>Use the same wallet to ship goods or carry them.</li>
+          </ol>
+        </Card>
+      )}
+
       <Card className={styles.filterBar} padded={false}>
         <div className={styles.filterRow}>
           <SearchInput
@@ -154,7 +171,7 @@ export function Marketplace() {
                 deployError
                   ? deployError
                   : rows.length === 0
-                    ? 'Published delivery requests will appear here after shipper wallets submit createRequest().'
+                    ? 'Published delivery requests will appear here once a shipper creates them.'
                     : 'No open requests match your current filters. Try clearing the search or picking a different route.'
               }
               action={

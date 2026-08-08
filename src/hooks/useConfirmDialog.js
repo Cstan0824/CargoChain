@@ -17,6 +17,8 @@ export function useConfirmDialog() {
     setConfirmation({
       title: options.title,
       message: options.message,
+      details: options.details || [],
+      warning: options.warning || '',
       confirmLabel: options.confirmLabel || 'Confirm',
       cancelLabel: options.cancelLabel || 'Go back',
       tone: options.tone || 'primary',
