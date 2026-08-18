@@ -9,6 +9,7 @@ Current contract sources:
 | `DeliveryEscrow.sol` | requests, proposals, escrow, milestones, proof, payment, refunds, completion tips | team | ✅ implemented |
 | `LifecycleManager.sol` | amendments, shared negotiation lock, and mutual cancellation | GAN | ✅ implemented |
 | `PaymentEvents.sol` | payment event definitions inherited by `DeliveryEscrow` | Jeremy | ✅ implemented |
+| `ReputationRegistry.sol` | immutable carrier ratings and feedback-tag aggregates | team | ✅ implemented |
 
 Use Solidity `0.8.x`. Run `npm run compile` to verify before committing.
 

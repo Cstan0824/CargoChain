@@ -31,6 +31,9 @@ import { Tabs } from '../components/Tabs.jsx';
 import { Button } from '../components/Button.jsx';
 import { ChatButton } from '../components/chat/ChatButton.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
+import { CarrierRatingPanel } from '../components/CarrierRatingPanel.jsx';
+import { CarrierReputationSummary } from '../components/CarrierReputationSummary.jsx';
+import { CarrierReputationModal } from '../components/CarrierReputationModal.jsx';
 import { useContracts } from '../hooks/useContracts.js';
 import { useToast } from '../hooks/useToast.js';
 import { useWallet } from '../hooks/useWallet.js';
@@ -99,6 +102,7 @@ export function Track() {
   const [proofViewerMilestone, setProofViewerMilestone] = useState(null);
   const [tipScrollRequest, setTipScrollRequest] = useState(0);
   const [focusedAgreement, setFocusedAgreement] = useState(null);
+  const [reputationCarrier, setReputationCarrier] = useState(null);
   const [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1000));
   const { confirm: confirmAction, confirmation } = useConfirmDialog();
   const amendmentSectionRef = useRef(null);
@@ -1111,6 +1115,7 @@ export function Track() {
           onAccept={acceptProposal}
           onReject={rejectProposal}
           walletIdentities={walletIdentities}
+          onOpenCarrierReputation={setReputationCarrier}
           openShipment
           showHistory={false}
         />
@@ -1136,6 +1141,10 @@ export function Track() {
                 onVerify={verifyMilestone}
                 onSubmitProof={submitMilestoneProof}
                 showCompletionCta={isShipper && shipment.status === 'Completed'}
+                ratingRequestId={shipment.id}
+                ratingCarrier={shipment.carrier}
+                ratingIsShipper={isShipper}
+                ratingStatus={shipment.status}
                 tipSent={shipment.tipAmount > 0n}
                 onOpenTip={openCompletionTip}
               />
@@ -1164,6 +1173,7 @@ export function Track() {
                 proposedAmount={shipment.proposedAmount}
                 walletIdentities={walletIdentities}
                 collapsedByDefault={shipment.status === 'Open'}
+                onOpenCarrierReputation={setReputationCarrier}
               />
             )}
           </div>
@@ -1233,6 +1243,12 @@ export function Track() {
         <ProofViewerModal
           milestone={proofViewerMilestone}
           onClose={() => setProofViewerMilestone(null)}
+        />
+      )}
+      {reputationCarrier && (
+        <CarrierReputationModal
+          carrier={reputationCarrier}
+          onClose={() => setReputationCarrier(null)}
         />
       )}
       {confirmation && <ConfirmDialog {...confirmation} />}
@@ -2613,6 +2629,7 @@ function ProposalReview({
   onAccept,
   onReject,
   walletIdentities,
+  onOpenCarrierReputation,
   openShipment = false,
   showHistory = true,
 }) {
@@ -2696,6 +2713,7 @@ function ProposalReview({
                 key={proposal.id}
                 proposal={proposal}
                 walletIdentities={walletIdentities}
+                onOpenCarrierReputation={onOpenCarrierReputation}
                 onOpen={() => setSelectedProposal(proposal)}
               />
             ))}
@@ -2748,6 +2766,7 @@ function ProposalReview({
           actionStage={actionStage}
           onAccept={onAccept}
           onReject={onReject}
+          onOpenCarrierReputation={onOpenCarrierReputation}
           onClose={() => setSelectedProposal(null)}
         />
       )}
@@ -2755,12 +2774,13 @@ function ProposalReview({
   );
 }
 
-function ProposalSummaryCard({ proposal, status, onOpen, walletIdentities }) {
+function ProposalSummaryCard({ proposal, status, onOpen, walletIdentities, onOpenCarrierReputation }) {
   return (
     <button type="button" className={styles.proposalSummaryCard} onClick={onOpen}>
       <span className={styles.proposalSummaryIdentity}>
         <span className={styles.proposalCarrierLabel}>Carrier proposal #{proposal.id + 1}</span>
         <strong title={proposal.carrier}>{walletIdentityLabel(proposal.carrier, walletIdentities)}</strong>
+        <CarrierReputationSummary carrier={proposal.carrier} compact onOpenProfile={onOpenCarrierReputation} />
       </span>
       <span className={styles.proposalSummaryMeta}>
         <span>{formatDate(proposal.createdAt)}</span>
@@ -2774,7 +2794,14 @@ function ProposalSummaryCard({ proposal, status, onOpen, walletIdentities }) {
   );
 }
 
-function ProposalHistoryPanel({ requestId, proposals, proposedAmount, walletIdentities, collapsedByDefault = false }) {
+function ProposalHistoryPanel({
+  requestId,
+  proposals,
+  proposedAmount,
+  walletIdentities,
+  collapsedByDefault = false,
+  onOpenCarrierReputation,
+}) {
   const [dateSort, setDateSort] = useState('');
   const [milestoneSort, setMilestoneSort] = useState('');
   const [selectedProposal, setSelectedProposal] = useState(null);
@@ -2816,6 +2843,7 @@ function ProposalHistoryPanel({ requestId, proposals, proposedAmount, walletIden
                 onMilestoneSort={setMilestoneSort}
                 onOpen={setSelectedProposal}
                 walletIdentities={walletIdentities}
+                onOpenCarrierReputation={onOpenCarrierReputation}
               />
             </div>
           </details>
@@ -2838,6 +2866,7 @@ function ProposalHistoryPanel({ requestId, proposals, proposedAmount, walletIden
               onMilestoneSort={setMilestoneSort}
               onOpen={setSelectedProposal}
               walletIdentities={walletIdentities}
+              onOpenCarrierReputation={onOpenCarrierReputation}
             />
           </>
         )}
@@ -2855,6 +2884,7 @@ function ProposalHistoryPanel({ requestId, proposals, proposedAmount, walletIden
           actionStage="idle"
           onAccept={() => {}}
           onReject={() => {}}
+          onOpenCarrierReputation={onOpenCarrierReputation}
           readOnly
           onClose={() => setSelectedProposal(null)}
         />
@@ -2872,6 +2902,7 @@ function ProposalHistoryContent({
   onMilestoneSort,
   onOpen,
   walletIdentities,
+  onOpenCarrierReputation,
 }) {
   return proposals.length === 0 ? (
     <div className={styles.proposalHistoryEmpty}>No earlier carrier proposal was recorded for this request.</div>
@@ -2906,6 +2937,7 @@ function ProposalHistoryContent({
                   proposal={proposal}
                   status={proposal.status}
                   walletIdentities={walletIdentities}
+                  onOpenCarrierReputation={onOpenCarrierReputation}
                   onOpen={() => onOpen(proposal)}
                 />
               ))}
@@ -2931,6 +2963,7 @@ function ProposalDetailModal({
   actionStage,
   onAccept,
   onReject,
+  onOpenCarrierReputation,
   readOnly = false,
   onClose,
 }) {
@@ -2976,6 +3009,7 @@ function ProposalDetailModal({
             <span className={styles.proposalCarrierLabel}>Carrier proposal #{proposal.id + 1}</span>
             <strong id="proposal-modal-title" title={proposal.carrier}>{walletIdentityLabel(proposal.carrier, walletIdentities)}</strong>
             <span className={styles.proposalCreated}>Submitted {formatDate(proposal.createdAt)}</span>
+            <CarrierReputationSummary carrier={proposal.carrier} onOpenProfile={onOpenCarrierReputation} />
           </div>
           <div className={styles.proposalModalHeaderActions}>
             {proposal.status !== 'Active' && (
@@ -3102,6 +3136,10 @@ function TimelinePanel({
   canSubmitProof,
   onSubmitProof,
   showCompletionCta,
+  ratingRequestId,
+  ratingCarrier,
+  ratingIsShipper,
+  ratingStatus,
   tipSent,
   onOpenTip,
 }) {
@@ -3145,6 +3183,14 @@ function TimelinePanel({
             })}
           </ol>
         </div>
+        {ratingRequestId && ratingCarrier && ratingStatus === 'Completed' && (
+          <CarrierRatingPanel
+            requestId={ratingRequestId}
+            carrier={ratingCarrier}
+            isShipper={ratingIsShipper}
+            status={ratingStatus}
+          />
+        )}
         {showCompletionCta && (
           <section className={styles.timelineCompletionCta} aria-labelledby="timeline-completion-cta-title">
             <div className={styles.timelineCompletionCtaIcon} aria-hidden="true">

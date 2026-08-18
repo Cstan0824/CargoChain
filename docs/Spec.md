@@ -6,7 +6,7 @@
 
 CargoChain is a local-Ganache logistics DApp for milestone-based ETH escrow. A shipper creates a delivery request, carriers compete with milestone proposals, the shipper funds one proposal, the assigned carrier submits photo proof, and the shipper releases payment checkpoint by checkpoint.
 
-The current build also supports wallet display names, request-scoped private chat, mutual cancellation, negotiated amendments, immutable checkpoint IDs, and a one-time completion tip.
+The current build also supports wallet display names, request-scoped private chat, mutual cancellation, negotiated amendments, immutable checkpoint IDs, a one-time completion tip, and structured carrier reputation.
 
 ## 2. Stack
 
@@ -30,6 +30,7 @@ Sepolia, QR recipient confirmation, auto-release dispute windows, and carrier re
 | `DeliveryEscrow.sol` | Requests, proposals, accepted shipment state, proof state, milestone payment, refund accounting, stable checkpoint records, and tips. |
 | `LifecycleManager.sol` | Amendment/cancellation records, response deadlines, shared negotiation lock, and restricted calls to escrow finalisation hooks. |
 | `PaymentEvents.sol` | Payment-related events inherited by `DeliveryEscrow`. |
+| `ReputationRegistry.sol` | Immutable 1-5 completed-request ratings and carrier feedback-tag aggregates. |
 
 Deployment order:
 
@@ -37,9 +38,11 @@ Deployment order:
 UserRegistry → LifecycleManager → DeliveryEscrow(registry, manager)
                                       ↓
               LifecycleManager.initializeDeliveryEscrow(escrow)
+                                      ↓
+                    ReputationRegistry(escrow)
 ```
 
-The frontend validates that the deployed manager points back to the current escrow address. A matching chain ID alone is not sufficient because local Ganache deployments can be stale.
+The frontend validates that the deployed manager and reputation registry both point back to the current escrow address. A matching chain ID alone is not sufficient because local Ganache deployments can be stale.
 
 ## 4. Core data and state
 
@@ -68,6 +71,10 @@ PendingProof / Rejected → Submitted → Paid
 ```
 
 The shipper can reject a submitted proof, returning it to `Rejected` for carrier resubmission. A checkpoint is paid only after shipper verification.
+
+### Reputation
+
+`ReputationRegistry` accepts one permanent 1-5 rating from the shipper after a request reaches `Completed`, plus up to three predefined feedback tags. Carrier profiles aggregate those ratings and derive completion/timing outcomes from `DeliveryEscrow` request records and `RequestCompleted`/`RequestExpired` events.
 
 ## 5. Agreement rules
 
@@ -122,7 +129,7 @@ The conversation identity includes chain ID, contract address, request ID, and c
 | `/shipments/:id/propose` | Carrier proposal editor, active proposal, and history. |
 | `/track/:id` | Tracking, proof, payments, amendments, cancellation, and history. |
 | `/messages` | Request-scoped private conversations and activity timeline. |
-| `/profile` | Registered profile and payment/transaction presentation. |
+| `/profile` | Connected wallet profile, payment/transaction presentation, and its own verified carrier feedback aggregates. |
 
 ## 8. Local run and verification
 

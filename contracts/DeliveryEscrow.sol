@@ -171,6 +171,17 @@ contract DeliveryEscrow is PaymentEvents {
     );
     event MilestoneRejected(uint256 indexed requestId, uint256 indexed milestoneId, string reason);
     event RequestCancelled(uint256 indexed requestId, address indexed shipper);
+    event RequestCompleted(
+        uint256 indexed requestId,
+        address indexed carrier,
+        uint256 completedAt
+    );
+    event RequestExpired(
+        uint256 indexed requestId,
+        address indexed carrier,
+        uint256 deadline,
+        uint256 expiredAt
+    );
     event RequestAmended(
         uint256 indexed requestId,
         uint256 previousDeadline,
@@ -645,6 +656,12 @@ contract DeliveryEscrow is PaymentEvents {
         if (activeButExpired) {
             require(block.timestamp > delivery.deadline, "request deadline has not passed");
             delivery.status = RequestStatus.Expired;
+            emit RequestExpired(
+                requestId,
+                delivery.carrier,
+                delivery.deadline,
+                block.timestamp
+            );
         }
 
         uint256 remaining = escrowBalance(requestId);
@@ -993,7 +1010,8 @@ contract DeliveryEscrow is PaymentEvents {
             remainingBeforePayment == amount
         );
 
-        if (_allMilestonesPaid(requestId)) {
+        bool completed = _allMilestonesPaid(requestId);
+        if (completed) {
             delivery.status = RequestStatus.Completed;
         }
 
@@ -1001,6 +1019,9 @@ contract DeliveryEscrow is PaymentEvents {
         require(ok, "carrier payment failed");
         emit MilestonePaid(requestId, milestoneId, delivery.carrier, amount);
         emit PaymentReleased(requestId, milestoneId, amount, delivery.carrier);
+        if (completed) {
+            emit RequestCompleted(requestId, delivery.carrier, block.timestamp);
+        }
     }
 
     function _insertAmendmentMilestone(
