@@ -1,7 +1,7 @@
 # CargoChain Reputation Module Proposal
 
-**Status:** Planned — not yet implemented  
-**Scope:** Carrier reputation first; shipper reputation is a future extension  
+**Status:** Implemented initial carrier-reputation module
+**Scope:** Carrier reputation first; shipper reputation is a future extension
 **Primary goal:** Help shippers evaluate carrier reliability without exposing unrelated delivery information
 
 ## 1. Objective
@@ -219,7 +219,7 @@ It will not:
 
 ### 5.2 Proposed contract interface
 
-The final names should be confirmed against the current escrow API during Phase 1. The planned interface is:
+The implemented interface is:
 
 ```solidity
 function submitCarrierRating(
@@ -236,13 +236,7 @@ function hasRated(uint256 requestId)
 function getRating(uint256 requestId)
     external
     view
-    returns (
-        address shipper,
-        address carrier,
-        uint8 score,
-        uint16 tagMask,
-        uint256 createdAt
-    );
+    returns (Rating memory);
 
 function getCarrierRatingSummary(address carrier)
     external

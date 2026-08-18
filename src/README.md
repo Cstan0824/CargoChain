@@ -14,7 +14,7 @@ ToastProvider
 ```
 
 - `Web3Context` maintains the direct RPC provider, MetaMask browser provider, signer, account, and chain state.
-- `ContractsContext` loads `DeliveryEscrow`, `LifecycleManager`, and `UserRegistry` from Truffle artifacts and validates their current deployment linkage.
+- `ContractsContext` loads `DeliveryEscrow`, `LifecycleManager`, `ReputationRegistry`, and `UserRegistry` from Truffle artifacts and validates their current deployment linkage.
 - `UserProfileContext` reads/refreshes the connected wallet's on-chain registration and owns the registration modal flow.
 - `ChatAuthContext` manages SIWE chat authentication and clears sessions when wallet account/network changes.
 

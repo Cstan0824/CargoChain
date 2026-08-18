@@ -27,6 +27,7 @@
 | Stable order | Newly inserted checkpoints receive new immutable IDs and alter only the execution-order list. | `getMilestoneExecutionOrder` |
 | Cancellation | Either accepted participant may request cancellation; counterparty decision, withdrawal, expiry, notes, and pending-proof protection are supported. | `LifecycleManager` |
 | Tip | Completed shipment may receive one optional shipper tip paid directly to the carrier. | `tipCarrier` |
+| Reputation | Shipper can publish one immutable 1-5 structured rating for a completed request; proposal and track workflows show a read-only carrier reputation modal, while `/profile` shows the connected wallet's aggregates. | `ReputationRegistry`, `CarrierReputationModal`, `CarrierRatingPanel` |
 | Chat | Request-scoped SIWE-authenticated chat in Supabase plus a filtered on-chain activity timeline. | `server/`, `Messages`, `chatTimeline` |
 
 ## Current exclusions
@@ -34,7 +35,7 @@
 - No public testnet deployment in v1; Ganache is the supported chain.
 - No recipient QR verification, auto-release dispute window, carrier republishing, or custody transfer.
 - No general marketplace chat: conversations are restricted to the request shipper and the relevant carrier.
-- No custom token, reputation/staking, or multi-carrier collaboration after proposal acceptance.
+- No custom token, staking, or multi-carrier collaboration after proposal acceptance.
 
 ## Verification baseline
 
@@ -44,4 +45,4 @@ npm run test:frontend
 npm run build
 ```
 
-The latest recorded verification completed with 68 passing Truffle tests and 35 passing Vitest tests. See [`test/README.md`](../test/README.md) for suite ownership and coverage, and [`docs/Agreement-Changes.md`](Agreement-Changes.md) for the negotiated-shipment rules.
+The latest recorded verification completed with 72 passing Truffle tests and 40 passing Vitest tests. See [`test/README.md`](../test/README.md) for suite ownership and coverage, and [`docs/Agreement-Changes.md`](Agreement-Changes.md) for the negotiated-shipment rules.

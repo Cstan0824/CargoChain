@@ -221,8 +221,8 @@ export function ChatAuthProvider({ children }) {
       if (!nonce) throw new Error('Failed to retrieve authentication nonce from server');
 
       // 2. Construct SIWE Message (EIP-4361)
-      const domain = window.location.host || '127.0.0.1:5173';
-      const origin = window.location.origin || 'http://127.0.0.1:5173';
+      const domain = window.location.host || '127.0.0.1:5174';
+      const origin = window.location.origin || 'http://127.0.0.1:5174';
       const now = new Date();
       const expirationTime = new Date(now.getTime() + 5 * 60 * 1000); // 5 minutes
 

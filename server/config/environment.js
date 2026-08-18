@@ -40,7 +40,7 @@ const userRegistryAddress = getCurrentContractAddress('UserRegistry', chainId);
 
 const config = Object.freeze({
   port: parseInt(process.env.PORT || '3000', 10),
-  clientOrigin: (process.env.CLIENT_ORIGIN || 'http://127.0.0.1:5173').replace(/\/$/, ''),
+  clientOrigin: (process.env.CLIENT_ORIGIN || 'http://127.0.0.1:5174').replace(/\/$/, ''),
   ganacheRpcUrl: process.env.GANACHE_RPC_URL || `http://${ganacheHost}:${ganachePort}`,
   chainId: isNaN(chainId) ? 0 : chainId,
   deliveryEscrowAddress: deliveryEscrowAddress ? deliveryEscrowAddress.toLowerCase() : '',

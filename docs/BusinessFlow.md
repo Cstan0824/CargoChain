@@ -112,9 +112,13 @@ After the final checkpoint is paid, the shipper may make one optional tip paymen
 - The conversation also shows verified activity derived from escrow/lifecycle events, filtered to the exact carrier. Another carrier's proposal activity is not shown in this conversation.
 - Pending amendment/cancellation activity provides a review action that navigates to the correct Track section.
 
-## 9. Out of scope
+## 9. Carrier reputation
+
+After a request reaches `Completed`, its shipper can submit one permanent 1-5 rating and up to three predefined feedback tags for the accepted carrier. A read-only reputation modal combines these verified ratings with aggregate completion, timing, expiry, and accepted-cancellation outcomes during proposal review, and `/profile` shows the connected wallet's own aggregates. It does not reveal route, cargo, proof, escrow, request ID, or chat details.
+
+## 10. Out of scope
 
 - Carrier republishing/recovery and custody transfer.
 - QR recipient verification.
 - Automatic dispute-window payment release.
-- General marketplace messages, reputation, staking, and token payments.
+- General marketplace messages, staking, and token payments.

@@ -464,12 +464,16 @@ contract('DeliveryEscrow', (accounts) => {
     await createFundedRequest(escrow);
     await advancePastDeadline(escrow);
 
-    await escrow.refundRemaining(1, { from: shipper });
+    const receipt = await escrow.refundRemaining(1, { from: shipper });
 
     const request = await escrow.getRequest(1);
+    const expiredEvent = receipt.logs.find((log) => log.event === 'RequestExpired');
     assert.equal(Number(request.status), 7); // Refunded
     assert.equal(request.releasedAmount.toString(), '0');
     assert.equal(request.refundedAmount.toString(), oneEth);
+    assert.equal(Boolean(expiredEvent), true);
+    assert.equal(expiredEvent.args.requestId.toString(), '1');
+    assert.equal(expiredEvent.args.carrier, carrier);
     assert.equal((await web3.eth.getBalance(escrow.address)).toString(), '0');
   });
 

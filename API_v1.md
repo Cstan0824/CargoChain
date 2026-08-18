@@ -9,11 +9,13 @@
 2. Deploy `LifecycleManager` without arguments.
 3. Deploy `DeliveryEscrow` with the registry and manager addresses.
 4. Call `LifecycleManager.initializeDeliveryEscrow` once with the escrow address.
+5. Deploy `ReputationRegistry` with the escrow address.
 
 ```solidity
 LifecycleManager manager = new LifecycleManager();
 DeliveryEscrow escrow = new DeliveryEscrow(address(userRegistry), address(manager));
 manager.initializeDeliveryEscrow(address(escrow));
+ReputationRegistry reputation = new ReputationRegistry(address(escrow));
 ```
 
 `DeliveryEscrow` rejects zero registry or manager addresses. `LifecycleManager` records its deployer as the one-time initializer and rejects a zero escrow link.
@@ -313,7 +315,7 @@ function verifyMilestone(
 - **Validation:** Milestone exists and is `Submitted`; its predecessor in the current execution order is `Paid`; a rejection requires a non-empty reason.
 - **Approval effects:** Marks the milestone `Verified`, then `Paid`; increments request `releasedAmount`; decreases the shipper's locked total; transfers the payout to the carrier; sets request to `Completed` after the final payout. The contributing request count decreases only when remaining escrow reaches zero.
 - **Rejection effects:** Marks the milestone `Rejected` and stores the reason for carrier resubmission.
-- **Approval events:** `MilestoneVerified`, `MilestonePaid`, `PaymentReleased`.
+- **Approval events:** `MilestoneVerified`, `MilestonePaid`, `PaymentReleased`, and `RequestCompleted` after the final checkpoint payment.
 - **Rejection events:** `MilestoneVerified`, `MilestoneRejected`.
 - **Frontend:** Shipper proof review / tracking.
 
@@ -352,7 +354,7 @@ function verifyMilestone(
 - **Caller:** Registered request shipper only.
 - **Allowed states:** `Cancelled`, `Expired`, or deadline-passed `Funded`/`InProgress`.
 - **Effects:** Adds the remaining value to `refundedAmount`, sets status to `Refunded`, decreases the shipper's locked total and active count, then transfers the remaining ETH to the shipper.
-- **Event:** `RefundIssued(requestId, shipper, amount)`.
+- **Events:** `RequestExpired(requestId, carrier, deadline, expiredAt)` when an active request first enters expiry, then `RefundIssued(requestId, shipper, amount)`.
 - **Frontend:** Shipper refund action.
 
 ### `tipCarrier(uint256 requestId) payable`
@@ -532,6 +534,8 @@ event MilestoneVerified(uint256 indexed requestId, uint256 indexed milestoneId, 
 event MilestonePaid(uint256 indexed requestId, uint256 indexed milestoneId, address indexed carrier, uint256 amount);
 event MilestoneRejected(uint256 indexed requestId, uint256 indexed milestoneId, string reason);
 event RequestCancelled(uint256 indexed requestId, address indexed shipper);
+event RequestCompleted(uint256 indexed requestId, address indexed carrier, uint256 completedAt);
+event RequestExpired(uint256 indexed requestId, address indexed carrier, uint256 deadline, uint256 expiredAt);
 event RequestAmended(uint256 indexed requestId, uint256 previousDeadline, uint256 newDeadline, uint256 additionalFunding, uint256 newMilestoneCount);
 event EscrowFunded(uint256 indexed requestId, uint256 amount);
 event PaymentReleased(uint256 indexed requestId, uint256 indexed milestoneId, uint256 amount, address indexed recipient);
@@ -541,10 +545,78 @@ event CarrierTipped(uint256 indexed requestId, address indexed shipper, address 
 
 ---
 
+## ReputationRegistry.sol
+
+`ReputationRegistry` records one immutable, structured shipper rating for a completed request. It does not assign roles and does not store cargo, route, proof, escrow, chat, or free-form review data. Objective delivery outcomes remain derived from `DeliveryEscrow` and `LifecycleManager` records/events.
+
+### Constructor and constants
+
+```solidity
+constructor(address deliveryEscrowAddress)
+deliveryEscrow() view returns (address)
+MIN_SCORE() view returns (uint8) // 1
+MAX_SCORE() view returns (uint8) // 5
+TAG_COUNT() view returns (uint8) // 8
+MAX_TAGS_PER_RATING() view returns (uint8) // 3
+ALLOWED_TAG_MASK() view returns (uint16) // 0x00ff
+```
+
+The constructor rejects a zero escrow address. `deliveryEscrow` is immutable and the frontend validates that it matches the active `DeliveryEscrow` artifact before enabling contract use.
+
+### `submitCarrierRating(uint256 requestId, uint8 score, uint16 tagMask)`
+
+- **Purpose:** Publish one permanent structured rating for the accepted carrier on a completed request.
+- **Caller:** That request's shipper only. The caller does not need a role.
+- **Parameters:** `score` is an integer from `1` through `5`. `tagMask` encodes predefined feedback tags; only bits `0` through `7` are permitted and at most three may be selected.
+- **Validation:** The request must be `Completed`, have an assigned carrier, and have no earlier rating.
+- **Effects:** Stores the request rating, increments the carrier's rating count and total score, and increments the selected tag aggregates.
+- **Reverts:** `request already rated`, `score must be 1 to 5`, `unknown feedback tag`, `too many feedback tags`, `request is not completed`, `caller is not request shipper`, or `request has no carrier`.
+- **Event:** `CarrierRated`.
+- **Frontend:** Completed shipment `Track` view, read-only carrier reputation modal from proposal links, and connected-wallet `/profile` reputation summary.
+
+### Read functions
+
+```solidity
+hasRated(uint256 requestId) view returns (bool)
+getRating(uint256 requestId) view returns (Rating memory)
+getCarrierRatingSummary(address carrier)
+    view returns (uint256 ratingCount, uint256 totalScore)
+getCarrierTagCounts(address carrier) view returns (uint256[] memory counts)
+```
+
+`Rating` returns the shipper, carrier, rating timestamp, feedback-tag bitmask, and score. An unrated request returns the default zero-value struct. Tag counts are returned in bit-index order:
+
+| Bit | Feedback tag |
+|---|---|
+| 0 | Good communication |
+| 1 | Clear milestone updates |
+| 2 | Careful cargo handling |
+| 3 | Responsive |
+| 4 | Professional service |
+| 5 | Communication could improve |
+| 6 | Milestone updates could improve |
+| 7 | Cargo handling concern |
+
+### Events
+
+```solidity
+event CarrierRated(
+    uint256 indexed requestId,
+    address indexed shipper,
+    address indexed carrier,
+    uint8 score,
+    uint16 tagMask,
+    uint256 createdAt
+);
+```
+
+---
+
 ## Changelog
 
 | Date | Change |
 |---|---|
+| 2026-08-18 | Added `ReputationRegistry`: one immutable structured shipper rating per completed request, carrier rating/tag aggregates, read-only reputation modal/profile summary UI, and completion/expiry delivery events used by objective performance reporting. |
 | 2026-08-03 | Completed verification coverage for mutual cancellation, staged amendment refunds, response expiry, stable checkpoint ordering, tip limits, and lifecycle authorization. Documented the chat timeline's read-only use of escrow and lifecycle events. |
 | 2026-08-03 | Stabilised milestone identity: amendment insertions now alter a dedicated execution-order list, while each milestone keeps its original ID, proof/payment history, and event references. Added order views and `APPEND_MILESTONE_ID`. |
 | 2026-08-02 | Added Phase 5 shipment amendments: unilateral shipper extensions, mutually approved deadline/funding changes, milestone top-ups and insertion, staged-fund refunds, stale-progress protection, and tracking-page UI/history. |
