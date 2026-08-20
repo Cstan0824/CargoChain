@@ -1,6 +1,6 @@
-# CargoChain — Current Technical Specification
+# CargoChain — Technical Specification
 
-> Assignment implementation specification. This document reflects the deployed v1 architecture; [`API_v1.md`](../API_v1.md) is the authoritative function-level reference.
+> Assignment specification. [`API_v1.md`](../API_v1.md) remains the authoritative function-level reference for the currently implemented contracts. The IPFS proof-storage design is planned, not currently implemented; see [IPFS-Implementation-Plan.md](IPFS-Implementation-Plan.md).
 
 ## 1. Scope
 
@@ -17,7 +17,7 @@ The current build also supports wallet display names, request-scoped private cha
 | Browser app | React 18, Vite, JavaScript, ethers v6 |
 | Wallet | MetaMask browser extension |
 | Private chat | Express SIWE API + Supabase Postgres / Realtime |
-| Proof image storage | Supabase Storage `milestone-proofs` public bucket |
+| Proof image storage | Current: existing proof-reference flow. Planned: encrypted ciphertext pinned to Kubo/IPFS with wrapped per-proof keys in server-only `proof_keys` records. |
 | Tests | Truffle Mocha/Chai and Vitest |
 
 Sepolia, QR recipient confirmation, auto-release dispute windows, and carrier republishing are not part of v1.
@@ -98,9 +98,26 @@ The shipper can reject a submitted proof, returning it to `Rejected` for carrier
 
 ## 6. Off-chain services
 
-### Proof images
+### Proof images — planned IPFS design
 
-The browser hashes a valid JPEG/PNG/WebP file, uploads it under a SHA-256-derived path in Supabase Storage, receives a public URL, and submits that URL with proof metadata to the contract. The upload path is content-derived and not overwritten by the app, but the current contract stores the URL/remark rather than independently verifying file content.
+The browser validates a JPEG/PNG/WebP file up to 2 MB, computes the raw
+SHA-256, encrypts the bytes with a fresh AES-256-GCM key, and sends only
+ciphertext to the authenticated Express proof API. The API verifies the
+assigned carrier and milestone state against `DeliveryEscrow`, pins ciphertext
+to Kubo/IPFS using the frozen CIDv1/UnixFS profile, verifies gateway retrieval,
+and stores the data key wrapped by `IPFS_MASTER_KEY` in `proof_keys`.
+
+The contract receives a canonical URI such as:
+
+```text
+ipfs://<cid>?enc=aes-256-gcm&iv=<base64url>&sha256=<plaintext-sha256>&ctsha256=<ciphertext-sha256>
+```
+
+When a shipper or assigned carrier views the proof, Express repeats the live
+on-chain participant check before releasing the per-proof key. The browser
+retrieves ciphertext through the configured gateway list, verifies both hashes,
+decrypts in memory, and displays a temporary Blob URL. The CID may be public;
+the image itself remains confidential because IPFS stores ciphertext only.
 
 ### Private chat
 
@@ -128,12 +145,17 @@ The conversation identity includes chain ID, contract address, request ID, and c
 
 ```bash
 cp .env.example .env
-# configure Supabase values and SUPABASE_JWT_SECRET
+# configure the currently required Supabase values and SUPABASE_JWT_SECRET
 npm install
 npm run dev:all
 ```
 
-Before using chat, run `scripts/apply-chat-schema.sql` in Supabase and create the `milestone-proofs` bucket. For manual Ganache GUI use, run `npm run compile`, `npm run migrate`, `npm run server`, and `npm run dev` separately.
+The current application uses its existing proof-reference flow. The planned IPFS
+implementation, including Kubo/pinning setup, key custody, and any local
+playground, is defined in [IPFS-Implementation-Plan.md](IPFS-Implementation-Plan.md)
+and must not be inferred as currently available. For manual Ganache GUI use,
+run `npm run compile`, `npm run migrate`, `npm run server`, and
+`npm run dev` separately.
 
 ```bash
 npm test
