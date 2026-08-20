@@ -38,7 +38,7 @@ describe('mergeChatTimeline', () => {
     expect(notice.tone).toBe('payment');
   });
 
-  it('renders actionable lifecycle requests, proposal notes, and carrier tips', () => {
+  it('renders actionable lifecycle requests, proposal notes, completion outcomes, tips, and ratings', () => {
     const amendment = eventLogToNotice({
       eventName: 'AmendmentRequested',
       transactionHash: '0xamendment',
@@ -62,12 +62,36 @@ describe('mergeChatTimeline', () => {
       blockNumber: 6,
       args: { amount: 50000000000000000n },
     }, Date.parse('2026-08-01T10:03:00.000Z'));
+    const completion = eventLogToNotice({
+      eventName: 'RequestCompleted',
+      transactionHash: '0xcompleted',
+      index: 3,
+      blockNumber: 6,
+      args: {},
+    }, Date.parse('2026-08-01T10:03:00.000Z'));
+    const expiry = eventLogToNotice({
+      eventName: 'RequestExpired',
+      transactionHash: '0xexpired',
+      index: 4,
+      blockNumber: 6,
+      args: {},
+    }, Date.parse('2026-08-01T10:03:00.000Z'));
+    const rating = eventLogToNotice({
+      eventName: 'CarrierRated',
+      transactionHash: '0xrated',
+      index: 5,
+      blockNumber: 6,
+      args: { score: 5, tagMask: 3 },
+    }, Date.parse('2026-08-01T10:03:00.000Z'));
 
     expect(amendment.actionable).toBe(true);
     expect(amendment.focusTarget).toBe('amendment');
     expect(amendment.text).toContain('0.25 ETH');
     expect(proposal.text).toContain('Please add a customs checkpoint.');
     expect(tip.text).toContain('0.05 ETH completion tip');
+    expect(completion.text).toContain('Delivery completed');
+    expect(expiry.text).toContain('Shipment deadline passed');
+    expect(rating.text).toBe('Carrier rating published.');
   });
 
   it('combines escrow and lifecycle notices for the accepted carrier conversation', async () => {
@@ -100,11 +124,18 @@ describe('mergeChatTimeline', () => {
         args: { additionalFunding: 0n },
       }],
     });
+    const reputation = createContract({
+      CarrierRated: [{
+        transactionHash: '0xrated', blockNumber: 5, index: 0,
+        args: { carrier, score: 5, tagMask: 3 },
+      }],
+    });
     const provider = { getBlock: async (blockNumber) => ({ timestamp: 1_700_000_000 + blockNumber }) };
 
     const notices = await fetchRequestNotices({
       contract: escrow,
       lifecycleManager: lifecycle,
+      reputationRegistry: reputation,
       provider,
       requestId: 9,
       carrierWallet: carrier,
@@ -115,10 +146,12 @@ describe('mergeChatTimeline', () => {
       'MilestonePlanRejected',
       'CarrierTipped',
       'AmendmentRequested',
+      'CarrierRated',
     ]);
     expect(notices[1].text).toContain('Please revise the route.');
     expect(notices[3].actionable).toBe(true);
     expect(notices[3].requestId).toBe(9);
+    expect(notices[4].text).toBe('Carrier rating published.');
   });
 
   it('shows proposal and delivery activity only to the matching carrier conversation', () => {
@@ -133,6 +166,7 @@ describe('mergeChatTimeline', () => {
       { eventName: 'EscrowFunded', log: { blockNumber: 4, index: 2, args: {} } },
       { eventName: 'ProofSubmitted', log: { blockNumber: 5, index: 0, args: {} } },
       { eventName: 'AmendmentRequested', log: { blockNumber: 6, index: 0, args: {} } },
+      { eventName: 'CarrierRated', log: { blockNumber: 7, index: 0, args: { carrier: carrierA } } },
     ];
 
     expect(filterRequestNoticesForCarrier(events, carrierA).map(({ eventName }) => eventName)).toEqual([
@@ -142,6 +176,7 @@ describe('mergeChatTimeline', () => {
       'EscrowFunded',
       'ProofSubmitted',
       'AmendmentRequested',
+      'CarrierRated',
     ]);
     expect(filterRequestNoticesForCarrier(events, carrierB).map(({ eventName }) => eventName)).toEqual([
       'RequestCreated',

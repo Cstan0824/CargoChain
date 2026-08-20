@@ -14,7 +14,7 @@ const router = express.Router();
 const authRateLimiter = createRateLimiter({ windowMs: 60 * 1000, maxRequests: 30 });
 
 /**
- * Expected domain derived from configured CLIENT_ORIGIN (e.g. "127.0.0.1:5173" or "localhost:5173")
+ * Expected domain derived from configured CLIENT_ORIGIN (e.g. "127.0.0.1:5174" or "localhost:5174")
  */
 function getExpectedDomain() {
   try {
@@ -24,15 +24,25 @@ function getExpectedDomain() {
   }
 }
 
+function getConfiguredLocalPort() {
+  try {
+    const parsed = new URL(config.clientOrigin);
+    return parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+  } catch {
+    return '';
+  }
+}
+
 function isLocalDevDomain(value) {
-  return value === '127.0.0.1:5173' || value === 'localhost:5173';
+  const port = getConfiguredLocalPort();
+  return value === `127.0.0.1:${port}` || value === `localhost:${port}`;
 }
 
 function isLocalDevUri(value) {
   try {
     const parsed = new URL(value);
     return parsed.protocol === 'http:' &&
-      parsed.port === '5173' &&
+      parsed.port === getConfiguredLocalPort() &&
       (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost');
   } catch {
     return false;
@@ -83,7 +93,7 @@ router.post('/verify', authRateLimiter, async (req, res) => {
   const expectedDomain = getExpectedDomain();
   const expectedUri = config.clientOrigin;
 
-  // Local dev domain & URI compatibility (127.0.0.1:5173 vs localhost:5173)
+  // Local dev domain & URI compatibility (127.0.0.1:5174 vs localhost:5174)
   const localDomainMatch = isLocalDevDomain(expectedDomain) && isLocalDevDomain(siweMessage.domain);
 
   const localUriMatch = isLocalDevUri(expectedUri) && isLocalDevUri(siweMessage.uri);

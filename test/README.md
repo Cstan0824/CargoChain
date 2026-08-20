@@ -7,6 +7,7 @@
 | `userRegistry.test.js` | Name registration/update, trimming, byte limit, duplicate and unregistered behavior. |
 | `deliveryEscrow.test.js` | Requests, proposals, exact funding, proof submission/verification, payout/refund protection, registration enforcement, and completion tips. |
 | `lifecycleManager.test.js` | Manager initialisation, cancellation, partial settlement, response expiry, amendments, staged-fund refunds, stable checkpoint ordering, and authorization. |
+| `reputationRegistry.test.js` | Completed-request rating eligibility, immutable ratings, score/tag validation, and carrier aggregates. |
 
 Run against Ganache:
 
@@ -35,4 +36,4 @@ npm run test:frontend
 npm run build
 ```
 
-The latest complete local run recorded 68 passing contract tests and 35 passing frontend tests.
+The latest complete local run recorded 72 passing contract tests and 40 passing frontend tests.

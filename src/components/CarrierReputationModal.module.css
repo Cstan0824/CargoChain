@@ -1,0 +1,25 @@
+.overlay { position: fixed; inset: 0; z-index: 950; display: grid; place-items: center; padding: var(--s-5); background: rgba(15, 23, 42, .42); }
+.modal { width: min(100%, 520px); max-height: min(680px, calc(100vh - 40px)); overflow: auto; padding: var(--s-6); background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); }
+.header { display: flex; justify-content: space-between; gap: var(--s-4); margin-bottom: var(--s-5); }
+.eyebrow, .sectionLabel { color: var(--text-secondary); font-size: var(--fs-xs); font-weight: var(--fw-semibold); letter-spacing: .05em; text-transform: uppercase; }
+.header h2 { margin: 2px 0 0; font-size: var(--fs-lg); }
+.close { width: 32px; height: 32px; padding: 0; color: var(--text-secondary); background: transparent; border: 0; }
+.close svg { width: 20px; height: 20px; }
+.state { padding: var(--s-5) 0; color: var(--text-secondary); font-size: var(--fs-sm); }
+.identity { display: flex; align-items: center; gap: var(--s-3); padding-bottom: var(--s-5); border-bottom: 1px solid var(--border-soft); }
+.identityCopy { display: grid; gap: 3px; min-width: 0; flex: 1; }
+.identityCopy strong { overflow-wrap: anywhere; }
+.identityCopy code { color: var(--text-muted); font-size: var(--fs-xs); }
+.rating { display: grid; justify-items: end; gap: 3px; }
+.rating > strong { font-size: var(--fs-2xl); line-height: 1; }
+.rating span { display: inline-flex; align-items: center; gap: 3px; color: var(--text-secondary); font-size: var(--fs-xs); }
+.rating svg { color: #c58a1d; }
+.metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-3); padding: var(--s-5) 0; }
+.metric { display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; align-items: center; padding: 10px 12px; background: var(--bg-subtle); border-radius: var(--r-md); }
+.metric svg { grid-row: span 2; width: 18px; height: 18px; color: var(--primary); }
+.metric span { color: var(--text-secondary); font-size: var(--fs-xs); }
+.metric strong { font-size: var(--fs-md); }
+.tags { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.sectionLabel { width: 100%; margin-bottom: 2px; }
+.muted { color: var(--text-muted); font-size: var(--fs-sm); }
+@media (max-width: 520px) { .modal { padding: var(--s-5); } .identity { align-items: flex-start; flex-wrap: wrap; } .rating { margin-left: 64px; justify-items: start; } }

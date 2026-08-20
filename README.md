@@ -20,6 +20,7 @@ A milestone-based delivery marketplace where:
 5. After acceptance, either party can negotiate an amendment: extend or shorten a deadline under the applicable rules, add ETH to unpaid checkpoints, or insert a newly funded checkpoint without rewriting completed work.
 6. Either participant can request mutual cancellation. If the other accepts, completed payouts remain with the carrier and only unpaid escrow returns to the shipper. Overdue requests retain a separate refund path.
 7. After completion, the shipper may send one optional, one-time tip directly to the carrier.
+8. The shipper may publish one permanent 1-5 star rating with up to three predefined feedback tags. Carrier profiles combine those verified ratings with aggregate completion and timing outcomes.
 
 CargoChain also includes wallet-backed display names and request-scoped private chat. Chat messages are private, off-chain Supabase data; the accompanying delivery timeline is reconstructed from relevant, verified on-chain events.
 
@@ -69,12 +70,13 @@ This is the **assignment version** — built for clarity, demo, and grading — 
 - A request can have only one pending amendment or cancellation at a time. Resolved negotiations preserve a history of the requester, notes, before/after values, and outcome.
 - Once funded, cancellation is mutual: either participant requests it, the other accepts/rejects, and acceptance returns only remaining unpaid escrow to the shipper. It cannot settle while a proof is awaiting verification.
 - After all checkpoints are paid, the shipper can send one optional, separate tip directly to the carrier.
+- A completed request can receive one immutable shipper rating. Carrier reputation opens in a read-only proposal/track modal, while `/profile` shows the connected wallet's own aggregate delivery outcomes.
 
 ### Identity and chat
 
 - A wallet registers an on-chain display name through `UserRegistry`; the same wallet can be a shipper in one request and carrier in another.
 - The accepted shipper/carrier pair receives a request-scoped conversation. Text messages live in Supabase; SIWE authorisation and server-side contract checks protect access.
-- Chat also renders a filtered, read-only activity timeline from `DeliveryEscrow` and `LifecycleManager` events. Pending amendments and cancellations link directly to the relevant Track review section.
+- Chat also renders a filtered, read-only activity timeline from `DeliveryEscrow` and `LifecycleManager` events, including completion and expiry outcomes. Pending amendments and cancellations link directly to the relevant Track review section.
 
 For exact callable functions and validation rules, see [`API_v1.md`](API_v1.md). For product decisions around amendments, cancellation, and tips, see [`docs/Agreement-Changes.md`](docs/Agreement-Changes.md).
 
@@ -99,7 +101,7 @@ CargoChain/
 ├── scripts/                # chat schema, development launcher, scenario helpers
 ├── docs/                   # PRD, specification, architecture, agreement-change rules
 ├── truffle-config.js       # Ganache default; Sepolia commented (future plan)
-├── vite.config.js          # Vite dev server on 127.0.0.1:5173
+├── vite.config.js          # Vite dev server on 127.0.0.1:5174
 ├── package.json
 ├── README.md               # this file
 ├── AGENTS.md               # Coding-agent rules (read first)
@@ -301,12 +303,12 @@ That command starts deterministic Ganache with a local `ganache-data/` database,
 RPC Listening on 127.0.0.1:7545
 [cargochain-api] listening on http://127.0.0.1:3000
 VITE v5.4.21 ready
-➜  Local: http://127.0.0.1:5173/
+➜  Local: http://127.0.0.1:5174/
 ```
 
 **Then in the browser:**
 
-1. Open **http://127.0.0.1:5173**
+1. Open **http://127.0.0.1:5174**
 2. Install **MetaMask** if you don't have it.
 3. MetaMask → Settings → Networks → Add network:
    - Network name: `Ganache Local`
@@ -350,6 +352,7 @@ npm run preview   # serves dist/ on http://127.0.0.1:8080
 | `LifecycleManager.sol` | amendment state, shared negotiation lock, and mutual-cancellation settlement | GAN |
 | `UserRegistry.sol` | wallet registration and on-chain display names | wx |
 | `PaymentEvents.sol` | payment event base inherited by `DeliveryEscrow` | Jeremy |
+| `ReputationRegistry.sol` | immutable completed-request carrier ratings and feedback aggregates | team |
 
 See `API_v1.md` for the function reference, `docs/Module-Split.md` for per-file responsibilities.
 
@@ -374,7 +377,7 @@ The Express API verifies SIWE wallet sessions, authorizes request-scoped convers
 
 ### `test/` — Truffle tests
 
-Contract tests run through Truffle with Mocha + Chai; frontend tests run through Vitest. The current suite covers escrow/proposal/proof/refund behavior, user registration, cancellation, amendments, stable checkpoint ordering, staged-fund refunds, and one-time tipping.
+Contract tests run through Truffle with Mocha + Chai; frontend tests run through Vitest. The current suite covers escrow/proposal/proof/refund behavior, user registration, cancellation, amendments, stable checkpoint ordering, staged-fund refunds, one-time tipping, immutable carrier ratings, and reputation profile aggregation.
 
 ```bash
 npm test              # Truffle contract suite
@@ -382,7 +385,7 @@ npm run test:frontend # Vitest frontend suite
 npm run build         # production bundle
 ```
 
-The latest full local verification completed with **68 passing contract tests** and **35 passing frontend tests**.
+The latest full local verification completed with **72 passing contract tests** and **40 passing frontend tests**.
 
 ### `docs/` — Documentation
 
@@ -434,7 +437,7 @@ Before pushing:
 The demo runs end-to-end on Ganache + a fresh `npm run migrate`:
 
 1. **Connect MetaMask** to `http://127.0.0.1:7545` (chain 1337) using separate shipper/carrier Ganache accounts, then register short display names in CargoChain.
-2. **Create and propose:** the shipper creates a request at `http://127.0.0.1:5173/`; two carriers submit milestone plans; the shipper compares, selects, and funds one.
+2. **Create and propose:** the shipper creates a request at `http://127.0.0.1:5174/`; two carriers submit milestone plans; the shipper compares, selects, and funds one.
 3. **Proof and payment:** the accepted carrier uploads checkpoint proof; the shipper verifies it; show the released ETH and on-chain payment entry.
 4. **Private chat:** the accepted pair authenticates with SIWE and exchanges request-scoped messages. Show that the activity timeline only contains events for that carrier/request pair.
 5. **Agreement change:** request a funded amendment or mutual cancellation, then show its review panel, on-chain decision, and history. Do not try to finalise cancellation while a proof is awaiting verification.

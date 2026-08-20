@@ -24,6 +24,7 @@ export function MessageTimeline({
   carrierWallet,
   deliveryEscrow,
   lifecycleManager,
+  reputationRegistry,
   provider,
   initialMessages = [],
   appendedMessage = null,
@@ -55,6 +56,7 @@ export function MessageTimeline({
       const nextNotices = await fetchRequestNotices({
         contract: deliveryEscrow,
         lifecycleManager,
+        reputationRegistry,
         provider,
         requestId,
         carrierWallet,
@@ -64,7 +66,7 @@ export function MessageTimeline({
     } catch {
       // Human messages remain usable if historical event logs are temporarily unavailable.
     }
-  }, [carrierWallet, deliveryEscrow, lifecycleManager, provider, requestId, scrollToBottom]);
+  }, [carrierWallet, deliveryEscrow, lifecycleManager, provider, reputationRegistry, requestId, scrollToBottom]);
 
   const loadTimeline = useCallback(async () => {
     if (!conversationId) return;
@@ -85,6 +87,7 @@ export function MessageTimeline({
         fetchRequestNotices({
           contract: deliveryEscrow,
           lifecycleManager,
+          reputationRegistry,
           provider,
           requestId,
           carrierWallet,
@@ -110,7 +113,7 @@ export function MessageTimeline({
         error: caughtError.message || 'Failed to load chat history.',
       });
     }
-  }, [carrierWallet, conversationId, deliveryEscrow, lifecycleManager, provider, requestId, scrollToBottom]);
+  }, [carrierWallet, conversationId, deliveryEscrow, lifecycleManager, provider, reputationRegistry, requestId, scrollToBottom]);
 
   useEffect(() => {
     loadTimeline();
@@ -131,10 +134,11 @@ export function MessageTimeline({
     return subscribeToRequestNotices({
       contract: deliveryEscrow,
       lifecycleManager,
+      reputationRegistry,
       requestId,
       onEvent: refreshNotices,
     });
-  }, [deliveryEscrow, lifecycleManager, refreshNotices, requestId]);
+  }, [deliveryEscrow, lifecycleManager, reputationRegistry, refreshNotices, requestId]);
 
   useEffect(() => {
     if (!appendedMessage?.message_id || appendedMessage.conversation_id !== conversationId) return;
