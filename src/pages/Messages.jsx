@@ -158,6 +158,7 @@ export function Messages() {
                     carrierWallet={selectedConversation.carrier_wallet}
                     deliveryEscrow={contracts?.deliveryEscrow}
                     lifecycleManager={contracts?.lifecycleManager}
+                    reputationRegistry={contracts?.reputationRegistry}
                     provider={provider}
                     appendedMessage={deliveredMessage}
                     displayNames={displayNames}

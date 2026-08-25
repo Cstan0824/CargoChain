@@ -3,7 +3,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { HiOutlineIdentification, HiOutlineInformationCircle, HiOutlineXMark } from 'react-icons/hi2';
+import { HiOutlineIdentification, HiOutlineInformationCircle, HiOutlineXMark, HiStar } from 'react-icons/hi2';
 import { Topbar } from '../components/Topbar.jsx';
 import { Card } from '../components/Card.jsx';
 import { Button } from '../components/Button.jsx';
@@ -35,6 +35,8 @@ import {
 } from '../utils/paymentHistory.js';
 import { countWords, utf8Length } from '../utils/textLimits.js';
 import { pickAvatar } from '../utils/avatar.js';
+import { loadCarrierReputationProfile } from '../services/reputationService.js';
+import { formatRatingAverage, REPUTATION_TAGS } from '../utils/reputation.js';
 import {
   workerPackingInventory,
   escrowFundedTile,
@@ -68,6 +70,8 @@ export function Profile() {
   const [historyError, setHistoryError] = useState(null);
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const [reputationProfile, setReputationProfile] = useState(null);
+  const [reputationLoading, setReputationLoading] = useState(false);
 
   // Refresh the real MetaMask balance on account, chain, and funds refresh.
   useEffect(() => {
@@ -149,6 +153,21 @@ export function Profile() {
   useEffect(() => {
     if (!isRegistered) setIsEditOpen(false);
   }, [isRegistered]);
+
+  useEffect(() => {
+    if (!account || !contracts?.reputationRegistry) {
+      setReputationProfile(null);
+      setReputationLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setReputationLoading(true);
+    loadCarrierReputationProfile(contracts, account)
+      .then((result) => { if (!cancelled) setReputationProfile(result); })
+      .catch(() => { if (!cancelled) setReputationProfile(null); })
+      .finally(() => { if (!cancelled) setReputationLoading(false); });
+    return () => { cancelled = true; };
+  }, [account, contracts]);
 
   const earningsPayments = useMemo(() => {
     const normalizedAccount = account?.toLowerCase();
@@ -364,6 +383,52 @@ export function Profile() {
               title="No carrier earnings yet"
               description="Payments released to this wallet will appear here as cumulative earnings."
             />
+          )}
+        </Card>
+      </div>
+
+      <div className={styles.section}>
+        <div className={styles.sectionHead}>
+          <div>
+            <h2 className={styles.cardTitle}>Carrier reputation</h2>
+            <p className={styles.cardSub}>Verified delivery outcomes and ratings earned by this wallet.</p>
+          </div>
+        </div>
+        <Card className={styles.reputationCard}>
+          {!account ? (
+            <div className={styles.reputationEmpty}>Connect your wallet to view its carrier reputation.</div>
+          ) : reputationLoading ? (
+            <div className={styles.reputationEmpty}>Loading carrier reputation...</div>
+          ) : reputationProfile ? (
+            <>
+              <div className={styles.reputationSummary}>
+                <div className={styles.reputationAverage}>
+                  <span>Average rating</span>
+                  <strong>{formatRatingAverage(reputationProfile.averageRating)}</strong>
+                </div>
+                <div className={styles.reputationStars} aria-label={`${reputationProfile.ratingCount} verified ratings`}>
+                  <div>
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <HiStar key={star} className={reputationProfile.averageRating != null && star <= Math.round(reputationProfile.averageRating) ? styles.reputationStarActive : styles.reputationStarInactive} aria-hidden="true" />
+                    ))}
+                  </div>
+                  <span>{reputationProfile.ratingCount} verified</span>
+                </div>
+                <div className={styles.reputationMetric}><span>Completed deliveries</span><strong>{reputationProfile.completedDeliveries}</strong></div>
+                <div className={styles.reputationMetric}><span>On-time completion</span><strong>{reputationProfile.onTimeRate == null ? '—' : `${reputationProfile.onTimeRate}%`}</strong></div>
+              </div>
+              <div className={styles.reputationTags}>
+                {REPUTATION_TAGS
+                  .map((tag) => ({ ...tag, count: reputationProfile.tagCounts[tag.id] || 0 }))
+                  .filter((tag) => tag.count > 0)
+                  .sort((left, right) => right.count - left.count)
+                  .slice(0, 5)
+                  .map((tag) => <Badge key={tag.id} tone={tag.tone === 'improvement' ? 'warning' : 'neutral'}>{tag.label} · {tag.count}</Badge>)}
+                {reputationProfile.ratingCount === 0 && <span className={styles.reputationMuted}>No carrier ratings yet.</span>}
+              </div>
+            </>
+          ) : (
+            <div className={styles.reputationEmpty}>Carrier reputation is unavailable for this deployment.</div>
           )}
         </Card>
       </div>

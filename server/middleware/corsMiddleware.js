@@ -4,11 +4,20 @@
 
 const { config } = require('../config/environment');
 
+function getConfiguredLocalPort() {
+  try {
+    const parsed = new URL(config.clientOrigin);
+    return parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+  } catch {
+    return '';
+  }
+}
+
 function isLocalDevOrigin(value) {
   try {
     const parsed = new URL(value);
     return parsed.protocol === 'http:' &&
-      parsed.port === '5173' &&
+      parsed.port === getConfiguredLocalPort() &&
       (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost');
   } catch {
     return false;
@@ -23,7 +32,7 @@ function corsMiddleware(req, res, next) {
     const normOrigin = origin.toLowerCase().replace(/\/$/, '');
     const normAllowed = allowedOrigin.toLowerCase().replace(/\/$/, '');
 
-    // Allow both 127.0.0.1:5173 and localhost:5173 in local development
+    // Allow both loopback hostnames on the configured local frontend port.
     const isDevMatch = isLocalDevOrigin(normAllowed) && isLocalDevOrigin(normOrigin);
 
     if (normOrigin === normAllowed || isDevMatch) {

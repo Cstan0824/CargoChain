@@ -323,6 +323,24 @@
 }
 
 /* --- Network & account --- */
+.reputationCard { display: flex; flex-direction: column; gap: var(--s-4); }
+.reputationSummary { display: grid; grid-template-columns: 1.2fr 1.4fr repeat(2, minmax(0, 1fr)); gap: var(--s-3); align-items: center; }
+.reputationSummary > div { min-width: 0; }
+.reputationAverage, .reputationMetric { display: grid; gap: 4px; }
+.reputationSummary span { color: var(--text-secondary); font-size: var(--fs-xs); }
+.reputationAverage strong { font-size: var(--fs-xl); font-variant-numeric: tabular-nums; }
+.reputationStars { display: grid; gap: 3px; }
+.reputationStars > div { display: flex; gap: 3px; }
+.reputationStarActive, .reputationStarInactive { width: 18px; height: 18px; }
+.reputationStarActive { color: #c58a1d; }
+.reputationStarInactive { color: var(--border); }
+.reputationMetric { padding-left: var(--s-3); border-left: 1px solid var(--border-soft); }
+.reputationMetric strong { font-size: var(--fs-md); font-variant-numeric: tabular-nums; }
+.reputationTags { display: flex; flex-wrap: wrap; gap: 7px; padding-top: var(--s-4); border-top: 1px solid var(--border-soft); }
+.reputationMuted, .reputationEmpty { color: var(--text-muted); font-size: var(--fs-sm); }
+.reputationEmpty { display: grid; min-height: 84px; place-items: center; text-align: center; }
+
+/* --- Network & account --- */
 .networkCard {
   display: flex;
   flex-direction: column;
@@ -907,6 +925,15 @@
 
   .networkRow {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .reputationSummary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .reputationMetric {
+    padding-left: 0;
+    border-left: 0;
   }
 }
 

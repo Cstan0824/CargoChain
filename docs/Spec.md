@@ -1,12 +1,12 @@
-# CargoChain — Current Technical Specification
+# CargoChain — Technical Specification
 
-> Assignment implementation specification. This document reflects the deployed v1 architecture; [`API_v1.md`](../API_v1.md) is the authoritative function-level reference.
+> Assignment specification. [`API_v1.md`](../API_v1.md) remains the authoritative function-level reference for the currently implemented contracts. The IPFS proof-storage design is planned, not currently implemented; see [IPFS-Implementation-Plan.md](IPFS-Implementation-Plan.md).
 
 ## 1. Scope
 
 CargoChain is a local-Ganache logistics DApp for milestone-based ETH escrow. A shipper creates a delivery request, carriers compete with milestone proposals, the shipper funds one proposal, the assigned carrier submits photo proof, and the shipper releases payment checkpoint by checkpoint.
 
-The current build also supports wallet display names, request-scoped private chat, mutual cancellation, negotiated amendments, immutable checkpoint IDs, and a one-time completion tip.
+The current build also supports wallet display names, request-scoped private chat, mutual cancellation, negotiated amendments, immutable checkpoint IDs, a one-time completion tip, and structured carrier reputation.
 
 ## 2. Stack
 
@@ -17,7 +17,7 @@ The current build also supports wallet display names, request-scoped private cha
 | Browser app | React 18, Vite, JavaScript, ethers v6 |
 | Wallet | MetaMask browser extension |
 | Private chat | Express SIWE API + Supabase Postgres / Realtime |
-| Proof image storage | Supabase Storage `milestone-proofs` public bucket |
+| Proof image storage | Current: existing proof-reference flow. Planned: encrypted ciphertext pinned to Kubo/IPFS with wrapped per-proof keys in server-only `proof_keys` records. |
 | Tests | Truffle Mocha/Chai and Vitest |
 
 Sepolia, QR recipient confirmation, auto-release dispute windows, and carrier republishing are not part of v1.
@@ -30,6 +30,7 @@ Sepolia, QR recipient confirmation, auto-release dispute windows, and carrier re
 | `DeliveryEscrow.sol` | Requests, proposals, accepted shipment state, proof state, milestone payment, refund accounting, stable checkpoint records, and tips. |
 | `LifecycleManager.sol` | Amendment/cancellation records, response deadlines, shared negotiation lock, and restricted calls to escrow finalisation hooks. |
 | `PaymentEvents.sol` | Payment-related events inherited by `DeliveryEscrow`. |
+| `ReputationRegistry.sol` | Immutable 1-5 completed-request ratings and carrier feedback-tag aggregates. |
 
 Deployment order:
 
@@ -37,9 +38,11 @@ Deployment order:
 UserRegistry → LifecycleManager → DeliveryEscrow(registry, manager)
                                       ↓
               LifecycleManager.initializeDeliveryEscrow(escrow)
+                                      ↓
+                    ReputationRegistry(escrow)
 ```
 
-The frontend validates that the deployed manager points back to the current escrow address. A matching chain ID alone is not sufficient because local Ganache deployments can be stale.
+The frontend validates that the deployed manager and reputation registry both point back to the current escrow address. A matching chain ID alone is not sufficient because local Ganache deployments can be stale.
 
 ## 4. Core data and state
 
@@ -68,6 +71,10 @@ PendingProof / Rejected → Submitted → Paid
 ```
 
 The shipper can reject a submitted proof, returning it to `Rejected` for carrier resubmission. A checkpoint is paid only after shipper verification.
+
+### Reputation
+
+`ReputationRegistry` accepts one permanent 1-5 rating from the shipper after a request reaches `Completed`, plus up to three predefined feedback tags. Carrier profiles aggregate those ratings and derive completion/timing outcomes from `DeliveryEscrow` request records and `RequestCompleted`/`RequestExpired` events.
 
 ## 5. Agreement rules
 
@@ -98,9 +105,26 @@ The shipper can reject a submitted proof, returning it to `Rejected` for carrier
 
 ## 6. Off-chain services
 
-### Proof images
+### Proof images — planned IPFS design
 
-The browser hashes a valid JPEG/PNG/WebP file, uploads it under a SHA-256-derived path in Supabase Storage, receives a public URL, and submits that URL with proof metadata to the contract. The upload path is content-derived and not overwritten by the app, but the current contract stores the URL/remark rather than independently verifying file content.
+The browser validates a JPEG/PNG/WebP file up to 2 MB, computes the raw
+SHA-256, encrypts the bytes with a fresh AES-256-GCM key, and sends only
+ciphertext to the authenticated Express proof API. The API verifies the
+assigned carrier and milestone state against `DeliveryEscrow`, pins ciphertext
+to Kubo/IPFS using the frozen CIDv1/UnixFS profile, verifies gateway retrieval,
+and stores the data key wrapped by `IPFS_MASTER_KEY` in `proof_keys`.
+
+The contract receives a canonical URI such as:
+
+```text
+ipfs://<cid>?enc=aes-256-gcm&iv=<base64url>&sha256=<plaintext-sha256>&ctsha256=<ciphertext-sha256>
+```
+
+When a shipper or assigned carrier views the proof, Express repeats the live
+on-chain participant check before releasing the per-proof key. The browser
+retrieves ciphertext through the configured gateway list, verifies both hashes,
+decrypts in memory, and displays a temporary Blob URL. The CID may be public;
+the image itself remains confidential because IPFS stores ciphertext only.
 
 ### Private chat
 
@@ -122,18 +146,23 @@ The conversation identity includes chain ID, contract address, request ID, and c
 | `/shipments/:id/propose` | Carrier proposal editor, active proposal, and history. |
 | `/track/:id` | Tracking, proof, payments, amendments, cancellation, and history. |
 | `/messages` | Request-scoped private conversations and activity timeline. |
-| `/profile` | Registered profile and payment/transaction presentation. |
+| `/profile` | Connected wallet profile, payment/transaction presentation, and its own verified carrier feedback aggregates. |
 
 ## 8. Local run and verification
 
 ```bash
 cp .env.example .env
-# configure Supabase values and SUPABASE_JWT_SECRET
+# configure the currently required Supabase values and SUPABASE_JWT_SECRET
 npm install
 npm run dev:all
 ```
 
-Before using chat, run `scripts/apply-chat-schema.sql` in Supabase and create the `milestone-proofs` bucket. For manual Ganache GUI use, run `npm run compile`, `npm run migrate`, `npm run server`, and `npm run dev` separately.
+The current application uses its existing proof-reference flow. The planned IPFS
+implementation, including Kubo/pinning setup, key custody, and any local
+playground, is defined in [IPFS-Implementation-Plan.md](IPFS-Implementation-Plan.md)
+and must not be inferred as currently available. For manual Ganache GUI use,
+run `npm run compile`, `npm run migrate`, `npm run server`, and
+`npm run dev` separately.
 
 ```bash
 npm test

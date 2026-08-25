@@ -19,6 +19,7 @@ The product is deliberately scoped for an academic local-chain demonstration. It
 3. Preserve a traceable history for proposals, proof decisions, payments, amendments, cancellation requests, and refunds.
 4. Let the parties adjust an accepted agreement safely without rewriting completed work.
 5. Provide an authenticated private discussion channel for the relevant shipper/carrier pair.
+6. Record one immutable structured shipper rating per completed request and expose aggregate carrier evidence without disclosing unrelated shipment details.
 
 ## 3. Users
 
@@ -89,6 +90,13 @@ A registered wallet can be a shipper for some requests and carrier for others. T
 - Supabase stores private message text and provides realtime updates.
 - A read-only activity timeline derives proposal, proof, payment, amendment, cancellation, and tip events from the chain, filtered to the relevant carrier.
 
+### 4.8 Carrier reputation
+
+- A shipper may submit one immutable 1-5 rating after its request is completed.
+- Ratings use up to three predefined feedback tags; free-form reviews are intentionally excluded.
+- Read-only carrier reputation modals show verified rating and delivery aggregates during proposal review; the connected wallet sees its own aggregates on `/profile`.
+- Objective delivery outcomes are derived from escrow/lifecycle state and events, rather than being user-entered claims.
+
 ## 5. Technical requirements
 
 | Area | Requirement |
@@ -109,6 +117,7 @@ A registered wallet can be a shipper for some requests and carrier for others. T
 | DeliveryEscrow.sol | Request/proposal state, escrow, proof, payouts, refunds, stable checkpoints, tips. |
 | LifecycleManager.sol | Amendment/cancellation records and restricted escrow finalisation. |
 | PaymentEvents.sol | Payment event declarations. |
+| ReputationRegistry.sol | Completed-request carrier ratings and feedback-tag aggregates. |
 
 LifecycleManager is intentionally separate to preserve DeliveryEscrow bytecode headroom. DeliveryEscrow remains canonical for shipment state.
 
@@ -118,7 +127,7 @@ LifecycleManager is intentionally separate to preserve DeliveryEscrow bytecode h
 - Recipient QR confirmation.
 - Automatic dispute-window payout release.
 - Carrier republishing/recovery/custody transfer.
-- Public marketplace messaging, reputation scoring, staking, custom tokens, and mobile wallet connections.
+- Public marketplace messaging, staking, custom tokens, and mobile wallet connections.
 
 ## 8. Acceptance checks
 
@@ -129,7 +138,7 @@ npm run test:frontend
 npm run build
 ~~~
 
-Manual demonstration should show wallet registration, proposal selection/funding, proof/payment, private chat, an amendment or mutual cancellation decision, and a completion tip. The latest recorded suite completed with 68 contract tests and 35 frontend tests passing.
+Manual demonstration should show wallet registration, proposal selection/funding, proof/payment, one completed-request rating, private chat, an amendment or mutual cancellation decision, and a completion tip.
 
 ## 9. References
 

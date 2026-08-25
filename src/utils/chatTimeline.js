@@ -14,9 +14,13 @@ export const ESCROW_CHAT_EVENT_NAMES = [
   'MilestoneRejected',
   'MilestonePaid',
   'RequestCancelled',
+  'RequestCompleted',
+  'RequestExpired',
   'RefundIssued',
   'CarrierTipped',
 ];
+
+export const REPUTATION_CHAT_EVENT_NAMES = ['CarrierRated'];
 
 export const LIFECYCLE_CHAT_EVENT_NAMES = [
   'ShipmentDeadlineExtended',
@@ -32,7 +36,7 @@ export const LIFECYCLE_CHAT_EVENT_NAMES = [
   'CancellationExpired',
 ];
 
-export const CHAT_EVENT_NAMES = [...ESCROW_CHAT_EVENT_NAMES, ...LIFECYCLE_CHAT_EVENT_NAMES];
+export const CHAT_EVENT_NAMES = [...ESCROW_CHAT_EVENT_NAMES, ...REPUTATION_CHAT_EVENT_NAMES, ...LIFECYCLE_CHAT_EVENT_NAMES];
 
 const timestampCaches = new WeakMap();
 
@@ -40,6 +44,7 @@ export async function fetchRequestNotices({
   contract,
   deliveryEscrow,
   lifecycleManager,
+  reputationRegistry,
   provider,
   requestId,
   carrierWallet = '',
@@ -48,14 +53,15 @@ export async function fetchRequestNotices({
   if (!escrowContract || !provider || requestId === undefined || requestId === null) return [];
 
   const parsedRequestId = BigInt(requestId);
-  const [escrowEntries, lifecycleEntries, proposalNotes] = await Promise.all([
+  const [escrowEntries, lifecycleEntries, reputationEntries, proposalNotes] = await Promise.all([
     fetchContractEventEntries(escrowContract, ESCROW_CHAT_EVENT_NAMES, parsedRequestId, 'escrow'),
     fetchContractEventEntries(lifecycleManager, LIFECYCLE_CHAT_EVENT_NAMES, parsedRequestId, 'lifecycle'),
+    fetchContractEventEntries(reputationRegistry, REPUTATION_CHAT_EVENT_NAMES, parsedRequestId, 'reputation'),
     fetchProposalRejectionNotes(escrowContract, parsedRequestId),
   ]);
 
   const logs = filterRequestNoticesForCarrier(
-    [...escrowEntries, ...lifecycleEntries],
+    [...escrowEntries, ...reputationEntries, ...lifecycleEntries],
     carrierWallet,
   );
   const notices = await Promise.all(logs.map(async ({ log, eventName }) => {
@@ -114,6 +120,7 @@ export function subscribeToRequestNotices({
   contract,
   deliveryEscrow,
   lifecycleManager,
+  reputationRegistry,
   requestId,
   onEvent,
 }) {
@@ -125,6 +132,7 @@ export function subscribeToRequestNotices({
   const handler = () => onEvent();
   const subscriptions = [
     ...subscribeToContractEvents(escrowContract, ESCROW_CHAT_EVENT_NAMES, requestId, handler),
+    ...subscribeToContractEvents(reputationRegistry, REPUTATION_CHAT_EVENT_NAMES, requestId, handler),
     ...subscribeToContractEvents(lifecycleManager, LIFECYCLE_CHAT_EVENT_NAMES, requestId, handler),
   ];
 
@@ -208,10 +216,16 @@ export function eventLogToNotice(log, timestampMs, eventNameOverride = '', conte
       return { ...base, tone: 'payment', text: `${formatAmount(args.amount)} ETH released for checkpoint ID ${Number(args.milestoneId)}.` };
     case 'RequestCancelled':
       return { ...base, tone: 'warning', text: 'Delivery request cancelled.' };
+    case 'RequestCompleted':
+      return { ...base, tone: 'success', text: 'Delivery completed and final escrow payment released.' };
+    case 'RequestExpired':
+      return { ...base, tone: 'warning', text: 'Shipment deadline passed; remaining escrow can be refunded to the shipper.' };
     case 'RefundIssued':
       return { ...base, tone: 'payment', text: `${formatAmount(args.amount)} ETH refunded to the shipper.` };
     case 'CarrierTipped':
       return { ...base, tone: 'payment', text: `The shipper sent a ${formatAmount(args.amount)} ETH completion tip.` };
+    case 'CarrierRated':
+      return { ...base, tone: 'success', text: 'Carrier rating published.' };
     case 'ShipmentDeadlineExtended':
       return {
         ...base,

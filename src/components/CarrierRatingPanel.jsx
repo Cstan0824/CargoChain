@@ -1,0 +1,210 @@
+import { useEffect, useState } from 'react';
+import { HiOutlineArrowRight, HiOutlineStar, HiStar } from 'react-icons/hi2';
+import { Button } from './Button.jsx';
+import { useContracts } from '../hooks/useContracts.js';
+import { useToast } from '../hooks/useToast.js';
+import { useUserProfile } from '../hooks/useUserProfile.js';
+import { useWallet } from '../hooks/useWallet.js';
+import {
+  buildTagMask,
+  MAX_REPUTATION_TAGS,
+  REPUTATION_TAGS,
+} from '../utils/reputation.js';
+import {
+  formatWalletTransactionError,
+  sendWalletContractTransaction,
+} from '../utils/walletTransaction.js';
+import styles from './CarrierRatingPanel.module.css';
+
+export function CarrierRatingPanel({ requestId, carrier, isShipper, status }) {
+  const { contracts } = useContracts();
+  const { account, signer, provider } = useWallet();
+  const { requireRegistration } = useUserProfile();
+  const { show } = useToast();
+  const [rating, setRating] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [selectedScore, setSelectedScore] = useState(0);
+  const [hoveredScore, setHoveredScore] = useState(0);
+  const [selectedTags, setSelectedTags] = useState([]);
+  const [stage, setStage] = useState('idle');
+
+  const loadRating = async () => {
+    if (!requestId || !carrier || !contracts?.reputationRegistry) {
+      setRating(null);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const rawRating = await contracts.reputationRegistry.getRating(BigInt(requestId));
+      const createdAt = BigInt(rawRating.createdAt ?? rawRating[2] ?? 0n);
+      setRating(createdAt > 0n ? {
+        score: Number(rawRating.score ?? rawRating[4] ?? 0),
+        tagMask: Number(rawRating.tagMask ?? rawRating[3] ?? 0),
+      } : null);
+    } catch {
+      setRating(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadRating();
+  }, [requestId, carrier, contracts?.reputationRegistry]);
+
+  const isCompleted = status === 'Completed';
+  const canRate = isCompleted && isShipper && !rating;
+  const submitting = stage === 'wallet' || stage === 'mining';
+  const visibleScore = hoveredScore || selectedScore;
+
+  const toggleTag = (tagId) => {
+    setSelectedTags((current) => {
+      if (current.includes(tagId)) return current.filter((id) => id !== tagId);
+      if (current.length >= MAX_REPUTATION_TAGS) {
+        show(`Choose up to ${MAX_REPUTATION_TAGS} feedback tags.`, 'warning');
+        return current;
+      }
+      return [...current, tagId];
+    });
+  };
+
+  const closeModal = () => {
+    if (submitting) return;
+    setModalOpen(false);
+    setSelectedScore(0);
+    setHoveredScore(0);
+    setSelectedTags([]);
+    setStage('idle');
+  };
+
+  const submitRating = async () => {
+    if (!contracts?.reputationRegistry || !signer || !provider || !account) {
+      show('Connect the completed shipment shipper wallet before rating.', 'warning');
+      return;
+    }
+    if (!selectedScore || !carrier || !requestId) return;
+
+    setStage('wallet');
+    try {
+      const activeSignerAddress = await signer.getAddress();
+      if (!(await requireRegistration(
+        'Register your CargoChain profile before publishing a carrier rating.',
+        activeSignerAddress,
+      ))) {
+        setStage('idle');
+        return;
+      }
+
+      const transaction = await sendWalletContractTransaction({
+        contract: contracts.reputationRegistry,
+        method: 'submitCarrierRating',
+        args: [BigInt(requestId), selectedScore, buildTagMask(selectedTags)],
+        signer,
+        provider,
+      });
+      setStage('mining');
+      await transaction.wait();
+      await loadRating();
+      show('Carrier rating published on-chain.', 'success');
+      setModalOpen(false);
+      setSelectedScore(0);
+      setHoveredScore(0);
+      setSelectedTags([]);
+      setStage('idle');
+    } catch (error) {
+      setStage('idle');
+      show(formatWalletTransactionError(error, 'Carrier rating could not be published.'), 'error');
+    }
+  };
+
+  if (!carrier || !isCompleted) return null;
+
+  return (
+    <section className={styles.actionBar} aria-labelledby="carrier-rating-cta-title">
+      <div className={styles.actionCopy}>
+        <span className={styles.actionIcon} aria-hidden="true"><HiOutlineStar /></span>
+        <div>
+          <span className={styles.actionKicker}>Delivery complete</span>
+          <strong id="carrier-rating-cta-title">{rating ? 'Carrier rating published' : 'How did the delivery go?'}</strong>
+          <p>
+            {loading
+              ? 'Checking this request...'
+                : rating
+                ? 'Your verified rating is recorded on-chain.'
+                : 'Publish one verified rating for this completed request.'}
+          </p>
+        </div>
+      </div>
+      {canRate && <Button onClick={() => setModalOpen(true)}>Rate carrier <HiOutlineArrowRight aria-hidden="true" /></Button>}
+
+      {modalOpen && (
+        <div className={styles.overlay} role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closeModal()}>
+          <section className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="carrier-rating-title">
+            <header className={styles.modalHeader}>
+              <div>
+                <span className={styles.kicker}>Completed request #{String(requestId).padStart(4, '0')}</span>
+                <h2 id="carrier-rating-title">Rate this carrier</h2>
+              </div>
+              <button type="button" className={styles.closeButton} onClick={closeModal} disabled={submitting} aria-label="Close rating dialog">×</button>
+            </header>
+
+            <div className={styles.formBody}>
+              <fieldset>
+                <legend>Overall experience</legend>
+                <div className={styles.starPicker} onMouseLeave={() => setHoveredScore(0)}>
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      type="button"
+                      className={styles.starButton}
+                      onMouseEnter={() => setHoveredScore(star)}
+                      onClick={() => setSelectedScore(star)}
+                      aria-label={`${star} star${star === 1 ? '' : 's'}`}
+                      aria-pressed={selectedScore === star}
+                    >
+                      {star <= visibleScore ? <HiStar className={styles.starFilled} /> : <HiOutlineStar className={styles.starEmpty} />}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+
+              <fieldset>
+                <legend>What went well <span>Optional</span></legend>
+                <div className={styles.tagChoices}>
+                  {REPUTATION_TAGS.filter((tag) => tag.tone === 'positive').map((tag) => (
+                    <label key={tag.id} className={`${styles.tagChoice} ${selectedTags.includes(tag.id) ? styles.tagChoiceSelected : ''}`}>
+                      <input type="checkbox" checked={selectedTags.includes(tag.id)} onChange={() => toggleTag(tag.id)} />
+                      <span>{tag.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+
+              <fieldset>
+                <legend>Could improve <span>Optional</span></legend>
+                <div className={styles.tagChoices}>
+                  {REPUTATION_TAGS.filter((tag) => tag.tone === 'improvement').map((tag) => (
+                    <label key={tag.id} className={`${styles.tagChoice} ${styles.improvementChoice} ${selectedTags.includes(tag.id) ? styles.tagChoiceSelected : ''}`}>
+                      <input type="checkbox" checked={selectedTags.includes(tag.id)} onChange={() => toggleTag(tag.id)} />
+                      <span>{tag.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+
+              <div className={styles.modalActions}>
+                <Button variant="secondary" onClick={closeModal} disabled={submitting}>Cancel</Button>
+                <Button onClick={submitRating} disabled={!selectedScore || submitting}>Publish rating</Button>
+              </div>
+            </div>
+            <div className={styles.tagLimit}>Choose up to {MAX_REPUTATION_TAGS} tags across both groups.</div>
+            {submitting && <div className={styles.transactionState} role="status">{stage === 'wallet' ? 'Review and approve the rating in MetaMask.' : 'Waiting for the rating transaction to confirm...'}</div>}
+          </section>
+        </div>
+      )}
+    </section>
+  );
+}

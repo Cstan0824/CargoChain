@@ -30,12 +30,14 @@ flowchart TB
   Registry[UserRegistry<br/>display name / registration]
   Escrow[DeliveryEscrow<br/>requests, proposals, escrow, proofs,<br/>checkpoints, refunds, tips]
   Lifecycle[LifecycleManager<br/>amendments, cancellation,<br/>one-pending-negotiation lock]
+  Reputation[ReputationRegistry<br/>completed-request ratings,<br/>feedback aggregates]
   Events[PaymentEvents<br/>event definitions]
 
   Registry -->|registration checks| Escrow
   Events -->|inherited events| Escrow
   Lifecycle -->|canonical shipment/progress reads| Escrow
   Lifecycle -->|restricted finalisation calls| Escrow
+  Reputation -->|completed-request eligibility read| Escrow
 ```
 
 `DeliveryEscrow` is the canonical shipment state. `LifecycleManager` deliberately does not copy request/cargo/milestone state; it reads the lifecycle snapshot and can only apply a previously validated amendment or accepted cancellation through escrow-only hooks.
@@ -47,9 +49,10 @@ UserRegistry
 LifecycleManager
 DeliveryEscrow(registryAddress, lifecycleManagerAddress)
 LifecycleManager.initializeDeliveryEscrow(escrowAddress)
+ReputationRegistry(escrowAddress)
 ```
 
-The frontend creates read-only ethers contract instances from Truffle artifacts and validates that the manager's stored escrow address matches the artifact address. This catches a common local Ganache failure where MetaMask/RPC points to a stale deployment.
+The frontend creates read-only ethers contract instances from Truffle artifacts and validates that the manager and reputation registry escrow links match the artifact address. This catches a common local Ganache failure where MetaMask/RPC points to a stale deployment.
 
 ## 3. On-chain delivery flow
 
@@ -119,7 +122,7 @@ Conversation identity includes chain ID, deployed contract address, request ID, 
 | Service | Address | Notes |
 |---|---|---|
 | Ganache | `http://127.0.0.1:7545` | Chain/network ID `1337`; deterministic accounts in launcher mode. |
-| Vite | `http://127.0.0.1:5173` | Browser frontend. |
+| Vite | `http://127.0.0.1:5174` | Browser frontend. |
 | Express | `http://127.0.0.1:3000` | SIWE and chat API; needs Supabase env values. |
 | Vite preview | `http://127.0.0.1:8080` | Production-bundle inspection. |
 
@@ -128,9 +131,10 @@ Conversation identity includes chain ID, deployed contract address, request ID, 
 ## 8. Security and scope boundaries
 
 - Private keys and service-role keys are only in `.env`; `VITE_*` variables are public browser values.
-- State-changing escrow actions require a registered wallet and role-specific shipment ownership checks.
+- State-changing escrow actions require a registered wallet and request-participant ownership checks.
 - Chat access is checked by the API and constrained by Supabase RLS.
 - Contract state is not updated by the chat server or Supabase.
-- v1 excludes Sepolia, QR verification, public general chat, reputation/staking, automatic dispute-window release, and recovery/republish.
+- Carrier ratings are immutable and structured; objective performance is derived from contract state/events instead of user-entered claims.
+- v1 excludes Sepolia, QR verification, public general chat, staking, automatic dispute-window release, and recovery/republish.
 
 See [`README.md`](../README.md) for setup, [`BusinessFlow.md`](BusinessFlow.md) for user flow, and [`API_v1.md`](../API_v1.md) for the full contract surface.
