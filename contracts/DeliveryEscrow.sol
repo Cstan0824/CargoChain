@@ -660,7 +660,8 @@ contract DeliveryEscrow is PaymentEvents {
         uint256 requestId,
         uint256 newDeadline,
         ExistingMilestoneFunding[] calldata existingFunding,
-        NewMilestoneFunding[] calldata newMilestones
+        NewMilestoneFunding[] calldata newMilestones,
+        uint256 additionalOperationalAllowance
     ) external requestExists(requestId) {
         require(msg.sender == lifecycleManager, "caller is not lifecycle manager");
         DeliveryRequest storage delivery = requests[requestId];
@@ -723,7 +724,7 @@ contract DeliveryEscrow is PaymentEvents {
         }
         uint256 additionalFunding = allocated;
         require(
-            cargoToken.balanceOf(address(this)) >= totalEscrowed + additionalFunding,
+            cargoToken.balanceOf(address(this)) >= totalEscrowed + additionalFunding + additionalOperationalAllowance,
             "amendment funding not received"
         );
 
@@ -750,6 +751,12 @@ contract DeliveryEscrow is PaymentEvents {
             totalEscrowed += additionalFunding;
             lockedEscrowByShipper[delivery.shipper].totalLocked += additionalFunding;
             emit EscrowFunded(requestId, additionalFunding);
+        }
+        if (additionalOperationalAllowance > 0) {
+            delivery.operationalAllowance += additionalOperationalAllowance;
+            totalEscrowed += additionalOperationalAllowance;
+            lockedEscrowByShipper[delivery.shipper].totalLocked += additionalOperationalAllowance;
+            emit OperationalAllowanceFunded(requestId, additionalOperationalAllowance);
         }
         _markMilestoneStateChanged(requestId);
         emit RequestAmended(
@@ -1066,10 +1073,13 @@ contract DeliveryEscrow is PaymentEvents {
     {
         require(proposalId < requestProposals[requestId].length, "proposal does not exist");
         uint256 actionCount = proposalMilestones[requestId][proposalId].length;
-        uint256 perAction = (PROOF_GAS_UNIT_CAP + REIMBURSEMENT_OVERHEAD)
+        return actionCount * minimumProofAllowance();
+    }
+
+    function minimumProofAllowance() public view returns (uint256) {
+        return (PROOF_GAS_UNIT_CAP + REIMBURSEMENT_OVERHEAD)
             * referenceGasPrice()
             * CARGO_PER_ETH;
-        return actionCount * perAction;
     }
 
     /// @notice Add refundable CARGO reserve for future carrier proof submissions.

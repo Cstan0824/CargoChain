@@ -56,8 +56,11 @@ interface IDeliveryEscrowLifecycle {
         uint256 requestId,
         uint256 newDeadline,
         ExistingMilestoneFunding[] calldata existingFunding,
-        NewMilestoneFunding[] calldata newMilestones
+        NewMilestoneFunding[] calldata newMilestones,
+        uint256 additionalOperationalAllowance
     ) external payable;
+
+    function minimumProofAllowance() external view returns (uint256);
 
     function getMilestoneCount(uint256 requestId) external view returns (uint256);
 
@@ -146,6 +149,7 @@ contract LifecycleManager {
         uint256 previousDeadline;
         uint256 proposedDeadline;
         uint256 additionalFunding;
+        uint256 operationalAllowance;
         uint256 responseDeadline;
         AmendmentStatus status;
         uint256 createdAt;
@@ -240,6 +244,7 @@ contract LifecycleManager {
     event AmendmentResponseAllowanceFunded(uint256 indexed requestId, uint256 indexed amendmentId, address indexed funder, uint256 amount);
     event AmendmentResponseReimbursed(uint256 indexed requestId, uint256 indexed amendmentId, address indexed responder, uint256 amount);
     event AmendmentResponseAllowanceRefunded(uint256 indexed requestId, uint256 indexed amendmentId, address indexed funder, uint256 amount);
+    event AmendmentOperationalAllowanceFunded(uint256 indexed requestId, uint256 indexed amendmentId, uint256 amount);
 
     constructor(address cargoTokenAddress) {
         require(cargoTokenAddress != address(0), "cargo token required");
@@ -320,7 +325,8 @@ contract LifecycleManager {
             requestId,
             newDeadline,
             existingFunding,
-            newMilestones
+            newMilestones,
+            0
         );
         amendmentRequests[requestId].push(
             AmendmentRequest({
@@ -331,6 +337,7 @@ contract LifecycleManager {
                 previousDeadline: currentDeadline,
                 proposedDeadline: newDeadline,
                 additionalFunding: 0,
+                operationalAllowance: 0,
                 responseDeadline: block.timestamp,
                 status: AmendmentStatus.Accepted,
                 createdAt: block.timestamp,
@@ -438,6 +445,7 @@ contract LifecycleManager {
             existingFunding,
             newMilestones
         );
+        uint256 operationalAllowance = newMilestones.length * deliveryEscrow.minimumProofAllowance();
         require(
             proposedDeadline != currentDeadline || additionalFunding > 0,
             "amendment must change agreement"
@@ -461,16 +469,17 @@ contract LifecycleManager {
         require(
             !(msg.sender == shipper &&
                 proposedDeadline > currentDeadline &&
-                additionalFunding == 0),
+                additionalFunding == 0 &&
+                operationalAllowance == 0),
             "shipper can extend deadline directly"
         );
         if (msg.sender == shipper) {
-            if (additionalFunding > 0) {
+            if (additionalFunding + operationalAllowance > 0) {
                 require(
-                    cargoToken.allowance(msg.sender, address(this)) >= additionalFunding,
+                    cargoToken.allowance(msg.sender, address(this)) >= additionalFunding + operationalAllowance,
                     "CARGO allowance too low"
                 );
-                cargoToken.safeTransferFrom(msg.sender, address(this), additionalFunding);
+                cargoToken.safeTransferFrom(msg.sender, address(this), additionalFunding + operationalAllowance);
             }
         } else {
             // Carrier-requested funding is supplied by the shipper when the
@@ -499,6 +508,7 @@ contract LifecycleManager {
                 previousDeadline: currentDeadline,
                 proposedDeadline: proposedDeadline,
                 additionalFunding: additionalFunding,
+                operationalAllowance: operationalAllowance,
                 responseDeadline: responseDeadline,
                 status: AmendmentStatus.Pending,
                 createdAt: block.timestamp,
@@ -533,6 +543,9 @@ contract LifecycleManager {
         if (responseAllowance > 0) {
             emit AmendmentResponseAllowanceFunded(requestId, amendmentId, msg.sender, responseAllowance);
         }
+        if (operationalAllowance > 0) {
+            emit AmendmentOperationalAllowanceFunded(requestId, amendmentId, operationalAllowance);
+        }
     }
 
     function acceptAmendment(uint256 requestId, uint256 amendmentId)
@@ -547,12 +560,12 @@ contract LifecycleManager {
         _requireCurrentMilestoneState(requestId, NegotiationKind.Amendment, amendmentId);
 
         (address shipper, , , , ) = deliveryEscrow.getLifecycleSnapshot(requestId);
-        if (amendment.requester != shipper && amendment.additionalFunding > 0) {
+        if (amendment.requester != shipper && amendment.additionalFunding + amendment.operationalAllowance > 0) {
             require(
-                cargoToken.allowance(msg.sender, address(this)) >= amendment.additionalFunding,
+                cargoToken.allowance(msg.sender, address(this)) >= amendment.additionalFunding + amendment.operationalAllowance,
                 "CARGO allowance too low"
             );
-            cargoToken.safeTransferFrom(msg.sender, address(this), amendment.additionalFunding);
+            cargoToken.safeTransferFrom(msg.sender, address(this), amendment.additionalFunding + amendment.operationalAllowance);
         }
 
         IDeliveryEscrowLifecycle.ExistingMilestoneFunding[] memory existingFunding =
@@ -560,19 +573,21 @@ contract LifecycleManager {
         IDeliveryEscrowLifecycle.NewMilestoneFunding[] memory newMilestones =
             _copyNewMilestones(requestId, amendmentId);
         uint256 amendmentFunding = amendment.additionalFunding;
+        uint256 amendmentOperationalAllowance = amendment.operationalAllowance;
         uint256 proposedDeadline = amendment.proposedDeadline;
 
         amendment.status = AmendmentStatus.Accepted;
         amendment.resolvedAt = block.timestamp;
         _closeNegotiation(requestId, NegotiationKind.Amendment, amendmentId);
-        if (amendmentFunding > 0) {
-            cargoToken.safeTransfer(address(deliveryEscrow), amendmentFunding);
+        if (amendmentFunding + amendmentOperationalAllowance > 0) {
+            cargoToken.safeTransfer(address(deliveryEscrow), amendmentFunding + amendmentOperationalAllowance);
         }
         deliveryEscrow.finalizeAmendment(
             requestId,
             proposedDeadline,
             existingFunding,
-            newMilestones
+            newMilestones,
+            amendmentOperationalAllowance
         );
         _reimburseAmendmentResponse(requestId, amendmentId, gasAtStart);
         _refundStagedAmendment(requestId, amendmentId);
@@ -1045,9 +1060,9 @@ contract LifecycleManager {
         if (
             amendment.status != AmendmentStatus.Accepted
             && amendment.requester == shipper
-            && amendment.additionalFunding > 0
+            && amendment.additionalFunding + amendment.operationalAllowance > 0
         ) {
-            cargoToken.safeTransfer(shipper, amendment.additionalFunding);
+            cargoToken.safeTransfer(shipper, amendment.additionalFunding + amendment.operationalAllowance);
         }
         if (amendment.responseAllowance > amendment.responseAllowanceSpent) {
             uint256 remaining = amendment.responseAllowance - amendment.responseAllowanceSpent;
