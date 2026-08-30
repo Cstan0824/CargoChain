@@ -5,6 +5,7 @@ import {
   HiOutlineCheckCircle,
   HiOutlineIdentification,
   HiOutlineInformationCircle,
+  HiOutlineExclamationTriangle,
   HiOutlineWallet,
   HiOutlineXMark,
 } from 'react-icons/hi2';
@@ -12,7 +13,9 @@ import {
   formatWalletTransactionError,
   sendWalletContractTransaction,
 } from '../utils/walletTransaction.js';
+import { CARGO_NETWORK_CONFIG, isNetworkMismatch } from '../utils/network.js';
 import { countWords, utf8Length } from '../utils/textLimits.js';
+import { startTransactionToast } from '../utils/transactionToast.js';
 import styles from './RegistrationModal.module.css';
 
 const MAX_DISPLAY_NAME_BYTES = 64;
@@ -22,6 +25,10 @@ export function RegistrationModal({
   isOpen,
   walletAddress,
   userRegistry,
+  expectedChainId,
+  walletChainId,
+  walletBusy = false,
+  switchNetwork,
   signer,
   provider,
   mandatory = false,
@@ -47,6 +54,9 @@ export function RegistrationModal({
   const nameTooLong = nameBytes > MAX_DISPLAY_NAME_BYTES
     || nameWordCount > MAX_DISPLAY_NAME_WORDS;
   const isSubmitting = stage === 'wallet' || stage === 'mining' || stage === 'refreshing';
+  const networkLoading = Boolean(walletAddress && expectedChainId != null && walletChainId == null);
+  const networkMismatch = isNetworkMismatch(walletChainId, expectedChainId);
+  const networkBlocked = networkLoading || networkMismatch;
 
   useEffect(() => {
     operationRef.current += 1;
@@ -85,6 +95,14 @@ export function RegistrationModal({
     setTouched(true);
     setError('');
     if (validationError) return;
+    if (networkLoading) {
+      setError('Checking the MetaMask network. Try again in a moment.');
+      return;
+    }
+    if (networkMismatch) {
+      setError(`Switch MetaMask to ${CARGO_NETWORK_CONFIG.chainName} (chain ${expectedChainId}) before registering.`);
+      return;
+    }
     if (!walletAddress || !userRegistry || !signer || !provider) {
       setError('Wallet registration is not available on the current network.');
       return;
@@ -94,6 +112,7 @@ export function RegistrationModal({
     const operationId = ++operationRef.current;
     const submittedWallet = walletAddress;
     const submittedRegistry = userRegistry;
+    let transactionToast;
 
     try {
       setStage('wallet');
@@ -104,6 +123,11 @@ export function RegistrationModal({
         throw new Error('The active MetaMask account changed. Reopen registration for the current wallet.');
       }
 
+      transactionToast = startTransactionToast({
+        wallet: 'Confirm wallet registration in MetaMask…',
+        submitted: 'Registering wallet identity…',
+        success: 'Wallet identity registered.',
+      });
       const transaction = await sendWalletContractTransaction({
         contract: submittedRegistry,
         method: 'registerUser',
@@ -115,17 +139,20 @@ export function RegistrationModal({
       if (operationId !== operationRef.current) return;
       setTransactionHash(transaction.hash || '');
       setStage('mining');
+      transactionToast.submitted();
       await transaction.wait();
 
       if (operationId !== operationRef.current) return;
       setStage('refreshing');
       const shouldClose = await onRegistered?.(submittedWallet, submittedRegistry);
+      transactionToast.success();
       if (operationId === operationRef.current && shouldClose !== false) onClose();
     } catch (caughtError) {
       if (operationId !== operationRef.current) return;
 
       const message = formatRegistrationError(caughtError);
       if (message.alreadyRegistered) {
+        transactionToast?.success();
         setStage('refreshing');
         const shouldClose = await onRegistered?.(submittedWallet, submittedRegistry);
         if (operationId === operationRef.current && shouldClose !== false) onClose();
@@ -134,6 +161,7 @@ export function RegistrationModal({
 
       setStage('error');
       setError(message.text);
+      transactionToast?.error(message.text);
     } finally {
       if (operationId === operationRef.current) submitLockRef.current = false;
     }
@@ -163,10 +191,10 @@ export function RegistrationModal({
             </span>
             <div>
               <h2 id={titleId} className={styles.title}>
-                {mandatory ? 'Register to continue' : 'Choose how CargoChain recognizes you'}
+                {mandatory ? 'Add a wallet alias to continue' : 'Add a public wallet alias'}
               </h2>
               <p id={descriptionId} className={styles.subtitle}>
-                Add a public display name to this wallet. Registration does not assign a shipper or carrier role.
+                Add a public alias to this MetaMask wallet. The same wallet can act as both shipper and carrier.
               </p>
             </div>
           </div>
@@ -199,10 +227,34 @@ export function RegistrationModal({
             </div>
           </div>
 
+          {networkBlocked && (
+            <div className={styles.networkNotice} role="alert">
+              <HiOutlineExclamationTriangle aria-hidden="true" />
+              <div className={styles.networkNoticeContent}>
+                <strong>{networkLoading ? 'Checking wallet network' : `Switch to ${CARGO_NETWORK_CONFIG.chainName}`}</strong>
+                <span>
+                  {networkLoading
+                    ? 'CargoChain is checking which network MetaMask is using.'
+                    : `MetaMask is on chain ${walletChainId}. CargoChain uses chain ${expectedChainId}.`}
+                </span>
+                {!networkLoading && (
+                  <button
+                    type="button"
+                    className={styles.networkButton}
+                    onClick={switchNetwork}
+                    disabled={walletBusy}
+                  >
+                    {walletBusy ? 'Switching…' : 'Switch network'}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className={styles.explanation}>
             <HiOutlineCheckCircle aria-hidden="true" />
             <p>
-              Your wallet remains your identity. The display name simply makes activity easier for other CargoChain users to recognize.
+              This alias is public on the CargoChain network and helps other users recognize this wallet.
             </p>
           </div>
 
@@ -269,9 +321,9 @@ export function RegistrationModal({
             <button
               type="submit"
               className={styles.primaryButton}
-              disabled={isSubmitting}
+              disabled={isSubmitting || networkBlocked}
             >
-              {getSubmitLabel(stage)}
+              {getSubmitLabel(stage, networkBlocked)}
             </button>
           </footer>
         </form>
@@ -311,10 +363,11 @@ function getStageDescription(stage, transactionHash) {
   return 'Refreshing your CargoChain profile.';
 }
 
-function getSubmitLabel(stage) {
+function getSubmitLabel(stage, networkBlocked) {
   if (stage === 'wallet') return 'Waiting for wallet…';
   if (stage === 'mining') return 'Confirming on-chain…';
   if (stage === 'refreshing') return 'Refreshing profile…';
+  if (networkBlocked) return 'Switch network first';
   return 'Register wallet';
 }
 
@@ -360,13 +413,13 @@ function formatRegistrationError(error) {
   }
   if (normalized.includes('header not found')) {
     return {
-      text: 'Ganache rejected a stale wallet block reference. Refresh CargoChain and retry the registration.',
+      text: `${CARGO_NETWORK_CONFIG.chainName} rejected a stale wallet block reference. Refresh CargoChain and retry the registration.`,
       alreadyRegistered: false,
     };
   }
   if (normalized.includes('current network does not support eip-1559')) {
     return {
-      text: 'MetaMask has outdated fee settings for Local Ganache. Refresh CargoChain and retry the registration.',
+      text: `MetaMask has outdated fee settings for ${CARGO_NETWORK_CONFIG.chainName}. Refresh CargoChain and retry with the configured network selected.`,
       alreadyRegistered: false,
     };
   }
@@ -378,7 +431,7 @@ function formatRegistrationError(error) {
   }
   if (normalized.includes('could not coalesce error')) {
     return {
-      text: 'MetaMask could not submit the registration to Ganache. Refresh CargoChain, confirm Local Ganache is selected, and try again.',
+      text: `MetaMask could not submit the registration to ${CARGO_NETWORK_CONFIG.chainName}. Refresh CargoChain, confirm the configured network is selected, and try again.`,
       alreadyRegistered: false,
     };
   }

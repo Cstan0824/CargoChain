@@ -12,6 +12,7 @@
 // and uses MetaMask only for signing/broadcasting.
 
 import { Contract } from 'ethers';
+import { CARGO_NETWORK_CONFIG } from '../utils/network.js';
 
 // Glob matches all built contract artifacts. `eager: true` returns the
 // JSON synchronously; `importAs: 'default'` reads the default export.
@@ -88,7 +89,7 @@ export async function validateContractMap(provider, contracts) {
   } catch (error) {
     if (isMissingHeaderError(error)) {
       throw new Error(
-        'Ganache returned a stale block header after several retries. ' +
+        `${CARGO_NETWORK_CONFIG.chainName} returned a stale block header after several retries. ` +
         'Restart npm run dev:all to recreate and redeploy the local chain.',
       );
     }
@@ -130,7 +131,7 @@ function deploymentMismatchError(name, address) {
   const target = address ? ` at ${address}` : '';
   return new Error(
     `${name}${target} does not match the current CargoChain deployment. ` +
-    'In MetaMask, use RPC http://127.0.0.1:7545 with chain ID 1337, then refresh. ' +
+    `In MetaMask, use ${CARGO_NETWORK_CONFIG.rpcUrl} with chain ID ${CARGO_NETWORK_CONFIG.chainId}, then refresh. ` +
     'If that RPC is already selected, restart npm run dev:all to redeploy.',
   );
 }

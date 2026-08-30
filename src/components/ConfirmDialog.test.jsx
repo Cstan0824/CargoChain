@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { useConfirmDialog } from '../hooks/useConfirmDialog.js';
@@ -51,5 +51,24 @@ describe('ConfirmDialog', () => {
 
     await waitFor(() => expect(screen.getByText('cancelled')).toBeTruthy());
     expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('traps focus and restores it to the opener', async () => {
+    const user = userEvent.setup();
+    render(<ConfirmationHarness />);
+
+    const opener = screen.getByRole('button', { name: 'Open confirmation' });
+    await user.click(opener);
+    const cancelButton = screen.getByRole('button', { name: 'Go back' });
+    const confirmButton = screen.getByRole('button', { name: 'Cancel request' });
+    const closeButton = screen.getByRole('button', { name: 'Close confirmation' });
+
+    await waitFor(() => expect(document.activeElement).toBe(cancelButton));
+    confirmButton.focus();
+    fireEvent.keyDown(window, { key: 'Tab' });
+    expect(document.activeElement).toBe(closeButton);
+
+    await user.click(cancelButton);
+    await waitFor(() => expect(document.activeElement).toBe(opener));
   });
 });

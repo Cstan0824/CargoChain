@@ -76,19 +76,27 @@
 
 /* --- Filter bar --- */
 .filterBar {
-  padding: var(--s-3);
+  padding: var(--s-2);
+  border-radius: var(--r-xl);
 }
 
 .filterRow {
   display: flex;
   align-items: center;
-  gap: var(--s-3);
-  flex-wrap: wrap;
+  gap: var(--s-2);
+  flex-wrap: nowrap;
 }
 
-.filterRow > :global(.SearchInput) {
-  flex: 1;
+.search {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+}
+
+.filterRow > .search {
+  flex: 1 1 auto;
   min-width: 240px;
+  max-width: none;
 }
 
 .viewToggle {
@@ -96,21 +104,23 @@
   align-items: center;
   gap: 2px;
   min-height: 40px;
-  padding: 3px;
-  border-radius: var(--r-md);
+  padding: 4px;
+  border-radius: var(--r-lg);
   background: var(--bg-subtle);
   box-shadow: inset 0 0 0 1px var(--border-soft);
+  margin-left: auto;
+  flex: 0 0 auto;
 }
 
 .viewToggleBtn {
-  min-height: 34px;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
   padding: 6px 10px;
   border: 0;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--text-secondary);
   font-size: var(--fs-sm);
@@ -145,6 +155,10 @@
 
 /* --- Notice --- */
 .notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
   font-size: var(--fs-sm);
   padding: var(--s-3) var(--s-4);
   background: var(--warning-soft);
@@ -166,8 +180,27 @@
 
 /* --- Empty card (wraps EmptyState) --- */
 .emptyCard {
-  padding: var(--s-6);
+  display: grid;
+  min-height: 280px;
+  place-items: center;
+  padding: var(--s-2);
 }
+
+.loadingState {
+  display: grid;
+  min-height: 280px;
+  place-items: center;
+  padding: var(--s-8) var(--s-4);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+
+.skeletonCard {
+  pointer-events: none;
+}
+.skeletonCard:hover { transform: none; box-shadow: var(--shadow-sm); }
+.skeletonCard .cardRoute,
+.skeletonCard .cardFooter { justify-content: space-between; }
 
 /* --- Route cell (now a clickable button) --- */
 .routeCell {
@@ -275,37 +308,6 @@
   white-space: nowrap;
 }
 
-/* --- Action cell --- */
-.actionCell {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--s-2);
-}
-
-.viewBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: transparent;
-  border: 0;
-  padding: 8px 4px;
-  min-height: 40px;
-  font: inherit;
-  font-size: var(--fs-sm);
-  color: var(--primary);
-  cursor: pointer;
-  transition: color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease);
-}
-
-.viewBtn:hover { text-decoration: underline; }
-.viewBtn:active:not(:disabled) { transform: scale(0.96); }
-
-.viewIcon {
-  width: 14px;
-  height: 14px;
-}
-
 /* --- Card view --- */
 .cardGrid {
   display: grid;
@@ -325,7 +327,6 @@
   box-shadow: var(--shadow-sm);
   border: 1px solid var(--border-soft);
   text-align: left;
-  cursor: pointer;
   width: 100%;
   color: inherit;
   transition: transform var(--dur-2) var(--ease), box-shadow var(--dur-2) var(--ease), background var(--dur-1) var(--ease);
@@ -405,7 +406,8 @@
 }
 
 .cargoIcon {
-  font-size: 14px;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
 }
 
@@ -435,6 +437,8 @@
 }
 
 .warningIcon {
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
 }
 
@@ -443,6 +447,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+.specialLabel {
+  flex: 0 0 auto;
+  color: var(--warning);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
 }
 
 .cardDivider {
@@ -460,6 +471,30 @@
   gap: var(--s-3);
 }
 
+.cardOpenButton {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  margin-top: var(--s-1);
+  padding: 0 2px;
+  border: 0;
+  color: var(--primary);
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+  transition-property: color, transform;
+  transition-duration: var(--dur-1);
+  transition-timing-function: var(--ease);
+}
+
+.cardOpenButton:hover { color: var(--primary-hover); text-decoration: underline; }
+.cardOpenButton:active { transform: scale(0.96); }
+.cardOpenButton svg { width: 16px; height: 16px; }
+
 .cardPaymentBox,
 .cardDeadlineBox {
   display: flex;
@@ -468,7 +503,7 @@
 }
 
 .footerLabel {
-  font-size: 9px;
+  font-size: var(--fs-xs);
   font-weight: var(--fw-bold);
   color: var(--text-secondary);
   letter-spacing: 0.05em;
@@ -535,6 +570,32 @@
   font-weight: var(--fw-medium);
 }
 
+.rowAction {
+  display: inline-flex;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--primary);
+  cursor: pointer;
+  transition-property: background-color, border-color, color, transform;
+  transition-duration: var(--dur-1);
+  transition-timing-function: var(--ease);
+}
+.rowAction:hover {
+  background: var(--primary-soft);
+  border-color: color-mix(in srgb, var(--primary) 18%, var(--border-soft));
+}
+.rowAction:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.rowAction:active { transform: scale(0.96); }
+.rowAction svg { width: 18px; height: 18px; }
+
 /* --- Empty state inside table --- */
 .empty {
   text-align: center;
@@ -548,10 +609,16 @@
 
   .filterRow {
     align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .filterRow > .search {
+    flex: 1 1 100%;
+    min-width: 0;
   }
 
   .viewToggle {
-    width: 100%;
+    margin-left: auto;
   }
 
   .viewToggleBtn {

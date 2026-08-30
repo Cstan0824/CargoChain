@@ -184,86 +184,127 @@ export function eventLogToNotice(log, timestampMs, eventNameOverride = '', conte
 
   switch (eventName) {
     case 'RequestCreated':
-      return { ...base, tone: 'request', text: 'Delivery request created.' };
-    case 'MilestonePlanProposed':
-      return { ...base, tone: 'proposal', text: `Carrier submitted proposal #${Number(args.proposalId) + 1}.` };
-    case 'MilestonePlanRevoked':
-      return { ...base, tone: 'proposal', text: `Carrier revoked proposal #${Number(args.proposalId) + 1}.` };
-    case 'MilestonePlanRejected':
       return {
         ...base,
-        tone: 'warning',
-        text: proposalRejectionText(args.proposalId, context.proposalNotes),
+        tone: 'request',
+        subject: 'Request',
+        action: 'created',
+        text: 'Request created',
       };
-    case 'MilestonePlanAccepted':
-      return { ...base, tone: 'success', text: `Proposal #${Number(args.proposalId) + 1} was accepted.` };
-    case 'EscrowFunded':
-      return { ...base, tone: 'payment', text: `Escrow funded with ${formatAmount(args.amount)} ETH.` };
-    case 'ProofSubmitted':
-      return { ...base, tone: 'proof', text: `Photo proof submitted for checkpoint ID ${Number(args.milestoneId)}.` };
+    case 'MilestonePlanProposed': {
+      const subject = `Proposal #${Number(args.proposalId) + 1}`;
+      return { ...base, tone: 'proposal', subject, action: 'submitted', text: `${subject} submitted` };
+    }
+    case 'MilestonePlanRevoked': {
+      const subject = `Proposal #${Number(args.proposalId) + 1}`;
+      return { ...base, tone: 'proposal', subject, action: 'revoked', text: `${subject} revoked` };
+    }
+    case 'MilestonePlanRejected':
+      {
+        const subject = `Proposal #${Number(args.proposalId) + 1}`;
+        const rejectionNote = context.proposalNotes?.get(Number(args.proposalId));
+        return {
+          ...base,
+          tone: 'warning',
+          subject,
+          action: 'rejected',
+          detail: rejectionNote ? ` Note: ${rejectionNote}` : '',
+          text: proposalRejectionText(args.proposalId, context.proposalNotes),
+        };
+      }
+    case 'MilestonePlanAccepted': {
+      const subject = `Proposal #${Number(args.proposalId) + 1}`;
+      return { ...base, tone: 'success', subject, action: 'accepted', text: `${subject} accepted` };
+    }
+    case 'EscrowFunded': {
+      const amount = formatAmount(args.amount);
+      return { ...base, tone: 'payment', subject: 'Escrow', action: 'funded', detail: ` with ${amount} ETH.`, text: `Escrow funded with ${amount} ETH.` };
+    }
+    case 'ProofSubmitted': {
+      const subject = `Checkpoint ID ${Number(args.milestoneId)}`;
+      return { ...base, tone: 'proof', subject, action: 'photo proof submitted', text: `${subject} photo proof submitted.` };
+    }
     case 'MilestoneVerified':
       if (args.approved === false) return null;
-      return { ...base, tone: 'success', text: `Checkpoint ID ${Number(args.milestoneId)} was verified.` };
+      {
+        const subject = `Checkpoint ID ${Number(args.milestoneId)}`;
+        return { ...base, tone: 'success', subject, action: 'verified', text: `${subject} was verified.` };
+      }
     case 'MilestoneRejected':
-      return {
-        ...base,
-        tone: 'warning',
-        text: args.reason
-          ? `Checkpoint ID ${Number(args.milestoneId)} was rejected: ${args.reason}`
-          : `Checkpoint ID ${Number(args.milestoneId)} was rejected.`,
-      };
-    case 'MilestonePaid':
-      return { ...base, tone: 'payment', text: `${formatAmount(args.amount)} ETH released for checkpoint ID ${Number(args.milestoneId)}.` };
+      {
+        const subject = `Checkpoint ID ${Number(args.milestoneId)}`;
+        const text = args.reason
+          ? `${subject} was rejected: ${args.reason}`
+          : `${subject} was rejected.`;
+        return { ...base, tone: 'warning', subject, action: 'rejected', detail: args.reason ? `: ${args.reason}` : '.', text };
+      }
+    case 'MilestonePaid': {
+      const subject = `Checkpoint ID ${Number(args.milestoneId)}`;
+      const amount = formatAmount(args.amount);
+      return { ...base, tone: 'payment', subject, action: 'paid', detail: ` (${amount} ETH released).`, text: `${amount} ETH released for ${subject}.` };
+    }
     case 'RequestCancelled':
-      return { ...base, tone: 'warning', text: 'Delivery request cancelled.' };
+      return { ...base, tone: 'warning', subject: 'Delivery request', action: 'cancelled', text: 'Delivery request cancelled.' };
     case 'RequestCompleted':
-      return { ...base, tone: 'success', text: 'Delivery completed and final escrow payment released.' };
+      return { ...base, tone: 'success', subject: 'Delivery', action: 'completed', detail: ' and final escrow payment released.', text: 'Delivery completed and final escrow payment released.' };
     case 'RequestExpired':
-      return { ...base, tone: 'warning', text: 'Shipment deadline passed; remaining escrow can be refunded to the shipper.' };
-    case 'RefundIssued':
-      return { ...base, tone: 'payment', text: `${formatAmount(args.amount)} ETH refunded to the shipper.` };
-    case 'CarrierTipped':
-      return { ...base, tone: 'payment', text: `The shipper sent a ${formatAmount(args.amount)} ETH completion tip.` };
+      return { ...base, tone: 'warning', subject: 'Shipment deadline', action: 'passed', detail: '; remaining escrow can be refunded to the shipper.', text: 'Shipment deadline passed; remaining escrow can be refunded to the shipper.' };
+    case 'RefundIssued': {
+      const amount = formatAmount(args.amount);
+      return { ...base, tone: 'payment', subject: 'Refund', action: 'issued', detail: ` (${amount} ETH returned to the shipper).`, text: `${amount} ETH refunded to the shipper.` };
+    }
+    case 'CarrierTipped': {
+      const amount = formatAmount(args.amount);
+      return { ...base, tone: 'payment', subject: 'Completion tip', action: 'sent', detail: ` (${amount} ETH to the carrier).`, text: `The shipper sent a ${amount} ETH completion tip.` };
+    }
     case 'CarrierRated':
-      return { ...base, tone: 'success', text: 'Carrier rating published.' };
+      return { ...base, tone: 'success', subject: 'Carrier rating', action: 'published', text: 'Carrier rating published.' };
     case 'ShipmentDeadlineExtended':
       return {
         ...base,
         tone: 'success',
+        subject: 'Shipment deadline',
+        action: 'extended',
+        detail: args.note ? ` Note: ${args.note}` : '',
         text: args.note ? `Shipment deadline extended. Note: ${args.note}` : 'Shipment deadline extended.',
       };
     case 'AmendmentRequested':
       return {
         ...base,
         tone: 'request',
+        subject: 'Agreement change',
+        action: 'needs a response',
+        detail: args.additionalFunding > 0 ? ` ${formatAmount(args.additionalFunding)} additional escrow proposed.` : '',
         text: amendmentRequestText(args.additionalFunding),
         actionable: true,
         focusTarget: 'amendment',
       };
     case 'AmendmentAccepted':
-      return { ...base, tone: 'success', text: 'Agreement change accepted and applied.' };
+      return { ...base, tone: 'success', subject: 'Agreement change', action: 'accepted', detail: ' and applied.', text: 'Agreement change accepted and applied.' };
     case 'AmendmentRejected':
-      return { ...base, tone: 'warning', text: 'Agreement change rejected; the existing agreement continues.' };
+      return { ...base, tone: 'warning', subject: 'Agreement change', action: 'rejected', detail: '; the existing agreement continues.', text: 'Agreement change rejected; the existing agreement continues.' };
     case 'AmendmentWithdrawn':
-      return { ...base, tone: 'warning', text: 'Agreement change request withdrawn.' };
+      return { ...base, tone: 'warning', subject: 'Agreement change', action: 'withdrawn', detail: ' request.', text: 'Agreement change request withdrawn.' };
     case 'AmendmentExpired':
-      return { ...base, tone: 'warning', text: 'Agreement change request expired without a response.' };
+      return { ...base, tone: 'warning', subject: 'Agreement change', action: 'expired', detail: ' without a response.', text: 'Agreement change request expired without a response.' };
     case 'CancellationRequested':
       return {
         ...base,
         tone: 'request',
+        subject: 'Cancellation request',
+        action: 'needs a response',
         text: 'A cancellation request needs a response.',
         actionable: true,
         focusTarget: 'cancellation',
       };
     case 'CancellationAccepted':
-      return { ...base, tone: 'warning', text: 'Cancellation agreed; remaining escrow was returned to the shipper.' };
+      return { ...base, tone: 'warning', subject: 'Cancellation', action: 'agreed', detail: '; remaining escrow was returned to the shipper.', text: 'Cancellation agreed; remaining escrow was returned to the shipper.' };
     case 'CancellationRejected':
-      return { ...base, tone: 'success', text: 'Cancellation request rejected; the shipment continues.' };
+      return { ...base, tone: 'success', subject: 'Cancellation request', action: 'rejected', detail: '; the shipment continues.', text: 'Cancellation request rejected; the shipment continues.' };
     case 'CancellationWithdrawn':
-      return { ...base, tone: 'warning', text: 'Cancellation request withdrawn.' };
+      return { ...base, tone: 'warning', subject: 'Cancellation request', action: 'withdrawn', text: 'Cancellation request withdrawn.' };
     case 'CancellationExpired':
-      return { ...base, tone: 'warning', text: 'Cancellation request expired without a response.' };
+      return { ...base, tone: 'warning', subject: 'Cancellation request', action: 'expired', detail: ' without a response.', text: 'Cancellation request expired without a response.' };
     default:
       return null;
   }
@@ -287,9 +328,8 @@ async function getBlockTimestamp(provider, blockNumber) {
 
 function formatAmount(value) {
   try {
-    const [whole, fraction = ''] = formatEther(value).split('.');
-    const trimmedFraction = fraction.slice(0, 4).replace(/0+$/, '');
-    return trimmedFraction ? `${whole}.${trimmedFraction}` : whole;
+    // Keep blockchain amounts deterministic across browser and test locales.
+    return Number(formatEther(value)).toLocaleString('en-US', { maximumFractionDigits: 4 });
   } catch {
     return '0';
   }

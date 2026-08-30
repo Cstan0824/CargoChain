@@ -38,6 +38,23 @@ describe('mergeChatTimeline', () => {
     expect(notice.tone).toBe('payment');
   });
 
+  it('uses concise neutral-row copy for request and proposal activity', () => {
+    const request = eventLogToNotice({
+      eventName: 'RequestCreated', transactionHash: '0x1', index: 0, blockNumber: 1, args: {},
+    }, 1_700_000_000_000);
+    const proposal = eventLogToNotice({
+      eventName: 'MilestonePlanProposed', transactionHash: '0x2', index: 1, blockNumber: 2,
+      args: { proposalId: 0n },
+    }, 1_700_000_001_000);
+
+    expect(request.text).toBe('Request created');
+    expect(request.subject).toBe('Request');
+    expect(request.action).toBe('created');
+    expect(proposal.text).toBe('Proposal #1 submitted');
+    expect(proposal.subject).toBe('Proposal #1');
+    expect(proposal.action).toBe('submitted');
+  });
+
   it('renders actionable lifecycle requests, proposal notes, completion outcomes, tips, and ratings', () => {
     const amendment = eventLogToNotice({
       eventName: 'AmendmentRequested',

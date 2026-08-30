@@ -1,13 +1,6 @@
 // src/utils/avatar.js — CargoChain
-// Single source of truth for picking an avatar asset. Used by Topbar,
-// Sidebar, Profile, etc. so the rule lives in one place.
-
-import {
-  avatarShipperMale,
-  avatarShipperFemale,
-  avatarCarrierDriver,
-  avatarPlaceholder,
-} from '../assets';
+// Legacy compatibility helper. CargoChain now uses a code-native avatar
+// fallback so identity visuals stay neutral until a user supplies a photo.
 
 /**
  * pickAvatar(role, seed) — deterministic avatar selection.
@@ -22,11 +15,7 @@ import {
  * BusinessFlow §6: Role enum is `None | Shipper | Carrier` — no "Both".
  */
 export function pickAvatar(role, seed) {
-  if (role === 'Carrier') return avatarCarrierDriver;
-  if (role === 'Shipper') {
-    let hash = 0;
-    for (let i = 0; i < (seed || '').length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
-    return hash % 2 === 0 ? avatarShipperMale : avatarShipperFemale;
-  }
-  return avatarPlaceholder;
+  void role;
+  void seed;
+  return null;
 }

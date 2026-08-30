@@ -5,9 +5,10 @@ import { useNavigate } from 'react-router-dom';
 import { HiOutlineChatBubbleLeftRight } from 'react-icons/hi2';
 import { supabase } from '../../lib/supabaseClient';
 import { getConversationMessages } from '../../services/chatReadService';
-import { formatDate } from '../../utils/format';
+import { formatTime } from '../../utils/format';
 import { useWallet } from '../../context/Web3Context';
 import { displayNameOrAddress } from '../../hooks/useConversationPresentation';
+import { Skeleton } from '../Skeleton.jsx';
 import {
   fetchRequestNotices,
   mergeChatTimeline,
@@ -43,9 +44,11 @@ export function MessageTimeline({
   const isNearBottomRef = useRef(true);
   const activeLoadRef = useRef(0);
   const shouldScrollOnReadyRef = useRef(true);
+  const optimisticMessagesRef = useRef(new Map());
 
   const scrollToBottom = useCallback((smooth = false) => {
-    scrollRef.current?.scrollTo({
+    if (typeof scrollRef.current?.scrollTo !== 'function') return;
+    scrollRef.current.scrollTo({
       top: scrollRef.current.scrollHeight,
       behavior: smooth ? 'smooth' : 'auto',
     });
@@ -74,12 +77,14 @@ export function MessageTimeline({
     const loadingStartedAt = Date.now();
     setTimelineState({
       status: 'loading',
-      messages: [],
+      messages: Array.from(optimisticMessagesRef.current.values()),
       notices: [],
       error: null,
     });
     shouldScrollOnReadyRef.current = true;
-    scrollRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+    if (typeof scrollRef.current?.scrollTo === 'function') {
+      scrollRef.current.scrollTo({ top: 0, behavior: 'auto' });
+    }
 
     try {
       const [messageResult, noticeResult] = await Promise.allSettled([
@@ -97,9 +102,18 @@ export function MessageTimeline({
       if (messageResult.status === 'rejected') throw messageResult.reason;
       await waitForMinimumLoadingDuration(loadingStartedAt);
       if (loadId !== activeLoadRef.current) return;
+      const optimisticMessages = Array.from(optimisticMessagesRef.current.values());
+      let mergedMessages = optimisticMessages.reduce(
+        (messages, message) => reconcileMessageList(messages, message, currentWallet),
+        [],
+      );
+      mergedMessages = messageResult.value.reduce(
+        (messages, message) => reconcileMessageList(messages, message, currentWallet),
+        mergedMessages,
+      );
       setTimelineState({
         status: 'ready',
-        messages: messageResult.value,
+        messages: mergedMessages,
         notices: noticeResult.status === 'fulfilled' ? noticeResult.value : [],
         error: null,
       });
@@ -113,7 +127,12 @@ export function MessageTimeline({
         error: caughtError.message || 'Failed to load chat history.',
       });
     }
-  }, [carrierWallet, conversationId, deliveryEscrow, lifecycleManager, provider, reputationRegistry, requestId, scrollToBottom]);
+  }, [carrierWallet, conversationId, currentWallet, deliveryEscrow, lifecycleManager, provider, reputationRegistry, requestId, scrollToBottom]);
+
+  useEffect(() => {
+    optimisticMessagesRef.current.clear();
+    setTimelineState((current) => ({ ...current, messages: [] }));
+  }, [conversationId]);
 
   useEffect(() => {
     loadTimeline();
@@ -140,15 +159,33 @@ export function MessageTimeline({
     });
   }, [deliveryEscrow, lifecycleManager, reputationRegistry, refreshNotices, requestId]);
 
+  const upsertMessage = useCallback((message) => {
+    if (!message?.message_id || message.conversation_id !== conversationId) return;
+
+    const clientMessageId = getClientMessageId(message);
+    if (isOptimisticMessage(message) || clientMessageId) {
+      if (getDeliveryStatus(message) === 'sent' || (!isOptimisticMessage(message) && !message.optimistic)) {
+        if (clientMessageId) optimisticMessagesRef.current.delete(clientMessageId);
+      } else if (clientMessageId) {
+        optimisticMessagesRef.current.set(clientMessageId, message);
+      }
+    } else if (!isOptimisticMessage(message)) {
+      const reconciledPending = Array.from(optimisticMessagesRef.current.entries())
+        .find(([, pending]) => canReconcileByContent(pending, message, currentWallet));
+      if (reconciledPending) optimisticMessagesRef.current.delete(reconciledPending[0]);
+    }
+
+    setTimelineState((current) => ({
+      ...current,
+      messages: reconcileMessageList(current.messages, message, currentWallet),
+    }));
+    setTimeout(() => scrollToBottom(true), 50);
+  }, [conversationId, currentWallet, scrollToBottom]);
+
   useEffect(() => {
     if (!appendedMessage?.message_id || appendedMessage.conversation_id !== conversationId) return;
-    setTimelineState((current) => {
-      if (current.status !== 'ready'
-        || current.messages.some((message) => message.message_id === appendedMessage.message_id)) return current;
-      return { ...current, messages: [...current.messages, appendedMessage] };
-    });
-    setTimeout(() => scrollToBottom(true), 50);
-  }, [appendedMessage, conversationId, scrollToBottom]);
+    upsertMessage(appendedMessage);
+  }, [appendedMessage, conversationId, upsertMessage]);
 
   useEffect(() => {
     if (!conversationId) return undefined;
@@ -162,11 +199,7 @@ export function MessageTimeline({
       }, (payload) => {
         const message = payload.new;
         if (!message?.message_id) return;
-        setTimelineState((current) => {
-          if (current.status !== 'ready'
-            || current.messages.some((item) => item.message_id === message.message_id)) return current;
-          return { ...current, messages: [...current.messages, message] };
-        });
+        upsertMessage(message);
         if (message.sender_wallet?.toLowerCase() === currentWallet || isNearBottomRef.current) {
           setTimeout(() => scrollToBottom(true), 50);
         }
@@ -174,7 +207,7 @@ export function MessageTimeline({
       .subscribe();
 
     return () => supabase.removeChannel(channel);
-  }, [conversationId, currentWallet, loadTimeline, scrollToBottom]);
+  }, [conversationId, currentWallet, scrollToBottom, upsertMessage]);
 
   const timeline = useMemo(
     () => mergeChatTimeline(timelineState.messages, timelineState.notices),
@@ -189,12 +222,16 @@ export function MessageTimeline({
   };
 
   return (
-    <section className={styles.container} aria-label="Message timeline">
+    <section className={styles.container} aria-label="Message timeline" aria-busy={isLoading}>
       <div ref={scrollRef} onScroll={handleScroll} className={styles.scrollArea}>
-        {isLoading && (
-          <div className={styles.loadingState} role="status" aria-live="polite">
-            <span className={styles.loadingSpinner} aria-hidden="true" />
-            <span>Loading conversation…</span>
+        {isLoading && timeline.length === 0 && (
+          <div className={styles.loadingState} role="status" aria-live="polite" aria-busy="true">
+            <span className="visually-hidden">Loading conversation…</span>
+            <div className={styles.timelineSkeleton} aria-hidden="true">
+              <div className={styles.timelineSkeletonMessage}><Skeleton width={92} height={11} /><Skeleton width="48%" height={46} /></div>
+              <div className={`${styles.timelineSkeletonMessage} ${styles.timelineSkeletonOwn}`}><Skeleton width={72} height={11} /><Skeleton width="58%" height={62} /></div>
+              <div className={styles.timelineSkeletonMessage}><Skeleton width={84} height={11} /><Skeleton width="36%" height={42} /></div>
+            </div>
           </div>
         )}
         {hasError && <p className={`${styles.state} ${styles.error}`}>{timelineState.error}</p>}
@@ -207,7 +244,7 @@ export function MessageTimeline({
           </div>
         )}
 
-        {!isLoading && !hasError && timeline.map((entry) => {
+        {!hasError && timeline.map((entry) => {
           if (entry.kind === 'blockchain_event') {
             return (
               <BlockchainNoticeTile
@@ -229,19 +266,121 @@ export function MessageTimeline({
             ? 'You'
             : displayNameOrAddress(displayNames[senderWallet], message.sender_wallet);
           const timestamp = message.created_at
-            ? formatDate(Math.floor(new Date(message.created_at).getTime() / 1000))
+            ? formatTime(Math.floor(new Date(message.created_at).getTime() / 1000))
             : '';
+          const deliveryStatus = isSender ? getDeliveryStatus(message) || 'sent' : null;
+          const deliveryStatusLabel = deliveryStatus === 'sending'
+            ? 'Sending…'
+            : deliveryStatus === 'failed'
+              ? 'Failed'
+              : deliveryStatus === 'sent'
+                ? 'Sent'
+                : '';
 
           return (
-            <article key={entry.id} className={`${styles.message} ${isSender ? styles.own : ''}`}>
-              <p className={styles.meta}>{senderName}{timestamp ? ` · ${timestamp}` : ''}</p>
-              <p className={styles.bubble}>{message.message_content}</p>
+            <article
+              key={entry.id}
+              className={`${styles.message} ${isSender ? styles.own : ''} ${deliveryStatus === 'failed' ? styles.failed : ''}`}
+            >
+              {!isSender && <p className={styles.meta}>{senderName}</p>}
+              <p className={styles.bubble}>
+                <span className={styles.bubbleContent}>{message.message_content}</span>
+                {(timestamp || deliveryStatusLabel) && (
+                  <span className={styles.bubbleMeta}>
+                    {timestamp && (
+                      <time className={styles.bubbleTime} dateTime={message.created_at}>
+                        {timestamp}
+                      </time>
+                    )}
+                    {deliveryStatusLabel && (
+                      <span
+                        className={styles.bubbleStatus}
+                        title={message.deliveryError || undefined}
+                        aria-label={message.deliveryError
+                          ? `${deliveryStatusLabel}: ${message.deliveryError}`
+                          : deliveryStatusLabel}
+                      >
+                        {deliveryStatusLabel}
+                      </span>
+                    )}
+                  </span>
+                )}
+              </p>
             </article>
           );
         })}
       </div>
     </section>
   );
+}
+
+function getDeliveryStatus(message) {
+  const status = message?.deliveryStatus || message?.delivery_status;
+  return ['sending', 'sent', 'failed'].includes(status) ? status : null;
+}
+
+function getClientMessageId(message) {
+  return message?.client_message_id || message?.clientMessageId || null;
+}
+
+function isOptimisticMessage(message) {
+  const status = getDeliveryStatus(message);
+  return Boolean(message?.optimistic || status === 'sending' || status === 'failed');
+}
+
+function canReconcileByContent(candidate, incoming, currentWallet) {
+  // A failed bubble is intentionally kept visible. It must not be consumed
+  // by a later realtime row when the user retries the same text; only an
+  // item that is still awaiting delivery can be reconciled implicitly.
+  if (getDeliveryStatus(candidate) !== 'sending') return false;
+  if (candidate.conversation_id !== incoming.conversation_id) return false;
+  if (candidate.message_content !== incoming.message_content) return false;
+  const incomingSender = incoming.sender_wallet?.toLowerCase();
+  const candidateSender = candidate.sender_wallet?.toLowerCase();
+  if (currentWallet && incomingSender && incomingSender !== currentWallet) return false;
+  if (candidateSender && incomingSender && candidateSender !== incomingSender) return false;
+  return true;
+}
+
+function reconcileMessageList(messages, incoming, currentWallet) {
+  const next = [...messages];
+  const clientMessageId = getClientMessageId(incoming);
+  let existingIndex = next.findIndex((message) => message.message_id === incoming.message_id);
+
+  if (existingIndex < 0 && clientMessageId) {
+    existingIndex = next.findIndex((message) => getClientMessageId(message) === clientMessageId);
+  }
+
+  // Supabase realtime rows do not carry the local correlation id. Match the
+  // currently sending item by its sender and content so response + realtime
+  // delivery cannot leave two copies in the conversation.
+  if (existingIndex < 0 && !isOptimisticMessage(incoming)) {
+    for (let index = next.length - 1; index >= 0; index -= 1) {
+      if (canReconcileByContent(next[index], incoming, currentWallet)) {
+        existingIndex = index;
+        break;
+      }
+    }
+  }
+
+  if (existingIndex < 0) {
+    next.push(incoming);
+    return next;
+  }
+
+  const existing = next[existingIndex];
+  const mergedClientMessageId = clientMessageId || getClientMessageId(existing);
+  const confirmed = !isOptimisticMessage(incoming) || getDeliveryStatus(incoming) === 'sent';
+  next[existingIndex] = confirmed
+    ? {
+      ...existing,
+      ...incoming,
+      ...(mergedClientMessageId ? { client_message_id: mergedClientMessageId } : {}),
+      deliveryStatus: 'sent',
+      optimistic: false,
+    }
+    : { ...existing, ...incoming };
+  return next;
 }
 
 function waitForMinimumLoadingDuration(startedAt) {

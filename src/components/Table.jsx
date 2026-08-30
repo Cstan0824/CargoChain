@@ -3,10 +3,20 @@
 // caller can drop Badges, icons, links, etc. in them.
 
 import styles from './Table.module.css';
+import { Skeleton } from './Skeleton.jsx';
 
-export function Table({ columns, rows, emptyMessage = 'No rows yet.', onRowClick }) {
+export function Table({
+  columns,
+  rows,
+  emptyMessage = 'No rows yet.',
+  onRowClick,
+  loading = false,
+  loadingRows = 4,
+  loadingLabel = 'Loading table…',
+}) {
   return (
-    <div className={styles.wrap}>
+    <div className={styles.wrap} aria-busy={loading || undefined}>
+      {loading && <span className="visually-hidden" role="status">{loadingLabel}</span>}
       <table className={styles.table}>
         <thead>
           <tr>
@@ -22,7 +32,24 @@ export function Table({ columns, rows, emptyMessage = 'No rows yet.', onRowClick
           </tr>
         </thead>
         <tbody>
-          {rows.length === 0 ? (
+          {loading ? (
+            Array.from({ length: loadingRows }, (_, rowIndex) => (
+              <tr key={`skeleton-${rowIndex}`} className={styles.skeletonRow} aria-hidden="true">
+                {columns.map((column) => {
+                  const skeleton = column.skeleton || {};
+                  return (
+                    <td key={column.key} className={column.align ? styles[`align_${column.align}`] : ''}>
+                      <Skeleton
+                        variant={skeleton.variant || 'text'}
+                        width={skeleton.width || '72%'}
+                        height={skeleton.height}
+                      />
+                    </td>
+                  );
+                })}
+              </tr>
+            ))
+          ) : rows.length === 0 ? (
             <tr>
               <td colSpan={columns.length} className={styles.empty}>
                 {emptyMessage}
@@ -31,8 +58,15 @@ export function Table({ columns, rows, emptyMessage = 'No rows yet.', onRowClick
           ) : (
             rows.map((row, i) => (
               <tr
-                key={i}
+                key={row.id ?? i}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
+                onKeyDown={onRowClick ? (event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    onRowClick(row);
+                  }
+                } : undefined}
+                tabIndex={onRowClick ? 0 : undefined}
                 className={onRowClick ? styles.clickableRow : ''}
               >
                 {columns.map((col) => (

@@ -10,8 +10,8 @@ import { useWallet } from '../../context/Web3Context';
 import { useChatAuth } from '../../context/ChatAuthContext';
 import { ensureConversation } from '../../lib/chatApiClient';
 import { useToast } from '../../hooks/useToast';
-
-const CONFIGURED_CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID || 1337);
+import { CARGO_NETWORK_CONFIG } from '../../utils/network.js';
+import styles from './ChatButton.module.css';
 
 export function ChatButton({
   requestId,
@@ -22,6 +22,7 @@ export function ChatButton({
   disabled = false,
   className = '',
   style = {},
+  iconOnly = false,
 }) {
   const navigate = useNavigate();
   const { account, walletChainId, connect, busy: walletBusy } = useWallet();
@@ -50,8 +51,11 @@ export function ChatButton({
     }
 
     const activeChainId = connectedWallet?.chainId ?? walletChainId;
-    if (activeChainId && Number(activeChainId) !== CONFIGURED_CHAIN_ID) {
-      show(`Wrong network. Please switch MetaMask to Chain ID ${CONFIGURED_CHAIN_ID}.`, 'error');
+    if (activeChainId && Number(activeChainId) !== CARGO_NETWORK_CONFIG.chainId) {
+      show(
+        `Wrong network. Please switch MetaMask to ${CARGO_NETWORK_CONFIG.chainName} (chain ID ${CARGO_NETWORK_CONFIG.chainId}).`,
+        'error',
+      );
       return;
     }
 
@@ -110,34 +114,26 @@ export function ChatButton({
   let displayLabel = label;
   if (loadingStage === 'signing') displayLabel = 'Signing in…';
   if (loadingStage === 'opening') displayLabel = 'Opening conversation…';
+  const accessibleLabel = loadingStage === 'signing'
+    ? 'Signing in to chat…'
+    : loadingStage === 'opening'
+      ? 'Opening chat…'
+      : label;
 
   return (
     <button
       type="button"
       onClick={handleClick}
       disabled={disabled || isBusy}
-      className={className}
+      className={`${styles.button} ${styles[`v_${variant}`] || styles.v_secondary} ${styles[`s_${size}`] || styles.s_md} ${iconOnly ? styles.iconOnly : ''} ${className}`}
+      aria-label={iconOnly ? accessibleLabel : undefined}
+      title={iconOnly ? accessibleLabel : undefined}
       style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: '6px',
-        padding: size === 'sm' ? '6px 12px' : size === 'lg' ? '12px 24px' : '8px 16px',
-        borderRadius: '8px',
-        fontSize: size === 'sm' ? '12px' : size === 'lg' ? '15px' : '13px',
-        fontWeight: '600',
-        cursor: disabled || isBusy ? 'not-allowed' : 'pointer',
-        opacity: disabled || isBusy ? 0.6 : 1,
-        transition: 'all 0.15s ease',
-        background: variant === 'primary' ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' : '#eff6ff',
-        color: variant === 'primary' ? '#ffffff' : '#1d4ed8',
-        border: variant === 'primary' ? 'none' : '1px solid #bfdbfe',
-        boxShadow: variant === 'primary' ? '0 2px 6px rgba(37, 99, 235, 0.2)' : 'none',
         ...style,
       }}
     >
-      <HiOutlineChatBubbleLeftRight aria-hidden="true" style={{ width: '17px', height: '17px' }} />
-      <span>{displayLabel}</span>
+      <HiOutlineChatBubbleLeftRight aria-hidden="true" className={styles.icon} />
+      {!iconOnly && <span>{displayLabel}</span>}
     </button>
   );
 }

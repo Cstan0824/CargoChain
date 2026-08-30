@@ -3,8 +3,7 @@
 import { useState } from 'react';
 import { HiOutlineChatBubbleLeftRight } from 'react-icons/hi2';
 import { formatRelative } from '../../utils/format';
-import { useWallet } from '../../context/Web3Context';
-import { displayNameOrAddress } from '../../hooks/useConversationPresentation';
+import { Skeleton } from '../Skeleton.jsx';
 import styles from './ConversationList.module.css';
 
 export function ConversationList({
@@ -15,9 +14,8 @@ export function ConversationList({
   loading = false,
   error = null,
 }) {
-  const { account } = useWallet();
   const [searchTerm, setSearchTerm] = useState('');
-  const currentWallet = account ? account.toLowerCase() : '';
+  const showSkeleton = loading && conversations.length === 0;
 
   const filteredConversations = conversations.filter((conversation) => {
     if (!searchTerm.trim()) return true;
@@ -30,19 +28,19 @@ export function ConversationList({
       presentation.route,
       presentation.shipperName,
       presentation.carrierName,
+      presentation.title,
+      presentation.workLabel,
+      presentation.preview,
     ].some((value) => String(value || '').toLowerCase().includes(term));
   });
 
   return (
-    <section className={styles.container} aria-label="Conversations">
+    <section className={styles.container} aria-label="Conversations" aria-busy={loading || undefined}>
       <header className={styles.header}>
         <div>
           <h2 className={styles.title}>Messages</h2>
           <p className={styles.subtitle}>Delivery conversations</p>
         </div>
-        <span className={styles.count} aria-label={`${conversations.length} conversations`}>
-          {conversations.length}
-        </span>
       </header>
 
       <div className={styles.searchWrap}>
@@ -56,10 +54,15 @@ export function ConversationList({
       </div>
 
       <div className={styles.list}>
-        {loading && <p className={styles.status}>Loading conversations…</p>}
-        {error && <p className={`${styles.status} ${styles.error}`}>{error}</p>}
+        {loading && !showSkeleton && <span className="visually-hidden" role="status">Refreshing conversations…</span>}
+        {showSkeleton && <ConversationListSkeleton />}
+        {error && (
+          <p className={`${styles.status} ${styles.error}`} role="alert">
+            {conversations.length > 0 ? 'Refresh failed. Showing the last loaded conversations.' : error}
+          </p>
+        )}
 
-        {!loading && !error && filteredConversations.length === 0 && (
+        {!showSkeleton && !error && filteredConversations.length === 0 && (
           <div className={styles.empty}>
             <HiOutlineChatBubbleLeftRight className={styles.emptyIcon} aria-hidden="true" />
             <strong>No conversations yet</strong>
@@ -67,16 +70,9 @@ export function ConversationList({
           </div>
         )}
 
-        {!loading && !error && filteredConversations.map((conversation) => {
+        {!showSkeleton && filteredConversations.map((conversation) => {
           const isSelected = selectedId === conversation.conversation_id;
-          const isShipper = currentWallet === (conversation.shipper_wallet || '').toLowerCase();
-          const otherRole = isShipper ? 'Carrier' : 'Shipper';
-          const otherWallet = isShipper ? conversation.carrier_wallet : conversation.shipper_wallet;
           const presentation = presentationById[conversation.conversation_id] || {};
-          const otherName = displayNameOrAddress(
-            isShipper ? presentation.carrierName : presentation.shipperName,
-            otherWallet,
-          );
           const timestamp = conversation.last_message_at || conversation.created_at;
 
           return (
@@ -87,18 +83,37 @@ export function ConversationList({
               className={`${styles.item} ${isSelected ? styles.selected : ''}`}
             >
               <span className={styles.itemTopline}>
-                <strong>Request #{conversation.request_id}</strong>
+                <strong>{presentation.title || `Shipment#${conversation.request_id}`}</strong>
                 {timestamp && <time>{formatRelative(Math.floor(new Date(timestamp).getTime() / 1000))}</time>}
               </span>
-              <span className={styles.route}>{presentation.route || 'Loading route…'}</span>
-              <span className={styles.person}>
-                <span className={styles.role}>{otherRole}</span>
-                <span className={styles.name}>{otherName}</span>
+              <span className={styles.workLabel}>{presentation.workLabel || 'Shipment work'}</span>
+              <span className={styles.preview}>{presentation.preview || 'Shipment activity'}</span>
+              <span className={styles.route}>
+                {presentation.route || 'Loading route…'}
               </span>
             </button>
           );
         })}
       </div>
     </section>
+  );
+}
+
+function ConversationListSkeleton() {
+  return (
+    <div className={styles.skeletonList} aria-busy="true">
+      <span className="visually-hidden" role="status">Loading conversations…</span>
+      {[1, 2, 3, 4, 5].map((key) => (
+        <div key={key} className={styles.skeletonItem} aria-hidden="true">
+          <div className={styles.skeletonTopline}>
+            <Skeleton width="54%" />
+            <Skeleton width={42} height={11} />
+          </div>
+          <Skeleton width="34%" height={11} />
+          <Skeleton width="88%" />
+          <Skeleton width="64%" height={11} />
+        </div>
+      ))}
+    </div>
   );
 }

@@ -1,11 +1,10 @@
 // src/pages/ProposeMilestones.jsx — CargoChain
 // Full-page carrier form for proposing milestones.
 
-import { useEffect, useState, useMemo } from 'react';
+import { Fragment, useEffect, useRef, useState, useMemo } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  HiOutlineCheckBadge,
-  HiOutlineCheckCircle,
+  HiOutlineFlag,
   HiOutlinePlus,
   HiOutlineTrash,
   HiOutlineInformationCircle,
@@ -30,12 +29,19 @@ import {
 import { useUserProfile } from '../hooks/useUserProfile.js';
 import { useWalletIdentities, walletIdentityLabel } from '../hooks/useWalletIdentities.js';
 import { useConfirmDialog } from '../hooks/useConfirmDialog.js';
+import { startTransactionToast } from '../utils/transactionToast.js';
+import {
+  allocationSummary,
+  proposalPresentationMode,
+  proposalValidationMessage,
+} from '../utils/proposalPresentation.js';
 import {
   formatEth,
   formatDate,
   formatDaysLeft,
   requestStatus,
 } from '../utils/format.js';
+import { CARGO_NETWORK_CONFIG } from '../utils/network.js';
 import styles from './ProposeMilestones.module.css';
 
 let nextMilestoneKey = 1;
@@ -56,6 +62,7 @@ export function ProposeMilestones() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const resubmitProposalId = searchParams.get('resubmit');
+  const editActiveIntent = searchParams.get('edit') === 'active';
   const { show } = useToast();
   const { account, signer, provider, connect, busy: walletBusy } = useWallet();
   const { contracts, deployError } = useContracts();
@@ -65,16 +72,35 @@ export function ProposeMilestones() {
   const [loadingRequest, setLoadingRequest] = useState(false);
   const [requestError, setRequestError] = useState(null);
   const [milestones, setMilestones] = useState(DEFAULT_MILESTONES);
+  const [isDirty, setIsDirty] = useState(false);
   const [submissionStage, setSubmissionStage] = useState('idle');
-  const [submissionResult, setSubmissionResult] = useState(null);
   const [ownProposal, setOwnProposal] = useState(null);
+  const [loadingOwnProposal, setLoadingOwnProposal] = useState(false);
   const [proposalRefreshKey, setProposalRefreshKey] = useState(0);
   const [revoking, setRevoking] = useState(false);
+  const [activeProposalRevoked, setActiveProposalRevoked] = useState(false);
+  const [replacementCompleted, setReplacementCompleted] = useState(false);
+  const [replacementError, setReplacementError] = useState('');
   const [draggedMilestoneIndex, setDraggedMilestoneIndex] = useState(null);
   const [dropTarget, setDropTarget] = useState(null);
   const [resubmissionSource, setResubmissionSource] = useState(null);
   const { confirm: confirmAction, confirmation } = useConfirmDialog();
+  const milestoneFieldRefs = useRef({});
+  const milestoneCardRefs = useRef({});
+  const keyboardDragSnapshotRef = useRef(null);
+  const dragModeRef = useRef('pointer');
+  const pendingFocusMilestoneIdRef = useRef(null);
+  const [dragAnnouncement, setDragAnnouncement] = useState('');
   const walletIdentities = useWalletIdentities([request?.shipper], contracts?.userRegistry);
+  const presentationMode = proposalPresentationMode({
+    editActive: editActiveIntent,
+    resubmitProposalId,
+    ownProposal,
+    replacementCompleted,
+  });
+  const isEditingActive = presentationMode === 'edit-active';
+  const isEditableMode = ['create', 'edit-active', 'resubmit-rejected'].includes(presentationMode);
+  const isSubmittedMode = presentationMode === 'submitted';
 
   // Load request details to display context
   useEffect(() => {
@@ -131,10 +157,12 @@ export function ProposeMilestones() {
   useEffect(() => {
     if (!account || !request || request.status !== 'Open' || !contracts?.deliveryEscrow) {
       setOwnProposal(null);
+      setLoadingOwnProposal(false);
       return;
     }
 
     let cancelled = false;
+    setLoadingOwnProposal(true);
     contracts.deliveryEscrow.getProposals(BigInt(idParam))
       .then(async (proposals) => {
         const proposalId = Array.from(proposals).findIndex((proposal) => (
@@ -142,7 +170,10 @@ export function ProposeMilestones() {
           && (proposal.carrier ?? proposal[0]).toLowerCase() === account.toLowerCase()
         ));
         if (proposalId < 0 || cancelled) {
-          if (!cancelled) setOwnProposal(null);
+          if (!cancelled) {
+            setOwnProposal(null);
+            setActiveProposalRevoked(false);
+          }
           return;
         }
 
@@ -156,6 +187,7 @@ export function ProposeMilestones() {
             id: proposalId,
             milestones: proposalMilestones,
           });
+          setIsDirty(false);
           setMilestones(proposalMilestones.map((milestone) => createMilestone(
             milestone.name,
             String(milestone.payoutPercentage),
@@ -164,6 +196,9 @@ export function ProposeMilestones() {
       })
       .catch(() => {
         if (!cancelled) setOwnProposal(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingOwnProposal(false);
       });
 
     return () => {
@@ -205,11 +240,31 @@ export function ProposeMilestones() {
     };
   }, [account, contracts, idParam, request, resubmitProposalId, resubmissionSource]);
 
-  const addMilestone = () => setMilestones((arr) => [...arr, createMilestone()]);
-  const updateMilestone = (i, k, v) => setMilestones((arr) => arr.map((m, idx) => (idx === i ? { ...m, [k]: v } : m)));
-  const removeMilestone = (i) => setMilestones((arr) => arr.filter((_, idx) => idx !== i));
+  const insertMilestone = (index) => {
+    if (!isEditableMode) return;
+    const blankMilestone = createMilestone();
+    setIsDirty(true);
+    pendingFocusMilestoneIdRef.current = blankMilestone.id;
+    setMilestones((arr) => {
+      const insertionIndex = Math.max(0, Math.min(index, arr.length));
+      return [
+        ...arr.slice(0, insertionIndex),
+        blankMilestone,
+        ...arr.slice(insertionIndex),
+      ];
+    });
+  };
+  const updateMilestone = (i, k, v) => {
+    setIsDirty(true);
+    setMilestones((arr) => arr.map((m, idx) => (idx === i ? { ...m, [k]: v } : m)));
+  };
+  const removeMilestone = (i) => {
+    setIsDirty(true);
+    setMilestones((arr) => arr.filter((_, idx) => idx !== i));
+  };
   const reorderMilestone = (fromIndex, targetIndex, placement) => {
     if (fromIndex === targetIndex || targetIndex < 0 || targetIndex >= milestones.length) return;
+    setIsDirty(true);
     setMilestones((current) => {
       const next = [...current];
       const [moved] = next.splice(fromIndex, 1);
@@ -220,13 +275,19 @@ export function ProposeMilestones() {
     });
   };
   const startMilestoneDrag = (event, index) => {
-    if (ownProposal) return;
+    if (!isEditableMode) return;
+    dragModeRef.current = 'pointer';
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData('text/plain', String(index));
+    const card = milestoneCardRefs.current[index];
+    if (card && typeof event.dataTransfer.setDragImage === 'function') {
+      event.dataTransfer.setDragImage(card, Math.min(32, card.offsetWidth / 2), 24);
+    }
     setDraggedMilestoneIndex(index);
+    setDragAnnouncement(`Grabbed milestone ${index + 1}. Drag before or after another checkpoint.`);
   };
   const dragOverMilestone = (event, index) => {
-    if (ownProposal || draggedMilestoneIndex === null) return;
+    if (!isEditableMode || dragModeRef.current !== 'pointer' || draggedMilestoneIndex === null) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
     if (draggedMilestoneIndex === index) {
@@ -238,29 +299,86 @@ export function ProposeMilestones() {
     setDropTarget({ index, placement });
   };
   const dropMilestone = (event, index) => {
+    if (!isEditableMode) return;
     event.preventDefault();
     const sourceIndex = draggedMilestoneIndex;
     const bounds = event.currentTarget.getBoundingClientRect();
     const placement = event.clientY < bounds.top + (bounds.height / 2) ? 'before' : 'after';
-    if (Number.isInteger(sourceIndex)) reorderMilestone(sourceIndex, index, placement);
+    if (Number.isInteger(sourceIndex)) {
+      reorderMilestone(sourceIndex, index, placement);
+      const targetLabel = placement === 'before' ? `before milestone ${index + 1}` : `after milestone ${index + 1}`;
+      setDragAnnouncement(`Milestone moved ${targetLabel}.`);
+    }
     setDraggedMilestoneIndex(null);
     setDropTarget(null);
   };
+  const handleMilestoneKeyDown = (event, index) => {
+    if (!isEditableMode) return;
+    const isGrabKey = event.key === 'Enter' || event.key === ' ';
+    if (isGrabKey) {
+      event.preventDefault();
+      if (draggedMilestoneIndex === null) {
+        dragModeRef.current = 'keyboard';
+        keyboardDragSnapshotRef.current = { milestones: [...milestones], isDirty };
+        setDraggedMilestoneIndex(index);
+        setDragAnnouncement(`Grabbed milestone ${index + 1}. Use Arrow Up or Arrow Down to move it, then press Space to drop.`);
+      } else if (dragModeRef.current === 'keyboard') {
+        setDragAnnouncement(`Dropped milestone ${index + 1}.`);
+        setDraggedMilestoneIndex(null);
+        keyboardDragSnapshotRef.current = null;
+      }
+      return;
+    }
+    if (draggedMilestoneIndex === null || dragModeRef.current !== 'keyboard') return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      const snapshot = keyboardDragSnapshotRef.current;
+      if (snapshot) {
+        setMilestones(snapshot.milestones);
+        setIsDirty(snapshot.isDirty);
+      }
+      setDraggedMilestoneIndex(null);
+      keyboardDragSnapshotRef.current = null;
+      setDragAnnouncement('Reordering cancelled. The checkpoint order was restored.');
+      return;
+    }
+    if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      const direction = event.key === 'ArrowUp' ? -1 : 1;
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= milestones.length) {
+        setDragAnnouncement(direction < 0 ? 'Already at the first checkpoint.' : 'Already at the last checkpoint.');
+        return;
+      }
+      reorderMilestone(index, targetIndex, direction < 0 ? 'before' : 'after');
+      setDraggedMilestoneIndex(targetIndex);
+      setDragAnnouncement(`Moved milestone ${targetIndex + 1}. Press Space to drop or keep using the arrow keys.`);
+      window.requestAnimationFrame?.(() => {
+        milestoneCardRefs.current[targetIndex]?.querySelector('button')?.focus();
+      });
+    }
+  };
+
+  useEffect(() => {
+    const pendingMilestoneId = pendingFocusMilestoneIdRef.current;
+    if (!pendingMilestoneId) return;
+
+    const nameField = document.getElementById(`${pendingMilestoneId}-name`);
+    if (!nameField) return;
+
+    nameField.focus();
+    pendingFocusMilestoneIdRef.current = null;
+  }, [milestones]);
 
   const totalPercentage = useMemo(() => {
     return milestones.reduce((sum, m) => sum + (Number(m.payoutPercentage) || 0), 0);
   }, [milestones]);
 
-  const isValid = useMemo(() => {
-    return (
-      milestones.length > 0 &&
-      milestones.every((m) => {
-        const percentage = Number(m.payoutPercentage);
-        return m.name.trim() && Number.isInteger(percentage) && percentage > 0 && percentage <= 100;
-      }) &&
-      totalPercentage === 100
-    );
-  }, [milestones, totalPercentage]);
+  const allocation = useMemo(
+    () => allocationSummary(totalPercentage, milestones),
+    [milestones, totalPercentage],
+  );
+  const isValid = milestones.length > 0 && allocation.isValid;
 
   const submitting = submissionStage !== 'idle';
   const isOwnRequest = Boolean(
@@ -272,21 +390,30 @@ export function ProposeMilestones() {
     !isOwnRequest &&
     isValid &&
     !loadingRequest &&
-    !ownProposal &&
-    !submissionResult &&
+    (presentationMode === 'edit-active'
+      || presentationMode === 'resubmit-rejected'
+      || (presentationMode === 'create' && !ownProposal)) &&
+    !loadingOwnProposal &&
+    (!editActiveIntent || Boolean(ownProposal)) &&
     !submitting &&
-    !walletBusy,
+    !walletBusy &&
+    Boolean(account),
   );
 
   const submit = async () => {
     if (submitting || walletBusy) return;
+
+    if (!account) {
+      show('Connect MetaMask before submitting a proposal.', 'warning');
+      return;
+    }
 
     if (!provider) {
       show('MetaMask is required to submit a proposal.', 'error');
       return;
     }
     if (!contracts?.deliveryEscrow) {
-      show(deployError || 'DeliveryEscrow contract is not available.', 'error');
+      show(deployError || 'CargoChain is unavailable on the current network.', 'error');
       return;
     }
     if (!request || loadingRequest) {
@@ -294,7 +421,15 @@ export function ProposeMilestones() {
       return;
     }
     if (!isValid) {
-      show('Use whole-number percentages from 1 to 100 that total exactly 100%.', 'error');
+      show(
+        proposalValidationMessage(allocation) || 'Allocate whole-number percentages that total exactly 100%.',
+        'error',
+      );
+      if (allocation.firstInvalidIndex >= 0 && allocation.firstInvalidField) {
+        milestoneFieldRefs.current[
+          `${allocation.firstInvalidIndex}-${allocation.firstInvalidField}`
+        ]?.focus();
+      }
       return;
     }
     if (request.status !== 'Open') {
@@ -302,18 +437,10 @@ export function ProposeMilestones() {
       return;
     }
 
-    if (!await confirmAction({
-      title: 'Send this checkpoint plan?',
-      message: 'The shipper will review the ordered checkpoints before selecting a carrier and locking escrow.',
-      details: [
-        { label: 'Checkpoints', value: `${milestones.length}` },
-        { label: 'Planned payment', value: formatEth(request.proposedAmountWei) },
-        { label: 'What happens next', value: 'The shipper reviews your plan' },
-      ],
-      confirmLabel: 'Send plan',
-    })) return;
-
-    setSubmissionStage(account ? 'signing' : 'connecting');
+    const replacingActiveProposal = presentationMode === 'edit-active';
+    setSubmissionStage(replacingActiveProposal && !activeProposalRevoked ? 'revoking' : 'signing');
+    let transactionToast;
+    let revocationConfirmed = activeProposalRevoked;
     try {
       const activeSigner = await resolveWalletSigner(signer, connect);
       const activeAccount = await activeSigner.getAddress();
@@ -322,7 +449,7 @@ export function ProposeMilestones() {
       const latestShipper = latestRequest.shipper ?? latestRequest[1];
 
       if (latestStatus !== 'Open') {
-        throw new Error('This request already has a carrier proposal.');
+        throw new Error('This request is no longer open for proposals.');
       }
       if (activeAccount.toLowerCase() === latestShipper.toLowerCase()) {
         show('The shipper cannot propose milestones for their own request.', 'error');
@@ -339,6 +466,37 @@ export function ProposeMilestones() {
         activeAccount,
       )) return;
 
+      if (replacingActiveProposal && !revocationConfirmed) {
+        transactionToast = startTransactionToast({
+          wallet: 'Confirm 1 of 2: revoke the current proposal in MetaMask…',
+          submitted: 'Revoking the current proposal…',
+          success: 'Current proposal revoked. Awaiting revised proposal confirmation…',
+        });
+        const revokeTx = await sendWalletContractTransaction({
+          contract: contracts.deliveryEscrow,
+          method: 'revokeMilestoneProposal',
+          args: [BigInt(idParam)],
+          signer: activeSigner,
+          provider,
+        });
+        transactionToast.submitted();
+        const revokeReceipt = await revokeTx.wait();
+        if (!revokeReceipt || revokeReceipt.status !== 1) {
+          throw new Error('The current proposal revocation was not confirmed.');
+        }
+        revocationConfirmed = true;
+        setActiveProposalRevoked(true);
+        transactionToast.wallet('Confirm 2 of 2: submit the revised proposal in MetaMask…');
+      } else {
+        transactionToast = startTransactionToast({
+          wallet: replacingActiveProposal
+            ? 'Confirm 2 of 2: submit the revised proposal in MetaMask…'
+            : 'Confirm the milestone proposal in MetaMask…',
+          submitted: replacingActiveProposal ? 'Submitting revised milestone proposal…' : 'Submitting milestone proposal…',
+          success: replacingActiveProposal ? 'Revised milestone proposal submitted.' : 'Milestone proposal submitted.',
+        });
+      }
+
       const tx = await sendWalletContractTransaction({
         contract: contracts.deliveryEscrow,
         method: 'proposeMilestones',
@@ -347,32 +505,60 @@ export function ProposeMilestones() {
         provider,
       });
 
-      setSubmissionStage('confirming');
-      show('Proposal sent. Waiting for blockchain confirmation...', 'info');
+      setSubmissionStage(replacingActiveProposal ? 'submitting-replacement' : 'confirming');
+      transactionToast.submitted();
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) {
         throw new Error('The proposal transaction was not confirmed.');
       }
 
-      show(`Proposal confirmed in block ${receipt.blockNumber}.`, 'success');
-      setSubmissionResult({
-        blockNumber: receipt.blockNumber,
-        transactionHash: receipt.hash,
-      });
+      transactionToast.success();
+      setReplacementError('');
+      setActiveProposalRevoked(false);
+      if (replacingActiveProposal) {
+        setReplacementCompleted(true);
+        setIsDirty(false);
+        navigate(`/shipments/${idParam}/propose`, { replace: true });
+      }
       setProposalRefreshKey((value) => value + 1);
-
-      show('Use “Open Chat with Shipper” when you want to sign in to private chat.', 'info');
     } catch (e) {
-      show(formatProposalError(e), 'error');
+      const message = formatProposalError(e);
+      if (replacingActiveProposal) {
+        setActiveProposalRevoked(revocationConfirmed);
+        setReplacementError(revocationConfirmed
+          ? 'The current proposal was revoked, but the revised proposal was not submitted. Your edited draft is preserved; retry the second confirmation when ready.'
+          : 'The current proposal was not revoked. Your edited draft is preserved; retry when ready.');
+      }
+      if (transactionToast) transactionToast.error(message);
+      else show(message, 'error');
     } finally {
       setSubmissionStage('idle');
     }
   };
 
-  const goBack = () => navigate('/my-shipments');
+  const goBack = async () => {
+    if (isDirty && isEditableMode) {
+      const discard = await confirmAction({
+        title: isEditingActive ? 'Cancel proposal edit?' : 'Discard proposal changes?',
+        message: isEditingActive
+          ? 'Your current on-chain proposal will stay active. Only this local draft will be discarded.'
+          : 'Your milestone names and payout changes will be lost.',
+        confirmLabel: isEditingActive ? 'Cancel editing' : 'Discard changes',
+        cancelLabel: 'Keep editing',
+        tone: 'danger',
+      });
+      if (!discard) return;
+    }
+    navigate('/my-shipments');
+  };
 
   const revokeProposal = async () => {
-    if (revoking || !ownProposal || !provider || !contracts?.deliveryEscrow) return;
+    if (revoking || !ownProposal || !isSubmittedMode || !provider || !contracts?.deliveryEscrow) return;
+
+    if (!account) {
+      show('Connect MetaMask before revoking a proposal.', 'warning');
+      return;
+    }
 
     if (!await confirmAction({
       title: 'Revoke this proposal?',
@@ -384,6 +570,7 @@ export function ProposeMilestones() {
     }
 
     setRevoking(true);
+    let transactionToast;
     try {
       const activeSigner = await resolveWalletSigner(signer, connect);
       const activeSignerAddress = await activeSigner.getAddress();
@@ -392,6 +579,11 @@ export function ProposeMilestones() {
         activeSignerAddress,
       )) return;
 
+      transactionToast = startTransactionToast({
+        wallet: 'Confirm proposal revocation in MetaMask…',
+        submitted: 'Revoking milestone proposal…',
+        success: 'Milestone proposal revoked.',
+      });
       const tx = await sendWalletContractTransaction({
         contract: contracts.deliveryEscrow,
         method: 'revokeMilestoneProposal',
@@ -399,16 +591,17 @@ export function ProposeMilestones() {
         signer: activeSigner,
         provider,
       });
-      show('Revoking proposal on-chain...', 'info');
+      transactionToast.submitted();
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) throw new Error('Proposal revocation was not confirmed.');
 
       setOwnProposal(null);
-      setSubmissionResult(null);
       setProposalRefreshKey((value) => value + 1);
-      show(`Proposal revoked in block ${receipt.blockNumber}. You can now submit a new plan.`, 'success');
+      transactionToast.success();
     } catch (e) {
-      show(formatProposalError(e), 'error');
+      const message = formatProposalError(e);
+      if (transactionToast) transactionToast.error(message);
+      else show(message, 'error');
     } finally {
       setRevoking(false);
     }
@@ -417,7 +610,7 @@ export function ProposeMilestones() {
   return (
     <div className={styles.page}>
       <Topbar
-        title="Propose Milestones"
+        title="Propose milestone plan"
         subtitle={`Request #${String(idParam || '').padStart(4, '0')}`}
       />
 
@@ -437,25 +630,60 @@ export function ProposeMilestones() {
         </Card>
       )}
 
-      {submissionResult && (
-        <Card className={styles.successPanel}>
-          <span className={styles.successIcon}>
-            <HiOutlineCheckCircle aria-hidden="true" />
-          </span>
-          <div className={styles.successContent}>
-            <span className={styles.successKicker}>Proposal confirmed</span>
-            <h2>Milestones submitted for shipper review</h2>
+      {isEditingActive && (
+        <Card className={styles.editingPanel} role="status" aria-live="polite">
+          <div className={styles.editingPanelCopy}>
+            <div className={styles.activeProposalTitleRow}>
+              <strong>Editing submitted proposal</strong>
+              <span className={styles.editingStatus}>Two confirmations required</span>
+            </div>
             <p>
-              The proposal was recorded in block {submissionResult.blockNumber}.
-              The shipper can now accept and fund the milestone plan.
+              Save a revised plan to revoke the active proposal first, then submit the edited checkpoints as a new proposal.
             </p>
-            <span className={styles.successHash} title={submissionResult.transactionHash}>
-              {submissionResult.transactionHash}
-            </span>
+            {replacementError && (
+              <p className={styles.replacementError}>{replacementError}</p>
+            )}
           </div>
-          <div className={styles.successActions}>
-            <Button variant="secondary" onClick={() => navigate('/')}>Marketplace</Button>
-            <ChatButton requestId={idParam} label="Open Chat with Shipper" variant="primary" />
+          <div className={styles.editingPanelActions}>
+            <Button variant="softNeutral" size="sm" onClick={goBack} disabled={submitting}>
+              Cancel editing
+            </Button>
+            {replacementError && (
+              <Button variant="softPrimary" size="sm" onClick={submit} disabled={!canSubmit}>
+                Retry submission
+              </Button>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {isSubmittedMode && ownProposal && (
+        <Card className={styles.activeProposalHeader}>
+          <div className={styles.activeProposalCopy}>
+            <div className={styles.activeProposalTitleRow}>
+              <h2>Proposal submitted</h2>
+              <span className={styles.activeProposalStatus}>Awaiting shipper review</span>
+            </div>
+          </div>
+          <div className={styles.activeProposalActions}>
+            <Button variant="softNeutral" onClick={() => navigate('/')} className={styles.touchAction}>
+              Marketplace
+            </Button>
+            <ChatButton
+              requestId={idParam}
+              label="Chat with Shipper"
+              variant="primary"
+              size="sm"
+            />
+            <Button
+              variant="softDanger"
+              size="sm"
+              onClick={revokeProposal}
+              disabled={revoking || submitting}
+              className={styles.revokeAction}
+            >
+              {revoking ? 'Revoking…' : 'Revoke proposal'}
+            </Button>
           </div>
         </Card>
       )}
@@ -465,22 +693,10 @@ export function ProposeMilestones() {
         <div className={styles.leftCol}>
           <Card className={styles.formCard} padded={false}>
             <div className={styles.formHeader}>
-              <HiOutlineCheckBadge className={styles.headerIcon} />
+              <HiOutlineFlag className={styles.headerIcon} aria-hidden="true" />
               <div className={styles.formHeaderContent}>
-                <h3>{ownProposal ? 'Your active proposal' : 'Propose Milestone Splits'}</h3>
-                <p>
-                  {ownProposal
-                    ? 'Awaiting shipper review. This submitted plan is locked until you revoke it.'
-                    : 'Define intermediate milestones between the pickup and destination points.'}
-                </p>
+                <h3>Milestone payout plan</h3>
               </div>
-              {ownProposal && (
-                <div className={styles.formHeaderActions}>
-                  <Button variant="danger" size="sm" onClick={revokeProposal} disabled={revoking || submitting}>
-                    {revoking ? 'Revoking...' : 'Revoke proposal'}
-                  </Button>
-                </div>
-              )}
             </div>
 
             <div className={styles.formBody}>
@@ -495,7 +711,11 @@ export function ProposeMilestones() {
                   </div>
                 </div>
 
-                <div className={styles.timelineConnectorLine} />
+                <TimelineConnector
+                  editable={isEditableMode}
+                  label={milestones.length > 0 ? 'Add checkpoint before milestone 1' : 'Add checkpoint'}
+                  onAdd={() => insertMilestone(0)}
+                />
 
                 {/* Milestone Intermediate Inputs */}
                 <div className={styles.timelineMilestones}>
@@ -505,21 +725,15 @@ export function ProposeMilestones() {
                       ? (request.proposedAmountWei * BigInt(percentage)) / 100n
                       : 0n;
                     return (
-                      <div
-                        key={m.id}
-                        className={styles.timelineRow}
-                      >
+                      <Fragment key={m.id}>
+                        <div className={styles.timelineRow}>
                         
-                        {/* Timeline Marker (Intermediate node) */}
-                        <div className={styles.intermediateNode}>
-                          <div className={styles.intermediateMarker}>{i + 1}</div>
-                        </div>
-
                         {/* Input Fields block */}
                         <div
+                          ref={(node) => {
+                            milestoneCardRefs.current[i] = node;
+                          }}
                           className={`${styles.inputCard} ${draggedMilestoneIndex === i ? styles.inputCardDragging : ''} ${dropTarget?.index === i && dropTarget.placement === 'before' ? styles.inputCardDropBefore : ''} ${dropTarget?.index === i && dropTarget.placement === 'after' ? styles.inputCardDropAfter : ''}`}
-                          draggable={!ownProposal}
-                          onDragStart={(event) => startMilestoneDrag(event, i)}
                           onDragOver={(event) => dragOverMilestone(event, i)}
                           onDrop={(event) => dropMilestone(event, i)}
                           onDragEnd={() => {
@@ -528,22 +742,44 @@ export function ProposeMilestones() {
                           }}
                         >
                           <div className={styles.fieldsGrid}>
+                            <button
+                              className={styles.dragHandle}
+                              type="button"
+                              draggable={isEditableMode}
+                              onDragStart={(event) => startMilestoneDrag(event, i)}
+                              onKeyDown={(event) => handleMilestoneKeyDown(event, i)}
+                              title={isEditableMode ? 'Drag to reorder milestone' : undefined}
+                              aria-label={isEditableMode ? `Reorder milestone ${i + 1}` : undefined}
+                              aria-grabbed={isEditableMode && draggedMilestoneIndex === i ? 'true' : undefined}
+                              disabled={!isEditableMode}
+                            >
+                              <span aria-hidden="true">⋮⋮</span>
+                            </button>
                             {/* Column 1: Milestone Name */}
-                            <div className={styles.field} style={{ flex: 3 }}>
-                              <label className={styles.label}>Milestone Name</label>
+                            <div className={styles.field}>
+                              <label className={styles.label} htmlFor={`${m.id}-name`}>Milestone Name</label>
                               <input
                                 type="text"
                                 className={styles.input}
+                                id={`${m.id}-name`}
                                 value={m.name}
                                 onChange={(e) => updateMilestone(i, 'name', e.target.value)}
-                                disabled={Boolean(ownProposal)}
+                                ref={(node) => {
+                                  milestoneFieldRefs.current[`${i}-name`] = node;
+                                }}
+                                disabled={!isEditableMode}
+                                aria-invalid={allocation.firstInvalidIndex === i && allocation.firstInvalidField === 'name'}
+                                aria-describedby={allocation.firstInvalidIndex === i && allocation.firstInvalidField === 'name' ? `${m.id}-name-error` : undefined}
                                 placeholder="e.g. Customs check / Delivery to Hub"
                               />
+                              {allocation.firstInvalidIndex === i && allocation.firstInvalidField === 'name' && (
+                                <span id={`${m.id}-name-error`} className={styles.fieldError} role="alert">{proposalValidationMessage(allocation)}</span>
+                              )}
                             </div>
 
                             {/* Column 2: Payout Percentage & calculated ETH */}
-                            <div className={styles.field} style={{ flex: 1.5, minWidth: '110px' }}>
-                              <label className={styles.label}>Payout Split</label>
+                            <div className={styles.field}>
+                              <label className={styles.label} htmlFor={`${m.id}-payoutPercentage`}>Payout</label>
                               <div className={styles.percentWrap}>
                                 <input
                                   type="number"
@@ -552,9 +788,15 @@ export function ProposeMilestones() {
                                   step="1"
                                   inputMode="numeric"
                                   className={styles.input}
+                                  id={`${m.id}-payoutPercentage`}
                                   value={m.payoutPercentage}
                                   onChange={(e) => updateMilestone(i, 'payoutPercentage', e.target.value)}
-                                  disabled={Boolean(ownProposal)}
+                                  ref={(node) => {
+                                    milestoneFieldRefs.current[`${i}-payoutPercentage`] = node;
+                                  }}
+                                  disabled={!isEditableMode}
+                                  aria-invalid={allocation.firstInvalidIndex === i && allocation.firstInvalidField === 'payoutPercentage'}
+                                  aria-describedby={allocation.firstInvalidIndex === i && allocation.firstInvalidField === 'payoutPercentage' ? `${m.id}-payout-error` : undefined}
                                   placeholder="0"
                                 />
                                 <span className={styles.percentUnit}>%</span>
@@ -562,6 +804,9 @@ export function ProposeMilestones() {
                               <span className={styles.calculatedEth}>
                                 {payoutWei > 0n ? formatEth(payoutWei) : '0.00 ETH'}
                               </span>
+                              {allocation.firstInvalidIndex === i && allocation.firstInvalidField === 'payoutPercentage' && (
+                                <span id={`${m.id}-payout-error`} className={styles.fieldError} role="alert">{proposalValidationMessage(allocation)}</span>
+                              )}
                             </div>
 
                             {/* Delete button */}
@@ -570,8 +815,9 @@ export function ProposeMilestones() {
                                 type="button"
                                 className={styles.removeBtn}
                                 onClick={() => removeMilestone(i)}
-                                disabled={milestones.length === 1 || Boolean(ownProposal)}
+                                disabled={milestones.length === 1 || !isEditableMode}
                                 title="Remove milestone step"
+                                aria-label={`Remove milestone ${i + 1}`}
                               >
                                 <HiOutlineTrash className={styles.trashIcon} />
                               </button>
@@ -580,12 +826,24 @@ export function ProposeMilestones() {
                           </div>
                         </div>
 
-                      </div>
+                        </div>
+                        {i < milestones.length - 1 && (
+                          <TimelineConnector
+                            editable={isEditableMode}
+                            label={`Add checkpoint after milestone ${i + 1}`}
+                            onAdd={() => insertMilestone(i + 1)}
+                          />
+                        )}
+                      </Fragment>
                     );
                   })}
                 </div>
 
-                <div className={styles.timelineConnectorLine} />
+                <TimelineConnector
+                  editable={isEditableMode}
+                  label={milestones.length > 0 ? `Add checkpoint after milestone ${milestones.length}` : 'Add checkpoint'}
+                  onAdd={() => insertMilestone(milestones.length)}
+                />
 
                 {/* End Node: Destination */}
                 <div className={styles.timelineNodeStatic}>
@@ -598,10 +856,15 @@ export function ProposeMilestones() {
 
               </div>
 
-              {/* Add Milestone button */}
-              <button type="button" className={styles.addBtn} onClick={addMilestone} disabled={Boolean(ownProposal)}>
-                <HiOutlinePlus className={styles.addIcon} /> Add Intermediate Milestone
-              </button>
+              <div className={styles.checkpointListFooter}>
+                <div
+                  className={`${styles.allocationSummary} ${styles[`allocation_${allocation.tone}`]}`}
+                  aria-live="polite"
+                >
+                  {allocation.label}
+                </div>
+              </div>
+              <span className="visually-hidden" role="status" aria-live="polite">{dragAnnouncement}</span>
             </div>
           </Card>
         </div>
@@ -619,15 +882,6 @@ export function ProposeMilestones() {
                     {walletIdentityLabel(request.shipper, walletIdentities)}
                   </strong>
                 </div>
-                {(ownProposal || submissionResult) && (
-                  <ChatButton
-                    requestId={idParam}
-                    label="Chat with shipper"
-                    variant="secondary"
-                    size="sm"
-                    className={styles.shipperChat}
-                  />
-                )}
               </div>
               <div className={styles.infoDivider} />
               <div className={styles.infoRow}>
@@ -641,9 +895,8 @@ export function ProposeMilestones() {
               <div className={styles.infoRow}>
                 <HiOutlineCurrencyDollar className={styles.infoIcon} />
                 <div>
-                  <div className={styles.infoLabel}>Total Budget</div>
+                  <div className={styles.infoLabel}>Planned budget</div>
                   <strong className={styles.infoVal}>{formatEth(request.proposedAmountWei)}</strong>
-                  <span className={styles.infoSub}>Funded after shipper approval</span>
                 </div>
               </div>
               <div className={styles.infoDivider} />
@@ -658,34 +911,25 @@ export function ProposeMilestones() {
             </Card>
           )}
 
-          {/* Allocation Checker Status */}
-          <div className={`${styles.statusBox} ${isValid ? styles.statusSuccess : styles.statusError}`}>
-            <HiOutlineInformationCircle className={styles.statusIcon} />
-            <div className={styles.statusContent}>
-              <h4>Total Split: {totalPercentage}%</h4>
-              <p>
-                {ownProposal
-                  ? 'This submitted plan is locked while awaiting shipper review. Revoke it to make changes.'
-                  : isValid
-                  ? 'All payouts are allocated. The proposal is ready to submit.'
-                  : 'Every milestone needs a name and a whole-number payout, with a total of exactly 100%.'}
-              </p>
-            </div>
-          </div>
-
           {isOwnRequest && (
             <div className={styles.requestError} role="status">
               Switch to a carrier wallet to submit a proposal. A shipper cannot carry their own request.
             </div>
           )}
 
-          {!ownProposal && (
+          {!isOwnRequest && !ownProposal && !account && (
+            <div className={styles.requestError} role="status">
+              Connect MetaMask on {CARGO_NETWORK_CONFIG.chainName} before submitting.
+            </div>
+          )}
+
+          {isEditableMode && (
             <div className={styles.actions}>
-              <Button variant="secondary" onClick={goBack} disabled={submitting} className={styles.actionBtn}>
-                Cancel
+              <Button variant="softNeutral" onClick={goBack} disabled={submitting} className={styles.actionBtn}>
+                {isEditingActive ? 'Cancel editing' : 'Cancel'}
               </Button>
-              <Button onClick={submit} disabled={!canSubmit} className={styles.actionBtn}>
-                {submissionLabel(submissionStage)}
+              <Button variant="softPrimary" onClick={submit} disabled={!canSubmit} className={styles.actionBtn}>
+                {submissionLabel(submissionStage, account, isEditingActive, Boolean(replacementError))}
               </Button>
             </div>
           )}
@@ -696,11 +940,44 @@ export function ProposeMilestones() {
   );
 }
 
-function submissionLabel(stage) {
+function TimelineConnector({ editable, label, onAdd }) {
+  return (
+    <div className={`${styles.timelineConnector} ${editable ? styles.timelineConnectorEditable : ''}`}>
+      {editable ? (
+        <>
+          <span className={`${styles.timelineConnectorLine} ${styles.timelineConnectorLineBefore}`} aria-hidden="true" />
+          <button
+            type="button"
+            className={styles.timelineConnectorAdd}
+            aria-label={label}
+            title={label}
+            onClick={(event) => {
+              event.stopPropagation();
+              onAdd();
+            }}
+          >
+            <span className={styles.timelineConnectorVisual} aria-hidden="true">
+              <HiOutlinePlus />
+            </span>
+            <span className={styles.timelineConnectorLabel} aria-hidden="true">Add checkpoint</span>
+          </button>
+          <span className={`${styles.timelineConnectorLine} ${styles.timelineConnectorLineAfter}`} aria-hidden="true" />
+        </>
+      ) : (
+        <span className={styles.timelineConnectorLine} aria-hidden="true" />
+      )}
+    </div>
+  );
+}
+
+function submissionLabel(stage, account, isEditingActive = false, hasReplacementError = false) {
   if (stage === 'connecting') return 'Connecting wallet...';
+  if (stage === 'revoking') return 'Confirm 1 of 2…';
   if (stage === 'signing') return 'Confirm in MetaMask...';
+  if (stage === 'submitting-replacement') return 'Confirm 2 of 2…';
   if (stage === 'confirming') return 'Waiting for confirmation...';
-  return 'Submit proposal';
+  if (isEditingActive) return hasReplacementError ? 'Retry submission' : 'Save revised proposal';
+  return account ? 'Submit proposal' : 'Connect and submit';
 }
 
 function formatProposalError(error) {

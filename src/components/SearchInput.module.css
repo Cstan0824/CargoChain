@@ -16,11 +16,17 @@
   box-shadow: 0 0 0 3px var(--primary-soft);
 }
 
+.contained {
+  /* Contained toolbars still benefit from a soft search silhouette. */
+  border-radius: 20px;
+}
+
 .icon {
   color: var(--text-secondary);
   display: inline-flex;
   align-items: center;
 }
+.icon svg { width: 16px; height: 16px; }
 
 .input {
   flex: 1;
@@ -34,11 +40,28 @@
 }
 .input::placeholder { color: var(--text-muted); }
 
+.clearBtn {
+  display: inline-grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--text-secondary);
+  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease);
+}
+.clearBtn:hover { background: var(--bg-subtle); color: var(--text-primary); }
+.clearBtn:active { transform: scale(0.96); }
+.clearBtn svg { width: 18px; height: 18px; }
+
 .btn {
   border: 0;
   background: var(--primary);
   color: var(--text-inverse);
   border-radius: var(--r-pill);
+  min-height: 44px;
   padding: 8px 18px;
   font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);

@@ -15,7 +15,7 @@ vi.mock('../lib/supabaseClient', () => ({
   supabase: { from: mocks.from },
 }));
 
-import { listConversations } from './chatReadService';
+import { enrichConversationPreviews, listConversations } from './chatReadService';
 
 describe('listConversations', () => {
   beforeEach(() => {
@@ -40,5 +40,24 @@ describe('listConversations', () => {
     await expect(listConversations({ chainId: 0, contractAddress: '' }))
       .rejects.toThrow('Active DeliveryEscrow deployment is unavailable');
     expect(mocks.from).not.toHaveBeenCalled();
+  });
+
+  it('adds the latest visible message preview without widening conversation scope', async () => {
+    mocks.query.then.mockImplementation((resolve) => resolve({
+      data: [
+        { message_content: 'Earlier update' },
+        { message_content: 'Latest private update' },
+      ],
+      error: null,
+    }));
+
+    const rows = await enrichConversationPreviews([{ conversation_id: 'visible-one', request_id: 4 }]);
+
+    expect(rows).toEqual([expect.objectContaining({
+      conversation_id: 'visible-one',
+      latest_message_preview: 'Latest private update',
+    })]);
+    expect(mocks.from).toHaveBeenCalledWith('messages');
+    expect(mocks.query.eq).toHaveBeenCalledWith('conversation_id', 'visible-one');
   });
 });

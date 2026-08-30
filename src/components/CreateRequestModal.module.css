@@ -7,7 +7,7 @@
 .overlay {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: var(--z-modal);
   background: rgba(10, 18, 36, 0.55);
   display: flex;
   align-items: center;
@@ -59,7 +59,7 @@
   position: sticky;
   top: 0;
   background: var(--bg-surface);
-  z-index: 10;
+  z-index: var(--z-sticky);
   background-image: linear-gradient(
     180deg,
     rgba(37, 99, 235, 0.035) 0%,
@@ -118,14 +118,12 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  min-width: 36px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
   background: transparent;
   border: 1px solid var(--border-soft);
   border-radius: var(--r-md);
-  font-size: 20px;
-  line-height: 1;
   color: var(--text-secondary);
   cursor: pointer;
   transition:
@@ -134,6 +132,7 @@
     border-color var(--dur-1) var(--ease),
     transform var(--dur-1) var(--ease);
 }
+.closeBtn svg { width: 20px; height: 20px; }
 .closeBtn:hover  { background: var(--bg-subtle); color: var(--text-primary); border-color: var(--border); }
 .closeBtn:active { transform: scale(0.96); }
 
@@ -165,7 +164,7 @@
   border-radius: 50%;
   background: var(--primary);
   color: #fff;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: var(--fw-bold);
   display: inline-flex;
   align-items: center;
@@ -199,7 +198,7 @@
   gap: var(--s-3);
   background: var(--bg-subtle);
   padding: var(--s-4);
-  border-radius: 14px;
+  border-radius: calc(var(--r-md) + var(--s-4));
   border: 1px solid var(--border-soft);
   transition: border-color var(--dur-1) var(--ease);
 }
@@ -215,8 +214,8 @@
 }
 
 .swapBtn {
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   background: var(--bg-surface);
   border: 1px solid var(--border);
@@ -269,7 +268,7 @@
   gap: var(--s-3);
   background: var(--bg-subtle);
   padding: var(--s-3) var(--s-4);
-  border-radius: 14px;
+  border-radius: calc(var(--r-md) + var(--s-4));
   border: 1px solid var(--border-soft);
   transition:
     border-color var(--dur-1) var(--ease),
@@ -295,9 +294,9 @@
 }
 
 .removeBtn {
-  width: 36px;
-  height: 36px;
-  min-width: 36px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -323,6 +322,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-height: 44px;
   padding: 7px 14px;
   background: transparent;
   border: 1px dashed var(--border);
@@ -401,6 +401,14 @@
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
+.inputError {
+  border-color: var(--danger) !important;
+}
+
+.inputError:focus-within {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
 .input {
   width: 100%;
   border: 0;
@@ -413,6 +421,14 @@
   border-radius: var(--r-md);
 }
 .input::placeholder { color: var(--text-muted); }
+
+.fieldError {
+  display: block;
+  color: var(--danger);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  text-wrap: pretty;
+}
 
 .inputWithIcon { padding-left: 38px; }
 

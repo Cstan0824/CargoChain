@@ -14,6 +14,7 @@ import {
   formatWalletTransactionError,
   sendWalletContractTransaction,
 } from '../utils/walletTransaction.js';
+import { startTransactionToast } from '../utils/transactionToast.js';
 import styles from './CarrierRatingPanel.module.css';
 
 export function CarrierRatingPanel({ requestId, carrier, isShipper, status }) {
@@ -88,6 +89,7 @@ export function CarrierRatingPanel({ requestId, carrier, isShipper, status }) {
     if (!selectedScore || !carrier || !requestId) return;
 
     setStage('wallet');
+    let transactionToast;
     try {
       const activeSignerAddress = await signer.getAddress();
       if (!(await requireRegistration(
@@ -98,6 +100,11 @@ export function CarrierRatingPanel({ requestId, carrier, isShipper, status }) {
         return;
       }
 
+      transactionToast = startTransactionToast({
+        wallet: 'Confirm carrier rating in MetaMask…',
+        submitted: 'Publishing carrier rating…',
+        success: 'Carrier rating published.',
+      });
       const transaction = await sendWalletContractTransaction({
         contract: contracts.reputationRegistry,
         method: 'submitCarrierRating',
@@ -106,9 +113,10 @@ export function CarrierRatingPanel({ requestId, carrier, isShipper, status }) {
         provider,
       });
       setStage('mining');
+      transactionToast.submitted();
       await transaction.wait();
       await loadRating();
-      show('Carrier rating published on-chain.', 'success');
+      transactionToast.success();
       setModalOpen(false);
       setSelectedScore(0);
       setHoveredScore(0);
@@ -116,7 +124,9 @@ export function CarrierRatingPanel({ requestId, carrier, isShipper, status }) {
       setStage('idle');
     } catch (error) {
       setStage('idle');
-      show(formatWalletTransactionError(error, 'Carrier rating could not be published.'), 'error');
+      const message = formatWalletTransactionError(error, 'Carrier rating could not be published.');
+      if (transactionToast) transactionToast.error(message);
+      else show(message, 'error');
     }
   };
 

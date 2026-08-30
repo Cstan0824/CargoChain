@@ -1,35 +1,36 @@
-/* src/components/Topbar.module.css — CargoChain */
+/* src/components/Topbar.module.css — page-background header. */
 
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--s-4);
-  padding: var(--s-6) 0 var(--s-5);
-  margin-bottom: var(--s-5);
+  gap: var(--s-5);
+  margin: var(--s-4) 0 var(--s-4);
+  padding: var(--s-2) 0;
 }
 
 .left {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
 }
 
 .title {
   margin: 0;
+  color: var(--text-primary);
   font-size: var(--fs-2xl);
   font-weight: var(--fw-semibold);
   letter-spacing: var(--tracking-tight);
-  color: var(--text-primary);
   line-height: 1.2;
   text-wrap: balance;
 }
 
 .subtitle {
+  max-width: 680px;
   margin: 0;
-  font-size: var(--fs-sm);
   color: var(--text-secondary);
+  font-size: var(--fs-sm);
   line-height: 1.4;
   text-wrap: pretty;
 }
@@ -37,21 +38,66 @@
 .right {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: var(--s-3);
-  flex-shrink: 0;
+  gap: var(--s-2);
+  flex: 0 0 auto;
 }
 
 .actions {
   display: flex;
   align-items: center;
   gap: var(--s-2);
-  margin-right: var(--s-2);
+  min-width: 0;
+}
+
+.utilityButton {
+  display: inline-grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  place-items: center;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  text-decoration: none;
+  transition-property: background-color, color, box-shadow, transform;
+  transition-duration: var(--dur-1);
+  transition-timing-function: var(--ease);
+}
+
+.utilityButton:hover {
+  color: var(--text-primary);
+  background: var(--bg-subtle);
+  box-shadow: var(--shadow-sm);
+  text-decoration: none;
+}
+
+.utilityButton:active { transform: scale(0.96); }
+.utilityButton > svg { width: 21px; height: 21px; }
+
+.avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  object-fit: cover;
 }
 
 @media (max-width: 640px) {
-  .topbar { flex-direction: column; align-items: flex-start; }
-  .right { width: 100%; justify-content: flex-end; }
-  .actions { margin-right: 0; }
+  .topbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: start;
+    margin-top: var(--s-3);
+    padding: var(--s-2) 0;
+  }
+
+  .left { grid-column: 1; min-width: 0; }
+  .title { font-size: var(--fs-xl); }
+  .right { display: contents; }
+  .actions { grid-column: 1 / -1; grid-row: 2; width: 100%; margin-top: var(--s-3); }
+  .actions :global(button) { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .utilityButton { transition-duration: 1ms; }
 }

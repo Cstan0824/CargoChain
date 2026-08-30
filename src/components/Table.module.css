@@ -24,11 +24,13 @@
   font-size: var(--fs-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  background: transparent;
-  border-bottom: 1px solid var(--border-soft);
+  /* Transparent on the surface, with enough opacity for sticky overlap. */
+  background: color-mix(in srgb, var(--bg-surface) 96%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: var(--z-sticky);
 }
 
 .table tbody tr {
@@ -38,6 +40,11 @@
 .table tbody tr:last-child { border-bottom: 0; }
 .table tbody tr:hover { background: var(--bg-subtle); }
 
+.skeletonRow td {
+  height: 72px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
 .align_center { text-align: center; }
 .align_right  { text-align: right; }
 
@@ -45,9 +52,39 @@
   cursor: pointer;
 }
 
+.clickableRow:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
 .empty {
   text-align: center;
   color: var(--text-muted);
   padding: var(--s-8) var(--s-4);
   font-style: italic;
+}
+
+@media (max-width: 640px) {
+  .table { min-width: 760px; }
+
+  .table th:first-child,
+  .table td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: calc(var(--z-sticky) + 1);
+    background: var(--bg-surface);
+    box-shadow: 1px 0 0 var(--border-soft);
+  }
+
+  .table th:last-child,
+  .table td:last-child {
+    position: sticky;
+    right: 0;
+    z-index: calc(var(--z-sticky) + 1);
+    background: var(--bg-surface);
+    box-shadow: -1px 0 0 var(--border-soft);
+  }
+
+  .table tbody tr:hover td:first-child,
+  .table tbody tr:hover td:last-child { background: var(--bg-subtle); }
 }

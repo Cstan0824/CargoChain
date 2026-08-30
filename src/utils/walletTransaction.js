@@ -1,3 +1,5 @@
+import { CARGO_NETWORK_CONFIG } from './network.js';
+
 const GAS_BUFFER_NUMERATOR = 120n;
 const GAS_BUFFER_DENOMINATOR = 100n;
 const RECEIPT_TIMEOUT_MS = 120_000;
@@ -58,7 +60,7 @@ export async function sendWalletContractTransaction({
     // Ganache is local-only and legacy gas pricing is understood by every
     // MetaMask profile, including profiles that cached this custom network
     // before its RPC began advertising EIP-1559 base fees.
-    if (readNetwork.chainId === 1337n && feeData.gasPrice != null) {
+    if (readNetwork.chainId === BigInt(CARGO_NETWORK_CONFIG.chainId) && feeData.gasPrice != null) {
       preparedRequest.gasPrice = feeData.gasPrice;
     } else if (feeData.maxFeePerGas != null && feeData.maxPriorityFeePerGas != null) {
       preparedRequest.type = 2;
@@ -119,10 +121,10 @@ export function formatWalletTransactionError(error, fallback = 'The blockchain t
   ));
 
   if (normalized.includes('header not found')) {
-    return 'Ganache rejected a stale block reference. Refresh CargoChain and retry the transaction.';
+    return `${CARGO_NETWORK_CONFIG.chainName} rejected a stale block reference. Refresh CargoChain and retry the transaction.`;
   }
   if (normalized.includes('nonce too low') || normalized.includes('incorrect nonce')) {
-    return 'MetaMask has an outdated transaction nonce. Reset the account activity data for Local Ganache, then retry.';
+    return `MetaMask has an outdated transaction nonce. Reset the account activity data for ${CARGO_NETWORK_CONFIG.chainName}, then retry.`;
   }
   if (normalized.includes('replacement transaction underpriced')) {
     return 'Another transaction from this wallet is still pending. Wait for it to confirm, then retry.';
@@ -131,13 +133,13 @@ export function formatWalletTransactionError(error, fallback = 'The blockchain t
     return 'The connected wallet does not have enough ETH for this transaction.';
   }
   if (normalized.includes('current network does not support eip-1559')) {
-    return 'MetaMask has outdated fee settings for Local Ganache. Refresh CargoChain and retry with the local network selected.';
+    return `MetaMask has outdated fee settings for ${CARGO_NETWORK_CONFIG.chainName}. Refresh CargoChain and retry with the configured network selected.`;
   }
   if (nestedRevertReason) {
     return nestedRevertReason;
   }
   if (normalized.includes('could not coalesce error')) {
-    return 'MetaMask could not submit the transaction to Ganache. Confirm Local Ganache is selected, refresh, and retry.';
+    return `MetaMask could not submit the transaction to ${CARGO_NETWORK_CONFIG.chainName}. Confirm the configured network is selected, refresh, and retry.`;
   }
   if (normalized.includes('missing revert data')) {
     return 'The contract rejected the transaction without returning a reason. Refresh the current on-chain state and retry.';

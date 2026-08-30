@@ -27,17 +27,25 @@ export function BlockchainNoticeTile({ notice, onOpenTracking }) {
 
   return (
     <div className={styles.wrap}>
-      <div className={`${styles.tile} ${styles[notice.tone] || ''}`}>
+      <div className={styles.tile}>
         <Icon className={styles.icon} aria-hidden="true" />
-        <span className={styles.copy}>{notice.text}</span>
+        <span className={styles.copy} aria-label={notice.text}>
+          {notice.subject && notice.action ? (
+            <>
+              <strong className={styles.subject}>{notice.subject}</strong>{' '}
+              <span className={styles.action}>{notice.action}</span>
+              {notice.detail && <span className={styles.detail}>{notice.detail}</span>}
+            </>
+          ) : notice.text}
+        </span>
+        {date && <time className={styles.time}>{date}</time>}
         {onOpenTracking && (
           <button type="button" className={styles.reviewAction} onClick={onOpenTracking}>
-            Review
+            View shipment
             <HiOutlineArrowTopRightOnSquare aria-hidden="true" />
           </button>
         )}
       </div>
-      {date && <time className={styles.time}>{date}</time>}
     </div>
   );
 }

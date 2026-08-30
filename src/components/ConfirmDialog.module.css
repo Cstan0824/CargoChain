@@ -1,7 +1,7 @@
 .scrim {
   position: fixed;
   inset: 0;
-  z-index: 1200;
+  z-index: var(--z-modal);
   display: grid;
   place-items: center;
   padding: var(--s-4);
@@ -39,8 +39,8 @@
   position: absolute;
   top: var(--s-3);
   right: var(--s-3);
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   display: grid;
   place-items: center;
   border: 0;
@@ -74,29 +74,6 @@
   text-wrap: pretty;
 }
 
-.details {
-  display: grid;
-  gap: 1px;
-  margin: var(--s-4) 0 0;
-  overflow: hidden;
-  border-radius: var(--r-md);
-  background: var(--border-soft);
-}
-
-.details > div {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--s-3);
-  padding: var(--s-2) var(--s-3);
-  background: var(--bg-subtle);
-  font-size: var(--fs-xs);
-}
-
-.details dt { color: var(--text-secondary); }
-.details dd { margin: 0; color: var(--text-primary); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; text-align: right; }
-.warning { margin-top: var(--s-3) !important; color: var(--danger) !important; font-weight: var(--fw-medium); }
-
 .actions {
   grid-column: 1 / -1;
   display: flex;
@@ -116,5 +93,5 @@
   .iconWrap { width: 42px; height: 42px; border-radius: var(--r-md); }
   .content { padding-right: var(--s-3); }
   .actions { align-items: stretch; flex-direction: column-reverse; }
-  .actions :global(button) { width: 100%; min-height: 42px; }
+  .actions :global(button) { width: 100%; min-height: 44px; }
 }

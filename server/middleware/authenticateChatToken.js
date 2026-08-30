@@ -20,6 +20,7 @@ function authenticateChatToken(req, res, next) {
     const verified = verifyToken(token);
     req.user = {
       walletAddress: verified.walletAddress,
+      accountId: verified.accountId,
       claims: verified.claims,
     };
     next();

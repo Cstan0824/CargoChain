@@ -28,3 +28,17 @@
   letter-spacing: 0.02em;
   font-variant-numeric: tabular-nums;
 }
+
+.neutralFallback {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--text-secondary);
+  background: var(--bg-subtle);
+}
+
+.neutralFallback svg {
+  width: 58%;
+  height: 58%;
+}

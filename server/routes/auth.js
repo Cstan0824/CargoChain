@@ -169,7 +169,7 @@ router.post('/verify', authRateLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Invalid, expired or replayed nonce' });
     }
 
-    // 9. Issue 8-hour HS256 JWT
+    // 9. Issue an 8-hour wallet-authenticated JWT for private chat.
     const tokenResult = issueToken(normalizedAddress);
     return res.json(tokenResult);
   } catch (verifyError) {

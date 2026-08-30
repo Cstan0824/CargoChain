@@ -18,6 +18,7 @@ import {
   resolveWalletSigner,
   sendWalletContractTransaction,
 } from '../utils/walletTransaction.js';
+import { startTransactionToast } from '../utils/transactionToast.js';
 import styles from './ProposeMilestoneModal.module.css';
 
 const DEFAULT_MILESTONES = [
@@ -66,7 +67,7 @@ export function ProposeMilestoneModal({ isOpen, onClose, requestId, onSuccess })
       return;
     }
     if (!contracts?.deliveryEscrow) {
-      show('DeliveryEscrow contract is not available.', 'error');
+      show('CargoChain is unavailable on the current network.', 'error');
       return;
     }
     if (!requestId) {
@@ -79,6 +80,7 @@ export function ProposeMilestoneModal({ isOpen, onClose, requestId, onSuccess })
     }
 
     setSubmitting(true);
+    let transactionToast;
     try {
       const activeSigner = await resolveWalletSigner(signer, connect);
       const activeSignerAddress = await activeSigner.getAddress();
@@ -94,6 +96,11 @@ export function ProposeMilestoneModal({ isOpen, onClose, requestId, onSuccess })
         activeSignerAddress,
       )) return;
 
+      transactionToast = startTransactionToast({
+        wallet: 'Confirm the milestone proposal in MetaMask…',
+        submitted: 'Submitting milestone proposal…',
+        success: 'Milestone proposal submitted.',
+      });
       const tx = await sendWalletContractTransaction({
         contract: contracts.deliveryEscrow,
         method: 'proposeMilestones',
@@ -102,20 +109,19 @@ export function ProposeMilestoneModal({ isOpen, onClose, requestId, onSuccess })
         provider,
       });
 
-      show('Submitting milestone proposal to blockchain...', 'info');
+      transactionToast.submitted();
       await tx.wait();
 
-      show('Milestone proposal submitted successfully!', 'success');
+      transactionToast.success();
       if (onSuccess) onSuccess();
       onClose();
     } catch (e) {
       const message = e.shortMessage || e.reason || e.message || '';
-      show(
-        message.includes('carrier already has active proposal')
+      const formattedMessage = message.includes('carrier already has active proposal')
           ? 'You already have an active proposal for this request. Open it to revoke or revise your plan.'
-          : formatWalletTransactionError(e, message || 'Failed to submit proposal.'),
-        'error',
-      );
+          : formatWalletTransactionError(e, message || 'Failed to submit proposal.');
+      if (transactionToast) transactionToast.error(formattedMessage);
+      else show(formattedMessage, 'error');
     } finally {
       setSubmitting(false);
     }

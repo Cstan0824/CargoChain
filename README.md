@@ -22,7 +22,7 @@ A milestone-based delivery marketplace where:
 7. After completion, the shipper may send one optional, one-time tip directly to the carrier.
 8. The shipper may publish one permanent 1-5 star rating with up to three predefined feedback tags. Carrier profiles combine those verified ratings with aggregate completion and timing outcomes.
 
-CargoChain also includes wallet-backed display names and request-scoped private chat. Chat messages are private, off-chain Supabase data; the accompanying delivery timeline is reconstructed from relevant, verified on-chain events.
+CargoChain also includes account-based access: one account can enable Shipper, Carrier, or both roles, then link one or more MetaMask wallets for on-chain signing. Wallet-backed display names and request-scoped private chat remain available. Chat messages are private, off-chain Supabase data; the accompanying delivery timeline is reconstructed from relevant, verified on-chain events.
 
 This is the **assignment version** — built for clarity, demo, and grading — not a production logistics platform.
 
@@ -74,7 +74,7 @@ This is the **assignment version** — built for clarity, demo, and grading — 
 
 ### Identity and chat
 
-- A wallet registers an on-chain display name through `UserRegistry`; the same wallet can be a shipper in one request and carrier in another.
+- A connected MetaMask wallet is the CargoChain identity. A wallet can register an on-chain display name through `UserRegistry`, then act as both shipper and carrier on different requests.
 - The accepted shipper/carrier pair receives a request-scoped conversation. Text messages live in Supabase; SIWE authorisation and server-side contract checks protect access.
 - Chat also renders a filtered, read-only activity timeline from `DeliveryEscrow` and `LifecycleManager` events, including completion and expiry outcomes. Pending amendments and cancellations link directly to the relevant Track review section.
 
@@ -101,7 +101,7 @@ CargoChain/
 ├── scripts/                # chat schema, development launcher, scenario helpers
 ├── docs/                   # PRD, specification, architecture, agreement-change rules
 ├── truffle-config.js       # Ganache default; Sepolia commented (future plan)
-├── vite.config.js          # Vite dev server on 127.0.0.1:5174
+├── vite.config.mjs         # Vite dev server on 127.0.0.1:5174
 ├── package.json
 ├── README.md               # this file
 ├── AGENTS.md               # Coding-agent rules (read first)
@@ -126,7 +126,7 @@ CargoChain/
 
 ### Install Node.js (Windows)
 
-Download the LTS installer from [https://nodejs.org/](https://nodejs.org/). Verify:
+Install Node.js **22.x LTS** from [https://nodejs.org/](https://nodejs.org/). The current Supabase and Vite dependencies require Node 22. Ganache may print a µWS native-binary compatibility warning on Node 22 and fall back to its JavaScript implementation; this is non-fatal for local development. Verify:
 
 ```bash
 node --version
@@ -288,8 +288,8 @@ Open `.env` and provide the Supabase project URL, browser publishable key, servi
 CargoChain needs Supabase for proof images and private chat:
 
 1. In the Supabase SQL Editor, run [`scripts/apply-chat-schema.sql`](scripts/apply-chat-schema.sql). It creates the `conversations` and `messages` tables, indexes, RLS read policies, and realtime publication entries.
-2. Create a public Storage bucket named `milestone-proofs`. The browser uploads JPEG, PNG, and WebP proof images up to 10 MB under a SHA-256-derived object path; the resulting public URL is submitted on-chain.
-3. Restart the API/Vite processes after changing `.env` values. Never commit `.env` or the service-role key.
+3. Create a public Storage bucket named `milestone-proofs`. The browser uploads JPEG, PNG, and WebP proof images up to 10 MB under a SHA-256-derived object path; the resulting public URL is submitted on-chain.
+4. Restart the API/Vite processes after changing `.env` values. Never commit `.env` or the service-role key.
 
 **Every dev session — one command, one terminal:**
 
@@ -363,7 +363,7 @@ See `API_v1.md` for the function reference, `docs/Module-Split.md` for per-file 
 | `index.html`, `main.jsx`, `App.jsx` | Vite entry + React root + Router |
 | `pages/` | marketplace, request details, proposals, shipments/tracking, profile, and messages |
 | `components/` | shared UI plus proposal, registration, and private-chat components |
-| `context/` | wallet/contracts, registered profile, SIWE chat auth, and toast state |
+| `context/` | account auth/access, wallet/contracts, registered profile, SIWE chat auth, and toast state |
 | `hooks/` | context access helpers |
 | `contracts/index.js` | `getContract(provider, name, networkId)` factory |
 | `utils/` | formatting, SHA-256/Supabase proof upload, transaction execution, payment history, and on-chain chat timeline helpers |
@@ -385,7 +385,7 @@ npm run test:frontend # Vitest frontend suite
 npm run build         # production bundle
 ```
 
-The latest full local verification completed with **72 passing contract tests** and **40 passing frontend tests**.
+The latest full local verification completed with **72 passing contract tests** and **48 passing frontend tests**.
 
 ### `docs/` — Documentation
 
@@ -396,6 +396,7 @@ The latest full local verification completed with **72 passing contract tests** 
 | `Architecture.md` | Diagram-rich architecture overview |
 | `Module-Split.md` | Detailed responsibilities, dependencies, handoffs per module |
 | `Agreement-Changes.md` | Implemented amendment, mutual-cancellation, and completion-tip rules |
+| `DESIGN.md` | Shared UI typography, surfaces, layering, tables, loading, and accessibility contract |
 
 ---
 
@@ -426,7 +427,7 @@ Before pushing:
 - [ ] `npm test` all green
 - [ ] `npm run test:frontend` all green
 - [ ] `npm run build` succeeds
-- [ ] Manual smoke against Ganache works, including a new wallet registration after migration
+- [ ] Manual smoke against Ganache works: connect registered shipper and carrier wallets, then complete the demo flow
 - [ ] `API_v1.md` updated if any contract function changed
 - [ ] No commented-out code in the diff
 
@@ -436,12 +437,13 @@ Before pushing:
 
 The demo runs end-to-end on Ganache + a fresh `npm run migrate`:
 
-1. **Connect MetaMask** to `http://127.0.0.1:7545` (chain 1337) using separate shipper/carrier Ganache accounts, then register short display names in CargoChain.
-2. **Create and propose:** the shipper creates a request at `http://127.0.0.1:5174/`; two carriers submit milestone plans; the shipper compares, selects, and funds one.
-3. **Proof and payment:** the accepted carrier uploads checkpoint proof; the shipper verifies it; show the released ETH and on-chain payment entry.
-4. **Private chat:** the accepted pair authenticates with SIWE and exchanges request-scoped messages. Show that the activity timeline only contains events for that carrier/request pair.
-5. **Agreement change:** request a funded amendment or mutual cancellation, then show its review panel, on-chain decision, and history. Do not try to finalise cancellation while a proof is awaiting verification.
-6. **Completion:** finish remaining checkpoints, show the optional one-time tip in Payments, and confirm it reaches the carrier without changing escrow accounting.
+1. **Connect a Ganache wallet** in MetaMask and register its optional public display name through the profile flow.
+2. **Switch MetaMask wallets** when demonstrating the other party. Each connected wallet may act as a shipper or carrier according to the shipment action.
+3. **Create and propose:** the shipper creates a request at `http://127.0.0.1:5174/`; two carriers submit milestone plans; the shipper compares, selects, and funds one.
+4. **Proof and payment:** the accepted carrier uploads checkpoint proof; the shipper verifies it; show the released ETH and on-chain payment entry.
+5. **Private chat:** the accepted pair authenticates with SIWE and exchanges request-scoped messages. Show that the activity timeline only contains events for that carrier/request pair.
+6. **Agreement change:** request a funded amendment or mutual cancellation, then show its review panel, on-chain decision, and history. Do not try to finalise cancellation while a proof is awaiting verification.
+7. **Completion:** finish remaining checkpoints, show the optional one-time tip in Payments, and confirm it reaches the carrier without changing escrow accounting.
 
 ---
 
@@ -461,6 +463,7 @@ The demo runs end-to-end on Ganache + a fresh `npm run migrate`:
 - PRD: [`docs/PRD.md`](docs/PRD.md)
 - Module breakdown: [`docs/Module-Split.md`](docs/Module-Split.md)
 - Contract API: [`API_v1.md`](API_v1.md)
+- Account and asset plan: [`docs/Account-Based-Access-and-Asset-Plan.md`](docs/Account-Based-Access-and-Asset-Plan.md)
 - Coding-agent rules: [`AGENTS.md`](AGENTS.md)
 
 ---

@@ -1,6 +1,6 @@
 // src/pages/Track.jsx - Single shipment view backed by DeliveryEscrow.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { parseEther } from 'ethers';
 import {
@@ -15,8 +15,8 @@ import {
   HiOutlineCreditCard,
   HiOutlineCube,
   HiOutlineExclamationCircle,
+  HiOutlineEye,
   HiOutlineGift,
-  HiOutlineInformationCircle,
   HiOutlineLockClosed,
   HiOutlinePencilSquare,
   HiOutlinePhoto,
@@ -27,7 +27,6 @@ import {
 import { Topbar } from '../components/Topbar.jsx';
 import { Card } from '../components/Card.jsx';
 import { Badge } from '../components/Badge.jsx';
-import { Tabs } from '../components/Tabs.jsx';
 import { Button } from '../components/Button.jsx';
 import { ChatButton } from '../components/chat/ChatButton.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
@@ -40,31 +39,24 @@ import { useWallet } from '../hooks/useWallet.js';
 import { useUserProfile } from '../hooks/useUserProfile.js';
 import { useWalletIdentities, walletIdentityLabel } from '../hooks/useWalletIdentities.js';
 import { useConfirmDialog } from '../hooks/useConfirmDialog.js';
+import { useDialogFocus } from '../hooks/useDialogFocus.js';
 import {
   formatDate,
   formatEth,
+  formatRemarks,
+  hasRemarks,
+  milestoneStatusLabel,
   requestStatus,
 } from '../utils/format.js';
-import {
-  loadPaymentHistory,
-  paymentActionLabel,
-  PAYMENT_ACTION_TONE,
-  shortTransactionHash,
-} from '../utils/paymentHistory.js';
 import styles from './Track.module.css';
 import {hashFile, uploadPhoto} from '../utils/upload.js';
 import {
   formatWalletTransactionError,
   sendWalletContractTransaction,
 } from '../utils/walletTransaction.js';
+import { startTransactionToast } from '../utils/transactionToast.js';
 import { countWords, exceedsTextLimit } from '../utils/textLimits.js';
-
-const TAB_ITEMS = [
-  { value: 'overview', label: 'Overview' },
-  { value: 'checkpoints', label: 'Checkpoints' },
-  { value: 'payments', label: 'Payment' },
-  { value: 'activity', label: 'Activity' },
-];
+import { shipmentPresentation } from '../utils/shipmentPresentation.js';
 
 const MILESTONE_STATUS = ['Proposed', 'PendingProof', 'Submitted', 'Verified', 'Rejected', 'Paid'];
 const PROPOSAL_STATUS = ['Active', 'Revoked', 'Rejected', 'Accepted'];
@@ -87,21 +79,16 @@ export function Track() {
   const navigate = useNavigate();
   const location = useLocation();
   const { contracts, deployError } = useContracts();
-  const { account, signer, provider } = useWallet();
+  const { account, signer, provider, connect } = useWallet();
   const { show } = useToast();
   const { requireRegistration } = useUserProfile();
-  const [tab, setTab] = useState('overview');
   const [shipment, setShipment] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [actionStage, setActionStage] = useState('idle');
   const [refreshKey, setRefreshKey] = useState(0);
-  const [paymentHistory, setPaymentHistory] = useState([]);
-  const [paymentHistoryLoading, setPaymentHistoryLoading] = useState(false);
-  const [paymentHistoryError, setPaymentHistoryError] = useState(null);
   const [proofViewerMilestone, setProofViewerMilestone] = useState(null);
-  const [tipScrollRequest, setTipScrollRequest] = useState(0);
   const [focusedAgreement, setFocusedAgreement] = useState(null);
   const [reputationCarrier, setReputationCarrier] = useState(null);
   const [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1000));
@@ -131,7 +118,6 @@ export function Track() {
     if (!section) return undefined;
 
     const frame = window.requestAnimationFrame(() => {
-      if (section instanceof HTMLDetailsElement) section.open = true;
       section.scrollIntoView({ behavior: 'smooth', block: 'start' });
       setFocusedAgreement(focusTarget);
     });
@@ -160,7 +146,6 @@ export function Track() {
           const actionableIndex = nextShipment.events.findIndex((event) => 
             ['pending', 'locked', 'rejected'].includes(event.status));
           setSelectedIndex(actionableIndex >= 0 ? actionableIndex : 0);
-          setTab(getDefaultShipmentTab(nextShipment, account));
         }
       })
       .catch((loadError) => {
@@ -176,67 +161,38 @@ export function Track() {
     return () => {
       cancelled = true;
     };
-  }, [account, contracts, idParam, refreshKey]);
+  }, [contracts, idParam, refreshKey]);
 
-  useEffect(() => {
-    if (
-      !provider
-      || !contracts?.deliveryEscrow
-      || !shipment?.id
-      || String(shipment.id) !== String(idParam)
-    ) {
-      setPaymentHistory([]);
-      setPaymentHistoryLoading(false);
-      setPaymentHistoryError(null);
-      return;
-    }
-
-    let cancelled = false;
-    setPaymentHistoryLoading(true);
-    setPaymentHistoryError(null);
-
-    loadPaymentHistory({
-      contract: contracts.deliveryEscrow,
-      provider,
-      requestId: shipment.id,
-    })
-      .then((rows) => {
-        if (!cancelled) setPaymentHistory(rows);
-      })
-      .catch((historyError) => {
-        if (!cancelled) {
-          setPaymentHistory([]);
-          setPaymentHistoryError(formatHistoryError(historyError));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setPaymentHistoryLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [provider, contracts, idParam, shipment?.id, refreshKey]);
-
-  const isShipper = Boolean(
+  const walletIsShipper = Boolean(
     account && shipment && account.toLowerCase() === shipment.shipper.toLowerCase(),
   );
-  const isCarrier = Boolean(
+  const walletIsCarrier = Boolean(
     account && shipment && shipment.carrier
       && account.toLowerCase() === shipment.carrier.toLowerCase(),
   );
-  const proposalPending = Boolean(
-    shipment?.status === 'Open'
-      && shipment.proposals?.some((proposal) => proposal.status === 'Active'),
+  const isShipper = walletIsShipper;
+  const isCarrier = walletIsCarrier;
+  const hasOwnActiveProposal = Boolean(
+    account
+      && shipment?.proposals?.some((proposal) => (
+        proposal.status === 'Active'
+        && proposal.carrier?.toLowerCase() === account.toLowerCase()
+      )),
   );
+  const canProposeAsCarrier = Boolean(
+    shipment?.status === 'Open' && !walletIsShipper,
+  );
+  const openProposal = () => {
+    if (!account) {
+      connect();
+      return;
+    }
+    navigate(`/shipments/${shipment.id}/propose${hasOwnActiveProposal ? '?edit=active' : ''}`);
+  };
   const milestonesApproved = !['Open', 'PendingApproval'].includes(shipment?.status);
-  const proposalHistory = (shipment?.proposals || []).filter((proposal) => (
-    shipment?.status === 'Open'
-      ? !['Active', 'Accepted'].includes(proposal.status)
-      : proposal.status !== 'Accepted'
-  ));
-  const showShipmentTabs = milestonesApproved || (isShipper && proposalHistory.length > 0);
-  const tabItems = TAB_ITEMS;
+  const proposalHistory = (shipment?.proposals || []).filter(
+    (proposal) => proposal.status !== 'Active',
+  );
   const deadlinePassed = Boolean(
     shipment?.deadline && nowSeconds > shipment.deadline,
   );
@@ -257,25 +213,10 @@ export function Track() {
   );
   const busy = actionStage !== 'idle';
 
-  const openCompletionTip = () => {
-    setTipScrollRequest((value) => value + 1);
-    setTab('payments');
-  };
-
   const acceptProposal = async (proposalId) => {
     if (busy || !shipment || !signer || !contracts?.deliveryEscrow) return;
-    if (!await confirmAction({
-      title: 'Select this carrier and fund escrow?',
-      message: 'The selected proposal becomes the delivery plan and competing active proposals are closed.',
-      details: [
-        { label: 'Escrow to lock', value: formatEth(shipment.proposedAmount) },
-        { label: 'Recipient now', value: 'CargoChain escrow' },
-        { label: 'What changes', value: 'The carrier is assigned' },
-      ],
-      warning: 'Funding cannot be undone from this screen. Remaining escrow can only be refunded under the contract rules.',
-      confirmLabel: 'Fund escrow',
-    })) return;
     setActionStage('accepting');
+    let transactionToast;
 
     try {
       const activeAddress = await signer.getAddress();
@@ -296,6 +237,11 @@ export function Track() {
         activeAddress,
       )) return;
 
+      transactionToast = startTransactionToast({
+        wallet: 'Confirm proposal and escrow funding in MetaMask…',
+        submitted: 'Funding shipment…',
+        success: 'Proposal accepted and escrow funded.',
+      });
       const tx = await sendWalletContractTransaction({
         contract: contracts.deliveryEscrow,
         method: 'approveAndFund',
@@ -304,14 +250,16 @@ export function Track() {
         signer,
         provider,
       });
-      show(`Locking ${formatEth(proposedAmount)} in escrow...`, 'info');
+      transactionToast.submitted();
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) throw new Error('Approval was not confirmed.');
 
-      show(`Proposal accepted in block ${receipt.blockNumber}.`, 'success');
+      transactionToast.success();
       setRefreshKey((value) => value + 1);
     } catch (actionError) {
-      show(formatActionError(actionError), 'error');
+      const message = formatActionError(actionError);
+      if (transactionToast) transactionToast.error(message);
+      else show(message, 'error');
     } finally {
       setActionStage('idle');
     }
@@ -320,6 +268,7 @@ export function Track() {
   const rejectProposal = async (proposalId, rejectionNote = '') => {
     if (busy || !shipment || !signer || !contracts?.deliveryEscrow) return false;
     setActionStage('rejecting');
+    let transactionToast;
 
     try {
       const activeSignerAddress = await signer.getAddress();
@@ -328,6 +277,11 @@ export function Track() {
         activeSignerAddress,
       )) return false;
 
+      transactionToast = startTransactionToast({
+        wallet: 'Confirm proposal rejection in MetaMask…',
+        submitted: 'Rejecting carrier proposal…',
+        success: 'Proposal rejected.',
+      });
       const tx = await sendWalletContractTransaction({
         contract: contracts.deliveryEscrow,
         method: 'rejectMilestoneProposal',
@@ -335,15 +289,17 @@ export function Track() {
         signer,
         provider,
       });
-      show('Rejecting this carrier proposal...', 'info');
+      transactionToast.submitted();
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) throw new Error('Rejection was not confirmed.');
 
-      show(`Proposal rejected in block ${receipt.blockNumber}. Other proposals remain available.`, 'success');
+      transactionToast.success();
       setRefreshKey((value) => value + 1);
       return true;
     } catch (actionError) {
-      show(formatActionError(actionError), 'error');
+      const message = formatActionError(actionError);
+      if (transactionToast) transactionToast.error(message);
+      else show(message, 'error');
       return false;
     } finally {
       setActionStage('idle');
@@ -365,19 +321,8 @@ export function Track() {
       return false;
     }
 
-    if (!await confirmAction({
-      title: 'Send this completion tip?',
-      message: 'This optional amount is paid directly to the assigned carrier and does not come from escrow.',
-      details: [
-        { label: 'Amount', value: formatEth(tipValue) },
-        { label: 'Recipient', value: shipment.carrier || 'Assigned carrier' },
-        { label: 'Reversible', value: 'No' },
-      ],
-      warning: 'A completion tip can be sent only once.',
-      confirmLabel: 'Send tip',
-    })) return false;
-
     setActionStage('tipping');
+    let transactionToast;
     try {
       const activeSignerAddress = await signer.getAddress();
       if (!await requireRegistration(
@@ -396,6 +341,11 @@ export function Track() {
         throw new Error('A tip has already been sent for this delivery.');
       }
 
+      transactionToast = startTransactionToast({
+        wallet: 'Confirm the completion tip in MetaMask…',
+        submitted: 'Sending completion tip…',
+        success: 'Completion tip sent.',
+      });
       const tx = await sendWalletContractTransaction({
         contract: contracts.deliveryEscrow,
         method: 'tipCarrier',
@@ -404,15 +354,17 @@ export function Track() {
         signer,
         provider,
       });
-      show(`Sending ${formatEth(tipValue)} directly to the carrier...`, 'info');
+      transactionToast.submitted();
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) throw new Error('Tip transaction was not confirmed.');
 
-      show(`Carrier tipped in block ${receipt.blockNumber}.`, 'success');
+      transactionToast.success();
       setRefreshKey((value) => value + 1);
       return true;
     } catch (actionError) {
-      show(formatActionError(actionError), 'error');
+      const message = formatActionError(actionError);
+      if (transactionToast) transactionToast.error(message);
+      else show(message, 'error');
       return false;
     } finally {
       setActionStage('idle');
@@ -433,6 +385,7 @@ export function Track() {
     })) return;
 
     setActionStage('cancelling');
+    let transactionToast;
     try {
       const latest = await getLatestRequestForShipper(contracts.deliveryEscrow, signer, shipment.id);
       const latestStatus = requestStatus(latest.status ?? latest[9]);
@@ -446,6 +399,11 @@ export function Track() {
         activeSignerAddress,
       )) return;
 
+      transactionToast = startTransactionToast({
+        wallet: 'Confirm request cancellation in MetaMask…',
+        submitted: 'Cancelling shipment request…',
+        success: 'Request cancelled.',
+      });
       const tx = await sendWalletContractTransaction({
         contract: contracts.deliveryEscrow,
         method: 'cancelRequest',
@@ -453,14 +411,16 @@ export function Track() {
         signer,
         provider,
       });
-      show('Cancelling request...', 'info');
+      transactionToast.submitted();
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) throw new Error('Cancellation was not confirmed.');
 
-      show('Request cancelled.', 'success');
+      transactionToast.success();
       setRefreshKey((value) => value + 1);
     } catch (actionError) {
-      show(formatActionError(actionError), 'error');
+      const message = formatActionError(actionError);
+      if (transactionToast) transactionToast.error(message);
+      else show(message, 'error');
     } finally {
       setActionStage('idle');
     }
@@ -479,6 +439,7 @@ export function Track() {
     }
 
     setActionStage(stage);
+    let transactionToast;
     try {
       const activeSignerAddress = await signer.getAddress();
       if (!await requireRegistration(
@@ -493,6 +454,11 @@ export function Track() {
         throw new Error('Only the shipment participants can manage this cancellation.');
       }
 
+      transactionToast = startTransactionToast({
+        wallet: `Confirm ${cancellationWalletCopy(method)} in MetaMask…`,
+        submitted: progressMessage.replace(/\.\.\.$/, '…'),
+        success: successMessage,
+      });
       const tx = await sendWalletContractTransaction({
         contract: contracts.lifecycleManager,
         method,
@@ -500,17 +466,19 @@ export function Track() {
         signer,
         provider,
       });
-      show(progressMessage, 'info');
+      transactionToast.submitted();
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) {
         throw new Error('The cancellation transaction was not confirmed.');
       }
 
-      show(`${successMessage} Block ${receipt.blockNumber}.`, 'success');
+      transactionToast.success();
       setRefreshKey((value) => value + 1);
       return true;
     } catch (actionError) {
-      show(formatActionError(actionError), 'error');
+      const message = formatActionError(actionError);
+      if (transactionToast) transactionToast.error(message);
+      else show(message, 'error');
       return false;
     } finally {
       setActionStage('idle');
@@ -619,6 +587,7 @@ export function Track() {
     }
 
     setActionStage(stage);
+    let transactionToast;
     try {
       const activeSignerAddress = await signer.getAddress();
       if (!await requireRegistration(
@@ -633,6 +602,11 @@ export function Track() {
         throw new Error('Only the shipment participants can manage this amendment.');
       }
 
+      transactionToast = startTransactionToast({
+        wallet: `Confirm ${amendmentWalletCopy(method)} in MetaMask…`,
+        submitted: progressMessage.replace(/\.\.\.$/, '…'),
+        success: successMessage,
+      });
       const tx = await sendWalletContractTransaction({
         contract: contracts.lifecycleManager,
         method,
@@ -641,17 +615,19 @@ export function Track() {
         signer,
         provider,
       });
-      show(progressMessage, 'info');
+      transactionToast.submitted();
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) {
         throw new Error('The amendment transaction was not confirmed.');
       }
 
-      show(`${successMessage} Block ${receipt.blockNumber}.`, 'success');
+      transactionToast.success();
       setRefreshKey((current) => current + 1);
       return true;
     } catch (actionError) {
-      show(formatActionError(actionError), 'error');
+      const message = formatActionError(actionError);
+      if (transactionToast) transactionToast.error(message);
+      else show(message, 'error');
       return false;
     } finally {
       setActionStage('idle');
@@ -755,6 +731,7 @@ export function Track() {
     })) return;
 
     setActionStage('refunding');
+    let transactionToast;
     try {
       const latest = await getLatestRequestForShipper(contracts.deliveryEscrow, signer, shipment.id);
       const latestStatus = requestStatus(latest.status ?? latest[9]);
@@ -776,6 +753,11 @@ export function Track() {
         activeSignerAddress,
       )) return;
 
+      transactionToast = startTransactionToast({
+        wallet: 'Confirm the escrow refund in MetaMask…',
+        submitted: 'Refunding remaining escrow…',
+        success: `${formatEth(latestRemaining)} refunded to the shipper wallet.`,
+      });
       const tx = await sendWalletContractTransaction({
         contract: contracts.deliveryEscrow,
         method: 'refundRemaining',
@@ -783,66 +765,47 @@ export function Track() {
         signer,
         provider,
       });
-      show('Claiming remaining escrow refund...', 'info');
+      transactionToast.submitted();
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) throw new Error('Refund was not confirmed.');
 
-      show(`${formatEth(latestRemaining)} refunded to the shipper wallet.`, 'success');
+      transactionToast.success();
       setRefreshKey((value) => value + 1);
     } catch (actionError) {
-      show(formatActionError(actionError), 'error');
+      const message = formatActionError(actionError);
+      if (transactionToast) transactionToast.error(message);
+      else show(message, 'error');
     } finally {
       setActionStage('idle');
     }
   };
 
-  const submitMilestoneProof = async (milestoneId, file) => {
+  const submitMilestoneProof = async (milestoneId, file, remark = '') => {
     if (busy || !shipment || !signer || !contracts?.deliveryEscrow) {
       show('Connect the carrier wallet first', 'error');
       return false;
     }
 
-    if(!isCarrier){
+    if (!isCarrier) {
       show('Only the assigned carrier can submit milestone proof.', 'error');
       return false;
     }
 
-    if(!file){
+    if (!file) {
       show('No file selected for upload.', 'error');
       return false;
     }
 
-    const fileTypes = [
-      'image/jpeg',
-      'image/png',
-      'image/webp',
-    ];
-
-    if(!fileTypes.includes(file.type)){
-      show('Invalid file type. Please upload a JPEG, PNG, or WEBP image.', 'error');
+    const fileError = proofFileError(file);
+    if (fileError) {
+      show(fileError, 'error');
       return false;
     }
-    
-    if(file.size > 2 * 1024 * 1024) {
-      show('File size exceeds 2MB limit. Please upload a smaller image.', 'error');
-      return false;
-    }
-
-    const milestone = shipment.milestones.find((entry) => entry.milestoneId === milestoneId);
-    if (!await confirmAction({
-      title: 'Submit this checkpoint proof?',
-      message: 'The shipper will review this image before the checkpoint payment can be released.',
-      details: [
-        { label: 'Checkpoint', value: milestone?.name || `Checkpoint ${milestoneId}` },
-        { label: 'File', value: file.name || 'Selected proof image' },
-        { label: 'Payment after approval', value: milestone ? formatEth(milestone.payoutAmount + milestone.additionalPayoutAmount) : 'Shown after review' },
-      ],
-      confirmLabel: 'Submit proof',
-    })) return false;
 
     setActionStage('submitting-proof');
+    let transactionToast;
 
-    try{
+    try {
       const activeSignerAddress = await signer.getAddress();
       if (!await requireRegistration(
         'Register your CargoChain profile to submit milestone proof.',
@@ -852,57 +815,61 @@ export function Track() {
       const hash = await hashFile(file);
       const uploadResult = await uploadPhoto(file, hash, shipment.id, milestoneId);
       const proofReference = `${uploadResult.url}?sha256=${encodeURIComponent(hash)}`;
+      transactionToast = startTransactionToast({
+        wallet: 'Confirm proof submission in MetaMask…',
+        submitted: 'Submitting photo proof…',
+        success: 'Photo proof submitted.',
+      });
       const tx = await sendWalletContractTransaction({
         contract: contracts.deliveryEscrow,
         method: 'submitProof',
-        args: [BigInt(shipment.id), BigInt(milestoneId), [proofReference], ''],
+        args: [BigInt(shipment.id), BigInt(milestoneId), [proofReference], remark.trim()],
         signer,
         provider,
       });
-      show('Submitting milestone proof on-chain...', 'info');
+      transactionToast.submitted();
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) throw new Error('Proof submission was not confirmed.');
       
-      show('Milestone proof submitted successfully.', 'success');
+      transactionToast.success();
       setRefreshKey((value) => value + 1);
       return true;
     } catch (actionError) {
-      show(formatActionError(actionError), 'error');
-        return false;
+      const message = formatActionError(actionError);
+      if (transactionToast) transactionToast.error(message);
+      else show(message, 'error');
+      return false;
     } finally {
-        setActionStage('idle');
+      setActionStage('idle');
     }
-  }
+  };
 
 
 
-  const verifyMilestone = async (milestoneId, approve) => {
-    if (busy ||!shipment ||!signer ||!contracts?.deliveryEscrow) {
+  const verifyMilestone = async (milestoneId, approve, rejectionReason = '') => {
+    if (busy || !shipment || !signer || !contracts?.deliveryEscrow) {
         return;
     }
 
+    if (!approve && !rejectionReason.trim()) {
+      show('Add a reason so the carrier knows what to correct.', 'error');
+      return;
+    }
+
     const milestone = shipment.milestones.find((entry) => entry.milestoneId === milestoneId);
-    if (!await confirmAction({
-      title: approve ? 'Approve proof and release payment?' : 'Reject this checkpoint proof?',
-      message: approve
-        ? 'Approval releases the checkpoint allocation directly to the carrier.'
-        : 'The carrier can submit a new proof after you reject this one.',
-      details: approve ? [
-        { label: 'Checkpoint', value: milestone?.name || `Checkpoint ${milestoneId}` },
-        { label: 'Payment to carrier', value: milestone ? formatEth(milestone.payoutAmount + milestone.additionalPayoutAmount) : 'Checkpoint allocation' },
-        { label: 'Reversible', value: 'No' },
-      ] : [
-        { label: 'Checkpoint', value: milestone?.name || `Checkpoint ${milestoneId}` },
-        { label: 'What changes', value: 'The carrier is asked to resubmit proof' },
-      ],
-      warning: approve ? 'Released payment cannot be reclaimed through CargoChain.' : '',
-      confirmLabel: approve ? 'Approve and release' : 'Reject proof',
-      tone: approve ? 'primary' : 'danger',
+    const payout = milestone
+      ? milestone.payoutAmount + milestone.additionalPayoutAmount
+      : 0n;
+    if (approve && !await confirmAction({
+      title: 'Release checkpoint payment?',
+      message: `Approving “${milestone?.name || 'this checkpoint'}” releases ${formatEth(payout)} to ${walletIdentityLabel(shipment.carrier, walletIdentities)}.`,
+      confirmLabel: `Approve & release ${formatEth(payout)}`,
     })) return;
 
     setActionStage(
       approve ? 'verifying' : 'rejecting-proof',
     );
+    let transactionToast;
 
     try {
       const activeSignerAddress = await signer.getAddress();
@@ -913,6 +880,13 @@ export function Track() {
         activeSignerAddress,
       )) return;
 
+      transactionToast = startTransactionToast({
+        wallet: approve
+          ? 'Confirm proof approval in MetaMask…'
+          : 'Confirm proof rejection in MetaMask…',
+        submitted: approve ? 'Releasing checkpoint payment…' : 'Rejecting proof…',
+        success: approve ? 'Proof approved and payment released.' : 'Proof rejected.',
+      });
       const tx = await sendWalletContractTransaction({
         contract: contracts.deliveryEscrow,
         method: 'verifyMilestone',
@@ -922,18 +896,13 @@ export function Track() {
           approve,
           approve
             ? ''
-            : 'Proof rejected by shipper',
+            : rejectionReason.trim(),
         ],
         signer,
         provider,
       });
 
-      show(
-        approve
-          ? 'Verifying proof and releasing payment...'
-          : 'Rejecting milestone proof...',
-        'info',
-      );
+      transactionToast.submitted();
 
       const receipt = await tx.wait();
 
@@ -943,27 +912,15 @@ export function Track() {
         );
       }
 
-      show(
-        approve
-          ? 'Milestone verified and payment released.'
-          : 'Milestone proof rejected.',
-        'success',
-      );
+      transactionToast.success();
 
       setRefreshKey((value) => value + 1);
     } catch (actionError) {
-      show(formatActionError(actionError), 'error');
+      const message = formatActionError(actionError);
+      if (transactionToast) transactionToast.error(message);
+      else show(message, 'error');
     } finally {
       setActionStage('idle');
-    }
-  };
-
-  const copyTransactionHash = async (transactionHash) => {
-    try {
-      await navigator.clipboard.writeText(transactionHash);
-      show('Tx hash copied to clipboard', 'success');
-    } catch {
-      show('Could not copy to clipboard', 'error');
     }
   };
 
@@ -971,7 +928,7 @@ export function Track() {
     return (
       <div className={styles.page}>
         <Topbar title={`Shipment #${String(idParam || '').padStart(4, '0')}`} />
-        <Card><div className={styles.tabEmpty}>Loading shipment from DeliveryEscrow...</div></Card>
+        <Card><div className={styles.tabEmpty}>Loading shipment timeline…</div></Card>
       </div>
     );
   }
@@ -990,194 +947,122 @@ export function Track() {
   }
 
   const displayedValue = shipment.escrow > 0n ? shipment.escrow : shipment.proposedAmount;
-  const displayedRemaining = shipment.escrow > 0n ? shipment.remaining : shipment.proposedAmount;
-  const releasedPct = shipment.escrow > 0n
-    ? Number((shipment.released * 100n) / shipment.escrow)
-    : 0;
+  const detailPresentation = shipmentPresentation({
+    request: shipment,
+    proposals: shipment.proposals,
+    milestones: shipment.milestones,
+    escrow: shipment.escrow,
+    released: shipment.released,
+    refunded: shipment.refunded,
+    remaining: shipment.remaining,
+    tipAmount: shipment.tipAmount,
+    account,
+  });
+  const visibleOpenProposals = visibleOpenProposalsFor(
+    shipment.proposals,
+    account,
+    shipment.shipper,
+  );
 
   return (
     <div className={styles.page}>
       <Topbar
         title={`Shipment #${String(shipment.id).padStart(4, '0')}`}
-        subtitle="Proposal, delivery checkpoints, proofs, and payments in one timeline."
+        subtitle="Shipment detail"
       />
 
-      <Card className={styles.summary}>
-        <div className={styles.statusPanel}>
-          <div className={styles.statusMain}>
-            <div className={styles.statusKicker}>Current status</div>
-            <div className={styles.statusTitleRow}>
-              <h2 className={styles.statusTitle}>{requestStatus(shipment.status)}</h2>
-              {shipment.carrier && (isShipper || isCarrier) && (
-                <ChatButton
-                  requestId={shipment.id}
-                  carrierWallet={isShipper ? shipment.carrier : undefined}
-                  label={isShipper ? 'Chat with carrier' : 'Chat with shipper'}
-                  variant="secondary"
-                  size="sm"
-                />
-              )}
-            </div>
-            <div className={styles.statusRoute}>
-              <span>{shipment.from}</span>
-              <span className={styles.routeArrow}>-&gt;</span>
-              <span>{shipment.to}</span>
-            </div>
+      <Card className={styles.detailCard}>
+        <div className={styles.detailHeader}>
+          <div className={styles.detailIntro}>
+            <span className={styles.statusKicker}>Current state</span>
+            <h2>{detailPresentation.currentStateTitle}</h2>
+            <p className={styles.detailRoute}>{shipment.from} <span aria-hidden="true">→</span> {shipment.to}</p>
           </div>
+          {shipment.carrier && (isShipper || isCarrier) && (
+            <ChatButton
+              requestId={shipment.id}
+              carrierWallet={isShipper ? shipment.carrier : undefined}
+              label={isShipper ? 'Chat with carrier' : 'Chat with shipper'}
+              variant="secondary"
+              size="sm"
+            />
+          )}
+        </div>
 
-          <div className={styles.statusProgress} aria-label={`${releasedPct}% escrow released`}>
-            <div className={styles.progressHead}>
-              <span>{shipment.escrow > 0n ? 'Escrow released' : 'Escrow awaiting approval'}</span>
-              <strong>{releasedPct}%</strong>
-            </div>
-            <div className={styles.progressTrack}>
-              <span className={styles.progressFill} style={{ width: `${releasedPct}%` }} />
-            </div>
-            <div className={styles.progressMeta}>
-              <span>{formatEth(shipment.released)} paid</span>
-              <span>{formatEth(displayedRemaining)} remaining</span>
-            </div>
+        <div className={styles.nextActionCard} role="status">
+          <span className={styles.nextActionIcon} aria-hidden="true"><HiOutlineArrowRight /></span>
+          <div>
+            <span className={styles.nextActionKicker}>Next action</span>
+            <strong>{detailPresentation.requiredAction || detailPresentation.nextStep}</strong>
           </div>
         </div>
 
-        <div className={styles.summaryGrid}>
-          <SummaryField label="Created" value={formatDate(shipment.createdAt)} />
-          <SummaryField label="Deadline" value={formatDate(shipment.deadline)} />
-          <div className={styles.summaryField}>
-            <div className={styles.summaryFieldLabel}>
-              {shipment.escrow > 0n ? 'Escrow value' : 'Planned payment'}
-            </div>
-            <div className={styles.summaryFieldVal}>
-              <strong>{formatEth(displayedValue)}</strong>
-              <Badge tone={shipment.escrow > 0n ? 'success' : 'warning'} icon={HiOutlineCheckBadge}>
-                {shipment.escrow > 0n ? 'Funded' : 'Awaiting funding'}
-              </Badge>
-            </div>
-          </div>
-          <div className={styles.summaryField}>
-            <div className={styles.summaryFieldLabel}>Carrier</div>
-            <div className={styles.summaryFieldVal}>
-              {shipment.carrier ? (
-                <span className={styles.addressVal} title={shipment.carrier}>
-                  {walletIdentityLabel(shipment.carrier, walletIdentities)}
-                </span>
-              ) : (
-                <span className={styles.muted}>Awaiting proposal</span>
-              )}
-            </div>
-          </div>
-        </div>
+        <ol className={styles.lifecycle} aria-label="Shipment lifecycle">
+          {detailPresentation.lifecycle.map((stage, index) => (
+            <li key={stage.id} className={`${styles.lifecycleStep} ${lifecycleStateClass(stage.state)}`}>
+              <span aria-hidden="true">{stage.state === 'complete' ? <HiOutlineCheck /> : index + 1}</span>
+              <strong>{stage.label}</strong>
+            </li>
+          ))}
+        </ol>
 
-        {shipment.items.length > 0 && (
-          <ShipmentContents items={shipment.items} />
-        )}
+        <dl className={styles.detailFacts}>
+          <DetailFact label="Created" value={formatDate(shipment.createdAt)} />
+          <DetailFact label="Deadline" value={formatDate(shipment.deadline)} />
+          <DetailFact label={shipment.escrow > 0n ? 'Escrow' : 'Planned payment'} value={formatEth(displayedValue)} />
+          <DetailFact label="Shipper" value={walletIdentityLabel(shipment.shipper, walletIdentities)} title={shipment.shipper} />
+          <DetailFact
+            label="Carrier"
+            value={shipment.carrier ? walletIdentityLabel(shipment.carrier, walletIdentities) : 'Awaiting proposal'}
+            title={shipment.carrier || undefined}
+          />
+        </dl>
 
-        {shipment.specialInstruction && (
-          <div className={styles.specialNote}>
-            <HiOutlineInformationCircle className={styles.specialNoteIcon} aria-hidden="true" />
-            <div>
-              <div className={styles.specialNoteTitle}>Special instructions</div>
-              <div className={styles.specialNoteBody}>{shipment.specialInstruction}</div>
-            </div>
-          </div>
-        )}
       </Card>
 
-      {(canCancelRequest || canClaimRefund) && (
-        <div className={styles.refundBlock} role="region" aria-label="Escrow recovery">
-          <div className={styles.refundText}>
-            <strong>
-              {canClaimRefund ? 'Remaining escrow is refundable.' : 'Manage this request'}
-            </strong>
-            <div>
-              {canClaimRefund
-                ? `${formatEth(shipment.remaining)} can be returned to the shipper wallet.`
-                : 'Cancel the request before escrow is funded.'}
-            </div>
-          </div>
-          <div className={styles.refundActions}>
-            {canCancelRequest && (
-              <Button
-                variant="danger"
-                onClick={cancelRequest}
-                disabled={busy}
-              >
-                {actionStage === 'cancelling'
-                  ? 'Cancelling...'
-                  : 'Cancel request'}
-              </Button>
+      {shipment.status === 'Open' ? (
+        <>
+          <ProposalReview
+            requestId={idParam}
+            proposals={visibleOpenProposals}
+            proposedAmount={shipment.proposedAmount}
+            isShipper={isShipper}
+            account={account}
+            busy={busy}
+            actionStage={actionStage}
+            onAccept={acceptProposal}
+            onReject={rejectProposal}
+            walletIdentities={walletIdentities}
+            onOpenCarrierReputation={setReputationCarrier}
+            canPropose={canProposeAsCarrier}
+            onPropose={openProposal}
+            presentation={detailPresentation}
+            showHistory={false}
+          />
+          <Card className={styles.manifestCard}>
+            {shipment.items.length > 0 ? (
+              <ShipmentContents items={shipment.items} />
+            ) : (
+              <p className={styles.manifestEmpty}>No item manifest was recorded.</p>
             )}
-            {canClaimRefund && (
-              <Button onClick={claimRefund} disabled={busy}>
-                {actionStage === 'refunding' ? 'Refunding...' : 'Claim refund'}
-              </Button>
-            )}
-          </div>
-        </div>
-      )}
+          </Card>
+        </>
+      ) : (
+        <>
+          {milestonesApproved && (
+            <Card padded={false} className={styles.checkpointsCard}>
+              <div className={styles.checkpointsHeader}>
+                <div>
+                  <span className={styles.statusKicker}>Delivery workspace</span>
+                  <h2>Checkpoints</h2>
+                </div>
+                <div className={styles.checkpointPaymentSummary} aria-label="Escrow summary">
+                  <PaymentMetric label="Escrow" value={formatEth(shipment.escrow)} />
+                  <PaymentMetric label="Released" value={formatEth(shipment.released)} />
+                  <PaymentMetric label="Remaining" value={formatEth(shipment.remaining)} />
+                </div>
+              </div>
 
-      {shipment.status === 'Open' && !isShipper && (
-        <Card className={styles.proposalCard}>
-          <div className={styles.proposalHeader}>
-            <div>
-              <div className={styles.proposalKicker}>Open shipment</div>
-              <h2>{proposalPending ? `${shipment.proposals.filter((proposal) => proposal.status === 'Active').length} carrier proposal${shipment.proposals.filter((proposal) => proposal.status === 'Active').length === 1 ? '' : 's'} ready to review` : 'No carrier proposal yet'}</h2>
-              <p>
-                {proposalPending
-                  ? 'The request remains open while the shipper compares plans and selects one carrier.'
-                  : 'A carrier must propose milestone names and payout percentages before escrow can be funded.'}
-              </p>
-            </div>
-            {account && !isShipper && (
-              <Button onClick={() => navigate(`/shipments/${shipment.id}/propose`)}>
-                Propose milestones
-              </Button>
-            )}
-          </div>
-          <span className={styles.proposalHint}>
-            {!account
-              ? 'Connect a carrier wallet to propose milestones.'
-              : isShipper
-                ? 'Your request remains visible in the marketplace while waiting for a carrier.'
-                : 'Each carrier can keep one active proposal until the shipper selects or rejects it.'}
-          </span>
-        </Card>
-      )}
-
-      {shipment.status === 'Open' && isShipper && (
-        <ProposalReview
-          requestId={idParam}
-          proposals={shipment.proposals}
-          proposedAmount={shipment.proposedAmount}
-          isShipper={isShipper}
-          account={account}
-          busy={busy}
-          actionStage={actionStage}
-          onAccept={acceptProposal}
-          onReject={rejectProposal}
-          walletIdentities={walletIdentities}
-          onOpenCarrierReputation={setReputationCarrier}
-          openShipment
-          showHistory={false}
-        />
-      )}
-
-      {showShipmentTabs && (
-        <Card padded={false} className={styles.tabsCard}>
-          <div className={styles.tabsWrap}>
-            <Tabs items={tabItems} value={tab} onChange={setTab} />
-          </div>
-          <div className={styles.tabBody}>
-            {tab === 'overview' && (
-              <ShipmentOverviewPanel
-                shipment={shipment}
-                isShipper={isShipper}
-                isCarrier={isCarrier}
-                walletIdentities={walletIdentities}
-              />
-            )}
-            {tab === 'checkpoints' && (
-              <>
               <TimelinePanel
                 events={shipment.events}
                 milestones={shipment.milestones}
@@ -1190,44 +1075,53 @@ export function Track() {
                 busy={busy}
                 onVerify={verifyMilestone}
                 onSubmitProof={submitMilestoneProof}
-                showCompletionCta={isShipper && shipment.status === 'Completed'}
                 ratingRequestId={shipment.id}
                 ratingCarrier={shipment.carrier}
                 ratingIsShipper={isShipper}
                 ratingStatus={shipment.status}
-                tipSent={shipment.tipAmount > 0n}
-                onOpenTip={openCompletionTip}
               />
-                <ProofPanel milestones={shipment.milestones} />
-              </>
+            </Card>
+          )}
+
+          <Card className={styles.manifestCard}>
+            {shipment.items.length > 0 ? (
+              <ShipmentContents items={shipment.items} />
+            ) : (
+              <p className={styles.manifestEmpty}>No item manifest was recorded.</p>
             )}
-            {tab === 'payments' && (
-              <PaymentsPanel
-                shipment={shipment}
-                isShipper={isShipper}
-                busy={busy}
-                actionStage={actionStage}
-                history={paymentHistory}
-                historyLoading={paymentHistoryLoading}
-                historyError={paymentHistoryError}
-                onCopyHash={copyTransactionHash}
-                onRetry={() => setRefreshKey((value) => value + 1)}
-                onTip={sendCarrierTip}
-                tipScrollRequest={tipScrollRequest}
-                onTipScrollComplete={() => setTipScrollRequest(0)}
-              />
-            )}
-            {tab === 'activity' && (
-              <ShipmentActivityPanel
-                shipment={shipment}
-                isShipper={isShipper}
-                proposalHistory={proposalHistory}
-                walletIdentities={walletIdentities}
-                collapsedByDefault={shipment.status === 'Open'}
-                onOpenCarrierReputation={setReputationCarrier}
-              />
-            )}
-          </div>
+          </Card>
+        </>
+      )}
+
+      <Card className={styles.remarksCard}>
+        <section className={styles.remarks} aria-labelledby="shipment-remarks-title">
+          <h3 id="shipment-remarks-title">Remarks</h3>
+          <p>{formatRemarks(shipment.specialInstruction)}</p>
+        </section>
+      </Card>
+
+      {milestonesApproved && (
+        <Card className={styles.escrowActivityCard}>
+          <EscrowActivityPanel
+            shipment={shipment}
+            isShipper={isShipper}
+            busy={busy}
+            actionStage={actionStage}
+            onTip={sendCarrierTip}
+          />
+        </Card>
+      )}
+
+      {isShipper && proposalHistory.length > 0 && (
+        <Card className={styles.proposalHistoryCard}>
+          <ProposalHistoryPanel
+            requestId={idParam}
+            proposals={proposalHistory}
+            proposedAmount={shipment.proposedAmount}
+            walletIdentities={walletIdentities}
+            collapsedByDefault={shipment.status === 'Open'}
+            onOpenCarrierReputation={setReputationCarrier}
+          />
         </Card>
       )}
 
@@ -1236,13 +1130,12 @@ export function Track() {
         && ['Funded', 'InProgress'].includes(shipment.status)
         && !deadlinePassed
       )) && (
-        <details
+        <div
           ref={amendmentSectionRef}
           className={`${styles.agreementFocusTarget} ${
             focusedAgreement === 'amendment' ? styles.agreementFocusTargetActive : ''
           }`}
         >
-          <summary className={styles.agreementSummary}>Agreement changes</summary>
           <AmendmentPanel
             amendments={shipment.amendments}
             shipment={shipment}
@@ -1259,7 +1152,7 @@ export function Track() {
             onWithdraw={withdrawAmendment}
             onExpire={expireAmendment}
           />
-        </details>
+        </div>
       )}
 
       {(shipment.cancellations.length > 0 || (
@@ -1267,13 +1160,12 @@ export function Track() {
         && ['Funded', 'InProgress'].includes(shipment.status)
         && !deadlinePassed
       )) && (
-        <details
+        <div
           ref={cancellationSectionRef}
           className={`${styles.agreementFocusTarget} ${
             focusedAgreement === 'cancellation' ? styles.agreementFocusTargetActive : ''
           }`}
         >
-          <summary className={styles.agreementSummary}>Cancellation and recovery</summary>
           <CancellationPanel
             cancellations={shipment.cancellations}
             shipment={shipment}
@@ -1289,7 +1181,35 @@ export function Track() {
             onWithdraw={withdrawMutualCancellation}
             onExpire={expireMutualCancellation}
           />
-        </details>
+        </div>
+      )}
+
+      {(canCancelRequest || canClaimRefund) && (
+        <section className={styles.secondaryManagement} aria-labelledby="secondary-management-title">
+          <div>
+            <span className={styles.statusKicker}>Secondary management</span>
+            <h2 id="secondary-management-title">
+              {canClaimRefund ? 'Escrow recovery' : 'Request management'}
+            </h2>
+            <p>
+              {canClaimRefund
+                ? `${formatEth(shipment.remaining)} remains available to refund.`
+                : 'Cancellation is available until a proposal is approved and funded.'}
+            </p>
+          </div>
+          <div className={styles.refundActions}>
+            {canCancelRequest && (
+              <Button variant="danger" onClick={cancelRequest} disabled={busy}>
+                {actionStage === 'cancelling' ? 'Cancelling…' : 'Cancel request'}
+              </Button>
+            )}
+            {canClaimRefund && (
+              <Button onClick={claimRefund} disabled={busy}>
+                {actionStage === 'refunding' ? 'Refunding…' : 'Claim refund'}
+              </Button>
+            )}
+          </div>
+        </section>
       )}
 
       {proofViewerMilestone && (
@@ -2635,91 +2555,21 @@ function CancellationPanel({
   );
 }
 
-function SummaryField({ label, value }) {
+function DetailFact({ label, value, title }) {
   return (
-    <div className={styles.summaryField}>
-      <div className={styles.summaryFieldLabel}>{label}</div>
-      <div className={styles.summaryFieldVal}>{value}</div>
+    <div className={styles.detailFact}>
+      <dt>{label}</dt>
+      <dd title={title}>{value}</dd>
     </div>
   );
 }
 
-function ShipmentOverviewPanel({ shipment, isShipper, isCarrier, walletIdentities }) {
-  const relationship = isShipper
-    ? 'You are the shipper for this delivery.'
-    : isCarrier
-      ? 'You are the assigned carrier for this delivery.'
-      : 'You can review this delivery, but only its participants can change it.';
-
+function PaymentMetric({ label, value }) {
   return (
-    <section className={styles.workspaceOverview} aria-label="Shipment overview">
-      <div className={styles.workspaceIntro}>
-        <div>
-          <h2>Delivery overview</h2>
-          <p>{relationship}</p>
-        </div>
-        <Badge tone={shipment.status === 'Completed' ? 'success' : 'info'}>{requestStatus(shipment.status)}</Badge>
-      </div>
-      <dl className={styles.workspaceFacts}>
-        <div>
-          <dt>Route</dt>
-          <dd>{shipment.from} <span aria-hidden="true">→</span> {shipment.to}</dd>
-        </div>
-        <div>
-          <dt>Deadline</dt>
-          <dd>{formatDate(shipment.deadline)}</dd>
-        </div>
-        <div>
-          <dt>Shipper</dt>
-          <dd>{walletIdentityLabel(shipment.shipper, walletIdentities)}</dd>
-        </div>
-        <div>
-          <dt>Carrier</dt>
-          <dd>{shipment.carrier ? walletIdentityLabel(shipment.carrier, walletIdentities) : 'Awaiting a selected proposal'}</dd>
-        </div>
-      </dl>
-      <details className={styles.blockchainDetails}>
-        <summary>Blockchain details</summary>
-        <p>Request #{shipment.id} records the delivery status, checkpoint proofs, and payment events on the configured local network.</p>
-      </details>
-    </section>
-  );
-}
-
-function ShipmentActivityPanel({ shipment, isShipper, proposalHistory, walletIdentities }) {
-  return (
-    <section className={styles.activityPanel} aria-label="Shipment activity">
-      <div className={styles.workspaceIntro}>
-        <div>
-          <h2>Activity</h2>
-          <p>Important delivery updates, proposal decisions, and recorded milestones.</p>
-        </div>
-      </div>
-      <ol className={styles.activityList}>
-        {shipment.events.map((event, index) => (
-          <li key={`${event.eventType}-${event.milestoneId ?? index}`}>
-            <span className={styles.activityMarker} aria-hidden="true" />
-            <div>
-              <strong>{event.label}</strong>
-              <p>{event.details}</p>
-            </div>
-            <time>{event.timestamp ? formatDate(event.timestamp) : event.statusLabel}</time>
-          </li>
-        ))}
-      </ol>
-      {isShipper && proposalHistory.length > 0 && (
-        <details className={styles.activityDisclosure}>
-          <summary>Proposal history ({proposalHistory.length})</summary>
-          <ProposalHistoryPanel
-            requestId={shipment.id}
-            proposals={proposalHistory}
-            proposedAmount={shipment.proposedAmount}
-            walletIdentities={walletIdentities}
-            collapsedByDefault={false}
-          />
-        </details>
-      )}
-    </section>
+    <div className={styles.checkpointPaymentMetric}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   );
 }
 
@@ -2762,7 +2612,9 @@ function ProposalReview({
   onReject,
   walletIdentities,
   onOpenCarrierReputation,
-  openShipment = false,
+  canPropose = false,
+  onPropose,
+  presentation,
   showHistory = true,
 }) {
   const [dateSort, setDateSort] = useState('');
@@ -2785,40 +2637,41 @@ function ProposalReview({
   });
   const sortedProposals = sortProposals(activeProposals);
   const sortedHistoricalProposals = sortProposals(historicalProposals);
+  const proposalView = presentation?.proposalView || {
+    visible: true,
+    badgeLabel: activeProposals.length
+      ? `${activeProposals.length} proposal${activeProposals.length === 1 ? '' : 's'} ready`
+      : 'Awaiting proposals',
+    badgeTone: activeProposals.length ? 'warning' : 'neutral',
+    emptyLabel: isShipper ? 'Awaiting proposals' : 'Proposal needed',
+    emptyTitle: isShipper ? 'Open for carrier proposals' : 'Submit a milestone plan',
+    canPropose,
+    actionLabel: 'Propose milestones',
+  };
+  const showProposalAction = canPropose && proposalView.canPropose !== false;
 
   return (
     <>
       <Card className={styles.proposalCard}>
         <div className={styles.proposalHeader}>
           <div>
-            <div className={styles.proposalKicker}>{openShipment ? 'Open shipment' : 'Carrier proposals'}</div>
-            <h2>
-              {openShipment
-                ? activeProposals.length
-                  ? `${activeProposals.length} carrier proposal${activeProposals.length === 1 ? '' : 's'} ready to review`
-                  : 'No carrier proposal yet'
-                : 'Compare milestone payout plans'}
-            </h2>
-            <p>
-              {openShipment
-                ? activeProposals.length
-                  ? 'Compare each payout plan and select the carrier that should receive escrow funding.'
-                  : 'Carrier plans will appear here when they are submitted for your review.'
-                : `Selecting one plan locks ${formatEth(proposedAmount)} in escrow and assigns that carrier.`}
-            </p>
+            <div className={styles.proposalKicker}>Open request</div>
+            <h2>Carrier proposals</h2>
           </div>
-          <Badge tone="warning">{activeProposals.length} active</Badge>
+          <div className={styles.proposalHeaderActions}>
+            <Badge tone={proposalView.badgeTone || 'neutral'} variant="outlined">
+              {proposalView.badgeLabel}
+            </Badge>
+            {showProposalAction && (
+              <Button onClick={onPropose}>{proposalView.actionLabel || 'Propose milestones'}</Button>
+            )}
+          </div>
         </div>
 
-        <div className={styles.proposalControls}>
-          <span>
-            {activeProposals.length === 0
-              ? 'This request stays open until a carrier submits a milestone payout plan.'
-              : activeProposals.length > 3
-                ? 'Showing three proposals at a time. Scroll to compare the rest.'
-                : 'Open a proposal to inspect its milestone breakdown.'}
-          </span>
-          {activeProposals.length > 0 && <div className={styles.proposalSortControls}>
+        {activeProposals.length > 1 && (
+          <div className={styles.proposalControls}>
+            <span>Sort proposals</span>
+            <div className={styles.proposalSortControls}>
             <label className={styles.proposalSortLabel}>
               <span>Date</span>
               <select value={dateSort} onChange={(event) => setDateSort(event.target.value)}>
@@ -2835,10 +2688,11 @@ function ProposalReview({
                 <option value="fewest">Fewest first</option>
               </select>
             </label>
-          </div>}
-        </div>
+            </div>
+          </div>
+        )}
 
-        {sortedProposals.length > 0 && (
+        {sortedProposals.length > 0 ? (
           <div className={styles.proposalList}>
             {sortedProposals.map((proposal) => (
               <ProposalSummaryCard
@@ -2850,19 +2704,15 @@ function ProposalReview({
               />
             ))}
           </div>
+        ) : (
+          <div className={styles.proposalEmpty} role="status">
+            <Badge tone={proposalView.badgeTone || 'neutral'} variant="outlined">
+              {proposalView.emptyLabel || proposalView.badgeLabel}
+            </Badge>
+            <strong>{proposalView.emptyTitle || proposalView.badgeLabel}</strong>
+            {proposalView.emptyDescription && <span>{proposalView.emptyDescription}</span>}
+          </div>
         )}
-
-        <div className={styles.proposalFooter}>
-          <span className={styles.proposalHint}>
-            {!account
-              ? 'Connect the shipper wallet to select a proposal.'
-              : isShipper
-                ? activeProposals.length
-                  ? 'Accept one plan to fund escrow, or reject individual plans without closing this request.'
-                  : 'Your request remains visible in the marketplace while waiting for a carrier.'
-                : 'Each carrier can have one active proposal while the shipper reviews the options.'}
-          </span>
-        </div>
 
         {showHistory && historicalProposals.length > 0 && (
           <details className={styles.proposalHistory}>
@@ -2906,23 +2756,61 @@ function ProposalReview({
   );
 }
 
-function ProposalSummaryCard({ proposal, status, onOpen, walletIdentities, onOpenCarrierReputation }) {
+function ProposalSummaryCard({ proposal, status, onOpen, walletIdentities, onOpenCarrierReputation, actionLabel = 'View proposal details' }) {
+  const handleCardClick = (event) => {
+    // The card is a review affordance, while the reputation and eye controls
+    // keep their own actions. Pointer crossing only changes the affordance;
+    // opening the review remains an explicit click or keyboard action.
+    if (event.target !== event.currentTarget && event.target.closest?.('button, a, input, select, textarea')) return;
+    onOpen();
+  };
+
+  const handleCardKeyDown = (event) => {
+    if (event.target !== event.currentTarget) return;
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    onOpen();
+  };
+
   return (
-    <button type="button" className={styles.proposalSummaryCard} onClick={onOpen}>
-      <span className={styles.proposalSummaryIdentity}>
-        <span className={styles.proposalCarrierLabel}>Carrier proposal #{proposal.id + 1}</span>
-        <strong title={proposal.carrier}>{walletIdentityLabel(proposal.carrier, walletIdentities)}</strong>
-        <CarrierReputationSummary carrier={proposal.carrier} compact onOpenProfile={onOpenCarrierReputation} />
-      </span>
-      <span className={styles.proposalSummaryMeta}>
-        <span>{formatDate(proposal.createdAt)}</span>
-        <span className={styles.proposalSummaryBadges}>
-          {status && <Badge tone={proposalStatusTone(status)}>{status}</Badge>}
-          <Badge tone="warning">{proposal.milestones.length} milestones</Badge>
+    <article
+      className={styles.proposalSummaryCard}
+      role="button"
+      tabIndex={0}
+      aria-label={`Review carrier proposal ${proposal.id + 1}`}
+      aria-haspopup="dialog"
+      onClick={handleCardClick}
+      onKeyDown={handleCardKeyDown}
+    >
+      <div className={styles.proposalSummaryIdentity}>
+        <div className={styles.proposalSummaryCarrier}>
+          <span className={styles.proposalCarrierLabel}>Carrier proposal #{proposal.id + 1}</span>
+          <strong title={proposal.carrier}>{walletIdentityLabel(proposal.carrier, walletIdentities)}</strong>
+          <CarrierReputationSummary carrier={proposal.carrier} compact onOpenProfile={onOpenCarrierReputation} />
+        </div>
+        {status && <span className={styles.proposalSummaryStatus}><Badge tone={proposalStatusTone(status)}>{status}</Badge></span>}
+      </div>
+      <div className={styles.proposalSummaryMeta}>
+        <span className={styles.proposalSummaryMetric}>
+          <strong>{proposal.milestones.length}</strong>
+          <span>milestones</span>
         </span>
+      </div>
+      <button
+        type="button"
+        className={styles.proposalSummaryAction}
+        onClick={onOpen}
+        title={actionLabel}
+        aria-label={actionLabel}
+      >
+        <HiOutlineEye aria-hidden="true" />
+        <span className={styles.proposalSummaryActionLabel}>Review proposal</span>
+      </button>
+      <span className={styles.proposalSummaryTime}>
+        Submitted {formatDate(proposal.createdAt)}
+        {proposal.updatedAt > proposal.createdAt ? ` · Updated ${formatDate(proposal.updatedAt)}` : ''}
       </span>
-      <span className={styles.proposalSummaryAction}>View details</span>
-    </button>
+    </article>
   );
 }
 
@@ -3041,8 +2929,8 @@ function ProposalHistoryContent({
   ) : (
     <>
             <div className={styles.proposalControls}>
-              <span>Open a proposal to inspect the milestone plan submitted by that carrier.</span>
-              <div className={styles.proposalSortControls}>
+              <span>Recorded proposals</span>
+              {proposals.length > 1 && <div className={styles.proposalSortControls}>
                 <label className={styles.proposalSortLabel}>
                   <span>Date</span>
                   <select value={dateSort} onChange={(event) => onDateSort(event.target.value)}>
@@ -3059,7 +2947,7 @@ function ProposalHistoryContent({
                     <option value="fewest">Fewest first</option>
                   </select>
                 </label>
-              </div>
+              </div>}
             </div>
 
             <div className={styles.proposalList}>
@@ -3070,6 +2958,7 @@ function ProposalHistoryContent({
                   status={proposal.status}
                   walletIdentities={walletIdentities}
                   onOpenCarrierReputation={onOpenCarrierReputation}
+                  actionLabel="View proposal"
                   onOpen={() => onOpen(proposal)}
                 />
               ))}
@@ -3101,6 +2990,7 @@ function ProposalDetailModal({
 }) {
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [rejectionNote, setRejectionNote] = useState('');
+  const dialogRef = useDialogFocus({ onClose });
   const rejectionNoteWordCount = countWords(rejectionNote);
   const rejectionNoteTooLong = exceedsTextLimit(
     rejectionNote,
@@ -3113,14 +3003,6 @@ function ProposalDetailModal({
     setRejectionNote('');
   }, [proposal.id]);
 
-  useEffect(() => {
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
-
   const confirmRejection = async () => {
     if (busy || rejectionNoteTooLong) return;
     const rejected = await onReject(proposal.id, rejectionNote);
@@ -3130,6 +3012,7 @@ function ProposalDetailModal({
   return (
     <div className={styles.proposalModalOverlay} role="presentation" onMouseDown={onClose}>
       <section
+        ref={dialogRef}
         className={styles.proposalModal}
         role="dialog"
         aria-modal="true"
@@ -3155,8 +3038,14 @@ function ProposalDetailModal({
 
         <div className={styles.proposalModalBody}>
           <div className={styles.proposalModalIntro}>
-            <span>{proposal.milestones.length} milestones</span>
-            <span>Planned escrow: {formatEth(proposedAmount)}</span>
+            <div className={styles.proposalMetricTile}>
+              <span>Milestones</span>
+              <strong>{proposal.milestones.length}</strong>
+            </div>
+            <div className={styles.proposalMetricTile}>
+              <span>Planned escrow</span>
+              <strong>{formatEth(proposedAmount)}</strong>
+            </div>
           </div>
           <ol className={styles.proposalSteps}>
             {proposal.milestones.map((milestone, index) => (
@@ -3165,7 +3054,6 @@ function ProposalDetailModal({
                 <div className={styles.proposalStepBody}>
                   <div className={styles.proposalStepHeader}>
                     <strong>{milestone.name}</strong>
-                    <Badge tone="warning">Proposed</Badge>
                   </div>
                   <div className={styles.proposalStepMeta}>
                     <span>{milestone.payoutPercentage}% of payment</span>
@@ -3228,16 +3116,16 @@ function ProposalDetailModal({
           {isShipper && proposal.status === 'Active' && !readOnly && (
             showRejectForm ? (
               <>
-                <Button variant="secondary" onClick={() => setShowRejectForm(false)} disabled={busy}>
+                <Button variant="softNeutral" onClick={() => setShowRejectForm(false)} disabled={busy}>
                   Keep proposal
                 </Button>
-                <Button variant="danger" onClick={confirmRejection} disabled={busy || rejectionNoteTooLong}>
+                <Button variant="softDanger" onClick={confirmRejection} disabled={busy || rejectionNoteTooLong}>
                   {actionStage === 'rejecting' ? 'Rejecting...' : 'Confirm rejection'}
                 </Button>
               </>
             ) : (
               <>
-                <Button variant="danger" onClick={() => setShowRejectForm(true)} disabled={busy}>
+                <Button variant="softDanger" onClick={() => setShowRejectForm(true)} disabled={busy}>
                   Reject proposal
                 </Button>
                 <Button onClick={() => onAccept(proposal.id)} disabled={busy}>
@@ -3247,9 +3135,6 @@ function ProposalDetailModal({
             )
           )}
         </div>
-        {!isShipper && account && account.toLowerCase() === proposal.carrier.toLowerCase() && (
-          <span className={styles.proposalOwnerNote}>This is your active proposal.</span>
-        )}
       </section>
     </div>
   );
@@ -3267,20 +3152,25 @@ function TimelinePanel({
   onVerify,
   canSubmitProof,
   onSubmitProof,
-  showCompletionCta,
   ratingRequestId,
   ratingCarrier,
   ratingIsShipper,
   ratingStatus,
-  tipSent,
-  onOpenTip,
 }) {
-  if (!events.length) return <div className={styles.tabEmpty}>No timeline entries yet.</div>;
   const selectedEvent = events[selectedIndex] || events[0];
   const selectedMilestone = selectedEvent.milestoneId == null
     ? null
     : milestones.find((milestone) => milestone.milestoneId === selectedEvent.milestoneId);
   const hasPhotoProof = selectedMilestone?.proofUris?.length > 0;
+  const [showProofRejectForm, setShowProofRejectForm] = useState(false);
+  const [proofRejectionReason, setProofRejectionReason] = useState('');
+
+  useEffect(() => {
+    setShowProofRejectForm(false);
+    setProofRejectionReason('');
+  }, [selectedEvent?.milestoneId, selectedEvent?.status]);
+
+  if (!selectedEvent) return <div className={styles.tabEmpty}>No timeline entries yet.</div>;
 
   return (
     <div className={styles.timelineWorkspace}>
@@ -3290,6 +3180,9 @@ function TimelinePanel({
           <ol className={styles.timeline}>
             {events.map((event, index) => {
               const active = index === selectedIndex;
+              const eventMilestone = event.milestoneId == null
+                ? null
+                : milestones.find((milestone) => milestone.milestoneId === event.milestoneId);
               const dotClass = timelineDotClass(event.status);
               const dotIcon = event.status === 'verified' || event.status === 'paid'
                 ? <HiOutlineCheck size={13} />
@@ -3304,10 +3197,23 @@ function TimelinePanel({
                   <div className={`${styles.tlDot} ${dotClass}`}>{dotIcon}</div>
                   <button type="button" className={styles.tlContent} onClick={() => onSelect(index)}>
                     <span className={styles.tlBrief}>
-                      <span className={styles.tlBriefTime}>
-                        {event.timestamp ? formatDate(event.timestamp) : event.statusLabel}
+                      <span className={styles.tlBriefCopy}>
+                        <span className={styles.tlBriefTime}>
+                          {event.timestamp ? formatDate(event.timestamp) : event.statusLabel}
+                        </span>
+                        <strong className={styles.tlBriefTitle}>{event.label}</strong>
                       </span>
-                      <strong className={styles.tlBriefTitle}>{event.label}</strong>
+                      {eventMilestone && (
+                        <span className={styles.tlEscrowAllocation}>
+                          <span>Escrow allocation</span>
+                          <strong>{formatEth(milestoneEscrowAllocation(eventMilestone))}</strong>
+                          <small>
+                            {eventMilestone.addedByAmendment
+                              ? 'Amendment funded'
+                              : `${eventMilestone.payoutPercentage}% payout`}
+                          </small>
+                        </span>
+                      )}
                     </span>
                   </button>
                 </li>
@@ -3322,28 +3228,6 @@ function TimelinePanel({
             isShipper={ratingIsShipper}
             status={ratingStatus}
           />
-        )}
-        {showCompletionCta && (
-          <section className={styles.timelineCompletionCta} aria-labelledby="timeline-completion-cta-title">
-            <div className={styles.timelineCompletionCtaIcon} aria-hidden="true">
-              <HiOutlineGift />
-            </div>
-            <div className={styles.timelineCompletionCtaCopy}>
-              <span>Delivery complete</span>
-              <strong id="timeline-completion-cta-title">
-                {tipSent ? 'Your carrier tip is recorded' : 'Want to thank the carrier?'}
-              </strong>
-              <p>
-                {tipSent
-                  ? 'Open Payments to review the completed tip transaction.'
-                  : 'Continue to Payments to send one optional tip directly to the carrier.'}
-              </p>
-            </div>
-            <Button variant={tipSent ? 'secondary' : 'primary'} onClick={onOpenTip}>
-              {tipSent ? 'View tip' : 'Leave a tip'}
-              <HiOutlineArrowRight aria-hidden="true" />
-            </Button>
-          </section>
         )}
       </div>
 
@@ -3381,7 +3265,7 @@ function TimelinePanel({
                     : 'Part of the original accepted milestone plan and funded from the initial escrow.'}
                 </p>
                 <div className={styles.sidebarCheckpointAmount}>
-                  <span>Allocated payment</span>
+                  <span>{checkpointPaymentState(selectedMilestone.status)}</span>
                   <strong>
                     {formatEth(
                       selectedMilestone.payoutAmount
@@ -3390,8 +3274,7 @@ function TimelinePanel({
                   </strong>
                 </div>
                 <p className={styles.sidebarCheckpointUpdate}>
-                  {selectedMilestone.remark
-                    || selectedMilestone.rejectionReason
+                  {firstMeaningfulRemark(selectedMilestone.remark, selectedMilestone.rejectionReason)
                     || milestoneDescription(selectedMilestone.status)}
                 </p>
               </section>
@@ -3421,7 +3304,7 @@ function TimelinePanel({
                   size="sm"
                   onClick={() => onViewProof(selectedMilestone)}
                 >
-                  View proof
+                  Review photo proof
                 </Button>
               </div>
             )}
@@ -3438,22 +3321,66 @@ function TimelinePanel({
             {selectedEvent.status === 'pending' && canVerify && (
               <div className={styles.sidebarVerifyPanel}>
                 <span className={styles.sidebarLabel}>Shipper verification required</span>
+                <p className={styles.sidebarVerifyHint}>
+                  Approve to release {formatEth(
+                    selectedMilestone
+                      ? selectedMilestone.payoutAmount + selectedMilestone.additionalPayoutAmount
+                      : 0n,
+                  )} to the carrier, or explain what needs to be corrected.
+                </p>
+                {showProofRejectForm && (
+                  <div className={styles.proofRejectionForm}>
+                    <label htmlFor={`proof-rejection-${selectedEvent.milestoneId}`}>
+                      Reason for rejection
+                    </label>
+                    <textarea
+                      id={`proof-rejection-${selectedEvent.milestoneId}`}
+                      value={proofRejectionReason}
+                      onChange={(event) => setProofRejectionReason(event.target.value)}
+                      placeholder="Tell the carrier what to retake or clarify..."
+                      rows={3}
+                      autoFocus
+                    />
+                    <span className={styles.proofRejectionMeta}>
+                      This reason is recorded on-chain and shown on resubmission.
+                    </span>
+                  </div>
+                )}
                 <div className={styles.actionRow}>
                   <Button
                     size="sm"
                     disabled={busy}
                     onClick={() => onVerify(selectedEvent.milestoneId, true)}
                   >
-                    Verify & release
+                    Approve proof & release
                   </Button>
                   <Button
                     size="sm"
                     variant="danger"
-                    disabled={busy}
-                    onClick={() => onVerify(selectedEvent.milestoneId, false)}
+                    disabled={busy || (showProofRejectForm && !proofRejectionReason.trim())}
+                    onClick={() => {
+                      if (!showProofRejectForm) {
+                        setShowProofRejectForm(true);
+                        return;
+                      }
+                      onVerify(selectedEvent.milestoneId, false, proofRejectionReason);
+                    }}
                   >
-                    Reject proof
+                    {showProofRejectForm ? 'Confirm rejection' : 'Reject proof'}
                   </Button>
+                  {showProofRejectForm && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() => {
+                        setShowProofRejectForm(false);
+                        setProofRejectionReason('');
+                      }}
+                    >
+                      Keep reviewing
+                    </Button>
+                  )}
                 </div>
               </div>
             )}
@@ -3472,39 +3399,83 @@ function TimelinePanel({
 
 function ProofSubmitBox({ milestoneId, rejected, busy, onSubmit }) {
   const [selectedFile, setSelectedFile] = useState(null);
+  const [fileError, setFileError] = useState('');
+  const [remark, setRemark] = useState('');
+  const [previewUrl, setPreviewUrl] = useState('');
+  const fileInputRef = useRef(null);
+  const fileInputId = useId();
+  const remarkInputId = useId();
+
+  useEffect(() => {
+    if (!selectedFile) {
+      setPreviewUrl('');
+      return undefined;
+    }
+    const nextUrl = URL.createObjectURL(selectedFile);
+    setPreviewUrl(nextUrl);
+    return () => URL.revokeObjectURL(nextUrl);
+  }, [selectedFile]);
+
+  const chooseFile = (file) => {
+    const nextError = proofFileError(file);
+    setFileError(nextError);
+    setSelectedFile(nextError ? null : file);
+  };
+
   const handleSubmit = async () => {
-    const success = await onSubmit(milestoneId, selectedFile);
+    if (!selectedFile || fileError) return;
+    const success = await onSubmit(milestoneId, selectedFile, remark);
     if (success) {
       setSelectedFile(null);
+      setFileError('');
+      setRemark('');
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
+
   return (
-    <div className={styles.sidebarVerifyPanel}>
+    <div className={`${styles.sidebarVerifyPanel} ${styles.proofSubmitPanel}`}>
       <span className={styles.sidebarLabel}>
-        {rejected 
-        ? 'Resubmit proof for this milestone' 
-        : 'Carrier checkpoint update'}
-        </span>
-
-        <input 
-        type="file" 
-        accept="image/jpeg,image/png,image/webp" 
-        disabled={busy}
-        onChange={(e) => setSelectedFile(e.target.files[0])} />
-
-        {selectedFile && (
-          <span> 
-            Selected: {selectedFile.name}
-          </span>
-        )}
-
-        <Button
-        size="sm"
-        disabled={busy || !selectedFile}
-        onClick={handleSubmit}
-        >
-          {busy ? 'Submitting proof...' : rejected ? 'Resubmit Proof' : 'Submit Proof'}
-        </Button>
+        {rejected ? 'Resubmit proof for this milestone' : 'Carrier checkpoint update'}
+      </span>
+      <p className={styles.proofUploadHint}>Add a clear JPEG, PNG, or WebP photo. Maximum 2 MB.</p>
+      <label htmlFor={fileInputId} className={styles.proofDropzone}>
+        <HiOutlinePhoto className={styles.proofDropzoneIcon} aria-hidden="true" />
+        <span>{selectedFile ? 'Replace photo' : 'Choose photo proof'}</span>
+        <small>{selectedFile ? selectedFile.name : 'Use a well-lit image where the package is visible.'}</small>
+        <input
+          ref={fileInputRef}
+          id={fileInputId}
+          className={styles.proofFileInput}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          disabled={busy}
+          onChange={(event) => chooseFile(event.target.files?.[0])}
+          aria-describedby={`${fileInputId}-hint`}
+        />
+      </label>
+      <span id={`${fileInputId}-hint`} className={styles.proofUploadHint}>JPEG, PNG, or WebP · max 2 MB</span>
+      {fileError && <span className={styles.proofUploadError} role="alert">{fileError}</span>}
+      {previewUrl && (
+        <div className={styles.proofPreview}>
+          <img src={previewUrl} alt={`Preview of ${selectedFile.name}`} />
+          <span>{Math.ceil(selectedFile.size / 1024)} KB ready to submit</span>
+        </div>
+      )}
+      <div className={styles.proofRemarkField}>
+        <label htmlFor={remarkInputId}>Carrier remark <span>(optional)</span></label>
+        <textarea
+          id={remarkInputId}
+          value={remark}
+          onChange={(event) => setRemark(event.target.value)}
+          placeholder="Add context for the shipper, such as handover time or packaging condition."
+          rows={2}
+          disabled={busy}
+        />
+      </div>
+      <Button size="sm" disabled={busy || !selectedFile || Boolean(fileError)} onClick={handleSubmit}>
+        {busy ? 'Submitting photo proof…' : rejected ? 'Resubmit photo proof' : 'Submit photo proof'}
+      </Button>
     </div>
   );
 }
@@ -3627,13 +3598,13 @@ function ProofImageCard({
           </Badge>
         </div>
 
-        {milestone.remark && (
+        {hasRemarks(milestone.remark) && (
           <div className={styles.proofRemark}>
             <span className={styles.proofCardLabel}>
               Carrier remark
             </span>
 
-            <p>{milestone.remark}</p>
+            <p>{String(milestone.remark).trim()}</p>
           </div>
         )}
 
@@ -3668,66 +3639,86 @@ function ProofImageCard({
   );
 }
 
-function ProofViewerModal({ milestone, onClose }) {
+export function ProofViewerModal({ milestone, onClose }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [imageFailed, setImageFailed] = useState(false);
+  const [imageLoading, setImageLoading] = useState(true);
+  const closeRef = useRef(null);
   const proofUris = milestone.proofUris || [];
   const hasMultipleProofs = proofUris.length > 1;
   const proofUri = proofUris[activeIndex];
-  const imageUrl = new URL(proofUri, window.location.origin).href;
+  const imageUrl = safeProofUrl(proofUri);
+  const focusedDialogRef = useDialogFocus({
+    onClose,
+    initialFocusRef: closeRef,
+  });
 
   useEffect(() => {
     const onKeyDown = (event) => {
-      if (event.key === 'Escape') onClose();
       if (event.key === 'ArrowLeft' && hasMultipleProofs) {
         setImageFailed(false);
+        setImageLoading(true);
         setActiveIndex((index) => (index - 1 + proofUris.length) % proofUris.length);
       }
       if (event.key === 'ArrowRight' && hasMultipleProofs) {
         setImageFailed(false);
+        setImageLoading(true);
         setActiveIndex((index) => (index + 1) % proofUris.length);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [hasMultipleProofs, onClose, proofUris.length]);
+  }, [hasMultipleProofs, proofUris.length]);
 
   const move = (direction) => {
     setImageFailed(false);
+    setImageLoading(true);
     setActiveIndex((index) => (index + direction + proofUris.length) % proofUris.length);
   };
 
   return (
-    <div className={styles.proofViewerScrim} onMouseDown={onClose}>
+    <div
+      className={styles.proofViewerScrim}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
       <section
+        ref={focusedDialogRef}
         className={styles.proofViewerDialog}
         role="dialog"
         aria-modal="true"
         aria-labelledby="proof-viewer-title"
-        onMouseDown={(event) => event.stopPropagation()}
       >
         <header className={styles.proofViewerHeader}>
           <div>
             <span className={styles.proofCardLabel}>Photo proof</span>
             <h2 id="proof-viewer-title">{milestone.name}</h2>
           </div>
-          <button type="button" className={styles.proofViewerClose} onClick={onClose} aria-label="Close proof viewer">
+          <button ref={closeRef} type="button" className={styles.proofViewerClose} onClick={onClose} aria-label="Close proof viewer">
             <HiOutlineXMark aria-hidden="true" />
           </button>
         </header>
 
         <div className={styles.proofViewerBody}>
-          {!imageFailed ? (
+          {imageLoading && imageUrl && !imageFailed && (
+            <div className={styles.proofViewerLoading} role="status">Loading photo proof…</div>
+          )}
+          {imageUrl && !imageFailed ? (
             <img
               src={imageUrl}
-              alt={`Proof ${activeIndex + 1} for ${milestone.name}`}
+              alt={`Photo proof attempt ${activeIndex + 1} for ${milestone.name}`}
               className={styles.proofViewerImage}
-              onError={() => setImageFailed(true)}
+              onLoad={() => setImageLoading(false)}
+              onError={() => {
+                setImageLoading(false);
+                setImageFailed(true);
+              }}
             />
           ) : (
             <div className={styles.proofViewerError}>
               <HiOutlineExclamationCircle aria-hidden="true" />
-              <span>Photo could not be loaded</span>
+              <span>{proofUris.length ? 'Photo could not be loaded' : 'No photo proof is available'}</span>
             </div>
           )}
           {hasMultipleProofs && (
@@ -3743,53 +3734,27 @@ function ProofViewerModal({ milestone, onClose }) {
         </div>
 
         <footer className={styles.proofViewerFooter}>
-          <span>Proof {activeIndex + 1} of {proofUris.length}</span>
-          <a href={imageUrl} target="_blank" rel="noreferrer">Open full image</a>
+          <span>Attempt {proofUris.length ? activeIndex + 1 : 0} of {proofUris.length}</span>
+          {imageUrl && <a href={imageUrl} target="_blank" rel="noreferrer">Open full image</a>}
         </footer>
       </section>
     </div>
   );
 }
 
-function PaymentsPanel({
+function EscrowActivityPanel({
   shipment,
   isShipper,
   busy,
   actionStage,
-  history,
-  historyLoading,
-  historyError,
-  onCopyHash,
-  onRetry,
   onTip,
-  tipScrollRequest,
-  onTipScrollComplete,
 }) {
   const [tipAmountEth, setTipAmountEth] = useState('');
-  const tipCardRef = useRef(null);
   const tipInputRef = useRef(null);
   const canTip = isShipper && shipment.status === 'Completed' && shipment.tipAmount === 0n;
   const amendmentFunding = shipment.escrow > shipment.proposedAmount
     ? shipment.escrow - shipment.proposedAmount
     : 0n;
-
-  useEffect(() => {
-    if (!tipScrollRequest || !tipCardRef.current) return undefined;
-    const frame = window.requestAnimationFrame(() => {
-      const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-      tipCardRef.current?.scrollIntoView({
-        behavior: reduceMotion ? 'auto' : 'smooth',
-        block: 'center',
-      });
-      if (canTip) {
-        tipInputRef.current?.focus({ preventScroll: true });
-      } else {
-        tipCardRef.current?.focus({ preventScroll: true });
-      }
-      onTipScrollComplete();
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [canTip, onTipScrollComplete, tipScrollRequest]);
 
   const submitTip = async (event) => {
     event.preventDefault();
@@ -3802,7 +3767,7 @@ function PaymentsPanel({
       <div className={styles.paymentsHeader}>
         <HiOutlineCreditCard className={styles.paymentsHeaderIcon} aria-hidden="true" />
         <div>
-          <div className={styles.paymentsHeaderTitle}>Payment status</div>
+          <div className={styles.paymentsHeaderTitle}>Escrow activity</div>
           <div className={styles.paymentsHeaderBody}>
             {shipment.escrow > 0n
               ? amendmentFunding > 0n
@@ -3824,48 +3789,10 @@ function PaymentsPanel({
       {shipment.tipAmount > 0n && (
         <PaymentRow label="Completion tip" value={formatEth(shipment.tipAmount)} />
       )}
-      <div className={styles.paymentNote}>
-        Milestone payments are released by <code>verifyMilestone()</code> after the shipper approves submitted proof.
-      </div>
-
-      <section className={styles.paymentAllocationSection} aria-labelledby="payment-allocation-title">
-        <div className={styles.paymentAllocationHeader}>
-          <div>
-            <h3 id="payment-allocation-title">Milestone escrow allocation</h3>
-            <p>Original and amendment funding currently assigned to each checkpoint.</p>
-          </div>
-          <Badge tone="neutral">{shipment.milestones.length} checkpoint{shipment.milestones.length === 1 ? '' : 's'}</Badge>
-        </div>
-        <ol className={styles.paymentAllocationList}>
-          {shipment.milestones.map((milestone) => {
-            const baseFunding = milestone.payoutAmount;
-            const addedFunding = milestone.additionalPayoutAmount;
-            return (
-              <li key={`payment-allocation-${milestone.milestoneId}`}>
-                <span className={styles.paymentAllocationIndex}>{milestone.index + 1}</span>
-                <div className={styles.paymentAllocationName}>
-                  <strong>{milestone.name}</strong>
-                  <span>
-                    {milestone.addedByAmendment ? 'Created by amendment' : milestone.status}
-                  </span>
-                </div>
-                <div className={styles.paymentAllocationEquation}>
-                  <span>{formatEth(baseFunding)}</span>
-                  <span aria-hidden="true">+</span>
-                  <span>{formatEth(addedFunding)}</span>
-                  <span aria-hidden="true">=</span>
-                  <strong>{formatEth(baseFunding + addedFunding)}</strong>
-                </div>
-              </li>
-            );
-          })}
-        </ol>
-      </section>
 
       {(canTip || shipment.tipAmount > 0n) && (
         <section
           id="carrier-tip-card"
-          ref={tipCardRef}
           className={styles.tipCard}
           aria-labelledby="carrier-tip-title"
           tabIndex={shipment.tipAmount > 0n ? -1 : undefined}
@@ -3917,53 +3844,6 @@ function PaymentsPanel({
           </div>
         </section>
       )}
-
-      <section className={styles.paymentHistorySection} aria-labelledby="payment-history-title">
-        <div className={styles.paymentHistoryHeader}>
-          <div>
-            <h3 id="payment-history-title">On-chain history</h3>
-            <p>Funding, payouts, refunds, and tips recorded by DeliveryEscrow.</p>
-          </div>
-          {!historyLoading && !historyError && (
-            <Badge tone="neutral">{history.length} event{history.length === 1 ? '' : 's'}</Badge>
-          )}
-        </div>
-
-        {historyLoading ? (
-          <div className={styles.paymentHistoryState} role="status">Loading payment events…</div>
-        ) : historyError ? (
-          <div className={styles.paymentHistoryError}>
-            <span>{historyError}</span>
-            <Button variant="secondary" size="sm" onClick={onRetry}>Try again</Button>
-          </div>
-        ) : history.length === 0 ? (
-          <div className={styles.paymentHistoryState}>No payment event has been emitted for this request yet.</div>
-        ) : (
-          <ol className={styles.paymentHistoryList}>
-            {history.map((entry) => (
-              <li key={entry.id} className={styles.paymentHistoryItem}>
-                <div className={styles.paymentHistoryMain}>
-                  <Badge tone={PAYMENT_ACTION_TONE[entry.action] || 'neutral'}>
-                    {paymentActionLabel(entry.action, entry.milestoneId)}
-                  </Badge>
-                  <button
-                    type="button"
-                    className={styles.paymentHashButton}
-                    onClick={() => onCopyHash(entry.transactionHash)}
-                    title="Copy transaction hash"
-                  >
-                    <code>{shortTransactionHash(entry.transactionHash)}</code>
-                  </button>
-                </div>
-                <div className={styles.paymentHistoryMeta}>
-                  <strong>{formatEth(entry.amount)}</strong>
-                  <span>{formatDate(entry.timestamp)}</span>
-                </div>
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
     </div>
   );
 }
@@ -3975,6 +3855,42 @@ function PaymentRow({ label, value }) {
       <div className={styles.paymentValue}>{value}</div>
     </div>
   );
+}
+
+function lifecycleStateClass(state) {
+  if (state === 'complete') return styles.lifecycleComplete;
+  if (state === 'current') return styles.lifecycleCurrent;
+  if (state === 'failed/cancelled') return styles.lifecycleFailed;
+  return styles.lifecycleUpcoming;
+}
+
+export function visibleOpenProposalsFor(proposals = [], account = '', shipper = '') {
+  const wallet = String(account || '').toLowerCase();
+  if (!wallet) return [];
+  if (wallet === String(shipper || '').toLowerCase()) return proposals;
+  return proposals.filter((proposal) => (
+    String(proposal?.carrier || '').toLowerCase() === wallet
+  ));
+}
+
+export function proofFileError(file) {
+  if (!file) return 'Choose a photo proof file.';
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+    return 'Invalid file type. Please choose a JPEG, PNG, or WebP image.';
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    return 'File size exceeds 2 MB. Choose a smaller image.';
+  }
+  return '';
+}
+
+function safeProofUrl(proofUri) {
+  if (!proofUri || typeof proofUri !== 'string') return '';
+  try {
+    return new URL(proofUri, window.location.origin).href;
+  } catch {
+    return '';
+  }
 }
 
 async function loadShipment(deliveryEscrow, lifecycleManager, idParam) {
@@ -4219,35 +4135,17 @@ function buildTimelineEvents({ shipper, carrier, createdAt, proposedAmount, mile
       eventType: milestone.status,
       label: milestone.name,
       status: timelineStatus(milestone.status),
-      statusLabel: milestone.status,
+      statusLabel: milestoneStatusLabel(milestone.status),
       timestamp: milestone.verifiedAt || milestone.submittedAt || null,
       actor: carrier,
       details: milestone.addedByAmendment
-        ? `${formatEth(payout)} funded through an accepted agreement change. ${milestone.remark || milestone.rejectionReason || milestoneDescription(milestone.status)}`
-        : `${milestone.payoutPercentage}% payout (${formatEth(payout)}). ${milestone.remark || milestone.rejectionReason || milestoneDescription(milestone.status)}`,
+        ? `${formatEth(payout)} funded through an accepted agreement change. ${firstMeaningfulRemark(milestone.remark, milestone.rejectionReason) || milestoneDescription(milestone.status)}`
+        : `${milestone.payoutPercentage}% payout (${formatEth(payout)}). ${firstMeaningfulRemark(milestone.remark, milestone.rejectionReason) || milestoneDescription(milestone.status)}`,
       milestoneId: milestone.milestoneId,
     });
   }
 
   return events;
-}
-
-function getDefaultShipmentTab(shipment, account) {
-  const normalizedAccount = account?.toLowerCase();
-  const isShipper = normalizedAccount && shipment.shipper?.toLowerCase() === normalizedAccount;
-  const isCarrier = normalizedAccount && shipment.carrier?.toLowerCase() === normalizedAccount;
-  const hasSubmittedProof = shipment.milestones.some((milestone) => milestone.status === 'Submitted');
-  const hasCarrierProofAction = shipment.milestones.some((milestone) => (
-    milestone.status === 'PendingProof' || milestone.status === 'Rejected'
-  ));
-  const needsAgreementResponse = [...shipment.amendments, ...shipment.cancellations].some((entry) => (
-    entry.status === 'Pending' && entry.responder?.toLowerCase() === normalizedAccount
-  ));
-
-  if ((isShipper && hasSubmittedProof) || (isCarrier && hasCarrierProofAction)) return 'checkpoints';
-  if (needsAgreementResponse) return 'activity';
-  if (isShipper && shipment.status === 'Completed' && shipment.tipAmount === 0n) return 'payments';
-  return 'overview';
 }
 
 function calculateProposedPayout(total, percentage, index, milestones) {
@@ -4296,6 +4194,24 @@ function milestoneDescription(status) {
   return descriptions[status] || '';
 }
 
+function firstMeaningfulRemark(...values) {
+  const value = values.find((candidate) => hasRemarks(candidate));
+  return value == null ? '' : String(value).trim();
+}
+
+export function checkpointPaymentState(status) {
+  if (status === 'Paid') return 'Payment released';
+  if (status === 'Verified') return 'Release pending';
+  if (status === 'Submitted') return 'Funds locked · proof under review';
+  if (status === 'Rejected') return 'Funds locked · proof rejected';
+  return 'Funds locked';
+}
+
+export function milestoneEscrowAllocation(milestone = {}) {
+  return BigInt(milestone.payoutAmount ?? 0n)
+    + BigInt(milestone.additionalPayoutAmount ?? 0n);
+}
+
 function formatActionError(error) {
   if (error?.code === 4001 || error?.code === 'ACTION_REJECTED') {
     return 'Transaction cancelled in MetaMask.';
@@ -4324,12 +4240,27 @@ function formatActionError(error) {
   return formatWalletTransactionError(error, message || 'The shipment transaction failed.');
 }
 
-function formatHistoryError(error) {
-  const message = error?.shortMessage || error?.reason || error?.message || '';
-  if (message.includes('could not coalesce error')) {
-    return 'Ganache or MetaMask returned an RPC error. Confirm CargoChain is selected, then retry.';
-  }
-  return message || 'Could not read payment events from DeliveryEscrow.';
+function cancellationWalletCopy(method) {
+  const labels = {
+    requestCancellation: 'cancellation request',
+    acceptCancellation: 'cancellation approval',
+    rejectCancellation: 'cancellation rejection',
+    withdrawCancellation: 'cancellation withdrawal',
+    expireCancellation: 'cancellation expiry',
+  };
+  return labels[method] || 'cancellation update';
+}
+
+function amendmentWalletCopy(method) {
+  const labels = {
+    extendShipmentDeadline: 'deadline extension',
+    requestAmendment: 'agreement change request',
+    acceptAmendment: 'agreement change approval',
+    rejectAmendment: 'agreement change rejection',
+    withdrawAmendment: 'agreement change withdrawal',
+    expireAmendment: 'agreement change expiry',
+  };
+  return labels[method] || 'agreement change';
 }
 
 async function getLatestRequestForShipper(deliveryEscrow, signer, requestId) {

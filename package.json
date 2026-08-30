@@ -10,6 +10,7 @@
     "build": "vite build",
     "preview": "vite preview --port 8080",
     "compile": "truffle compile",
+    "diagnose:profile": "node scripts/diagnose-profile.mjs",
     "migrate": "truffle migrate --reset --network development",
     "test": "truffle test",
     "test:frontend": "vitest run",
@@ -18,8 +19,9 @@
     "start": "npm run dev:all"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
     "@supabase/supabase-js": "^2.110.7",
-    "@truffle/hdwallet-provider": "^2.1.4",
+    "@truffle/hdwallet-provider": "^2.0.16",
     "ethers": "^6.13.0",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.3",
@@ -28,21 +30,22 @@
     "react-icons": "^5.7.0",
     "react-router-dom": "^6.26.0",
     "siwe": "^3.0.0",
-    "truffle": "^5.11.5"
+    "sonner": "^2.0.8",
+    "truffle": "^5.1.67"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@testing-library/user-event": "^14.5.2",
-    "@vitejs/plugin-react": "^4.3.0",
+    "@vitejs/plugin-react": "^5.2.0",
     "dotenv": "^16.4.5",
     "ganache": "^7.9.2",
     "jsdom": "^25.0.1",
-    "vite": "^5.4.0",
-    "vitest": "^2.1.9"
+    "vite": "^8.2.2",
+    "vitest": "^4.1.11"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.12.0 <23.0.0"
   },
   "author": "Cstan + Group (wx, GAN, Jeremy, Melissa)",
   "license": "UNLICENSED"

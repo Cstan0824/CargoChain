@@ -12,6 +12,9 @@ export function MessageComposer({
   conversationId,
   isWritable = true,
   onMessageSent,
+  onMessagePending,
+  onMessageFailed,
+  senderWallet = '',
 }) {
   const { show } = useToast();
   const [draft, setDraft] = useState('');
@@ -29,6 +32,22 @@ export function MessageComposer({
     const contentToSend = draft.trim();
     setSending(true);
     setSendError(null);
+    const clientMessageId = createClientMessageId();
+    const optimisticMessage = {
+      message_id: clientMessageId,
+      client_message_id: clientMessageId,
+      conversation_id: conversationId,
+      sender_wallet: senderWallet || undefined,
+      message_content: contentToSend,
+      message_type: 'text',
+      created_at: new Date().toISOString(),
+      deliveryStatus: 'sending',
+      optimistic: true,
+    };
+    // Publish the local item before waiting on the network so a slow API or
+    // realtime connection never makes the composer feel like it swallowed a
+    // message. The client id lets the timeline reconcile the eventual row.
+    onMessagePending?.(optimisticMessage);
 
     try {
       const result = await sendMessage(conversationId, contentToSend);
@@ -42,6 +61,10 @@ export function MessageComposer({
       else if (status === 403) message = 'This chat is now read-only.';
       else if (status === 429) message = 'Too many messages sent. Please wait briefly.';
       else if (status === 503) message = 'Chat service is temporarily unavailable.';
+      onMessageFailed?.(
+        { ...optimisticMessage, deliveryStatus: 'failed', deliveryError: message },
+        { clientMessageId, message },
+      );
       setSendError(message);
       show(message, 'error');
     } finally {
@@ -86,4 +109,11 @@ export function MessageComposer({
       </div>
     </div>
   );
+}
+
+let optimisticMessageSequence = 0;
+
+function createClientMessageId() {
+  optimisticMessageSequence += 1;
+  return `optimistic-${Date.now()}-${optimisticMessageSequence}`;
 }

@@ -50,11 +50,56 @@ describe('MessageComposer', () => {
     expect(input.value).toBe('');
   });
 
+  it('publishes an optimistic sending item before the API resolves', async () => {
+    const user = userEvent.setup();
+    const onMessagePending = vi.fn();
+    const onMessageSent = vi.fn();
+    let resolveSend;
+    mocks.sendMessage.mockReturnValue(new Promise((resolve) => {
+      resolveSend = resolve;
+    }));
+
+    render(
+      <MessageComposer
+        conversationId="conversation-1"
+        onMessagePending={onMessagePending}
+        onMessageSent={onMessageSent}
+        senderWallet="0xcarrier"
+      />,
+    );
+
+    await user.type(screen.getByRole('textbox'), 'Hello carrier{Enter}');
+
+    expect(onMessagePending).toHaveBeenCalledWith(expect.objectContaining({
+      conversation_id: 'conversation-1',
+      message_content: 'Hello carrier',
+      sender_wallet: '0xcarrier',
+      deliveryStatus: 'sending',
+      optimistic: true,
+    }));
+    expect(onMessageSent).not.toHaveBeenCalled();
+
+    resolveSend({ message: {
+      message_id: 'message-1',
+      conversation_id: 'conversation-1',
+      message_content: 'Hello carrier',
+    } });
+    await waitFor(() => expect(onMessageSent).toHaveBeenCalledWith(expect.objectContaining({ message_id: 'message-1' })));
+  });
+
   it('keeps the draft when the API rejects the send', async () => {
     const user = userEvent.setup();
+    const onMessagePending = vi.fn();
+    const onMessageFailed = vi.fn();
     mocks.sendMessage.mockRejectedValue(Object.assign(new Error('Forbidden'), { status: 403 }));
 
-    render(<MessageComposer conversationId="conversation-1" />);
+    render(
+      <MessageComposer
+        conversationId="conversation-1"
+        onMessagePending={onMessagePending}
+        onMessageFailed={onMessageFailed}
+      />,
+    );
 
     const input = screen.getByRole('textbox');
     await user.type(input, 'Retry me{Enter}');
@@ -63,6 +108,11 @@ describe('MessageComposer', () => {
       expect(screen.getByText('This chat is now read-only.')).toBeTruthy();
     });
     expect(input.value).toBe('Retry me');
+    expect(onMessagePending).toHaveBeenCalledWith(expect.objectContaining({ deliveryStatus: 'sending' }));
+    expect(onMessageFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ message_content: 'Retry me', deliveryStatus: 'failed' }),
+      expect.objectContaining({ message: 'This chat is now read-only.' }),
+    );
   });
 
   it('uses a disabled read-only input with a concise placeholder', () => {

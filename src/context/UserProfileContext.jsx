@@ -13,6 +13,8 @@ import { RegistrationModal } from '../components/RegistrationModal.jsx';
 import { useWallet } from './Web3Context.jsx';
 import { useContracts } from './ContractsContext.jsx';
 import { useToast } from './ToastContext.jsx';
+import { useAccountAccess } from './AccountAccessContext.jsx';
+import { CARGO_NETWORK_CONFIG, contractAddress, deploymentIdentityKey } from '../utils/network.js';
 
 const UserProfileContext = createContext(null);
 const CLOSED_MODAL = {
@@ -25,9 +27,18 @@ const CLOSED_MODAL = {
 };
 
 export function UserProfileProvider({ children }) {
-  const { account, rpcChainId: chainId, provider, signer } = useWallet();
+  const {
+    account,
+    rpcChainId: chainId,
+    walletChainId,
+    provider,
+    signer,
+    busy: walletBusy,
+    switchNetwork,
+  } = useWallet();
   const { contracts, deployError } = useContracts();
   const { show } = useToast();
+  const { selectedWallet, walletMatches, walletReady } = useAccountAccess();
   const userRegistry = contracts?.userRegistry || null;
   const walletKey = normalizeAddress(account);
   const sourceRef = useRef({ account, chainId, userRegistry });
@@ -117,7 +128,7 @@ export function UserProfileProvider({ children }) {
   }, [show]);
 
   useEffect(() => {
-    const sourceKey = makeSourceKey(chainId, account, userRegistry);
+    const sourceKey = deploymentIdentityKey(chainId, contractAddress(userRegistry), account);
     setRegistrationModal((current) => (
       current.isOpen && current.sourceKey === sourceKey ? current : CLOSED_MODAL
     ));
@@ -143,8 +154,6 @@ export function UserProfileProvider({ children }) {
     userRegistry &&
     (!profileMatchesCurrentSource || profileState.status === 'loading'),
   );
-  const currentSourceKey = makeSourceKey(chainId, account, userRegistry);
-
   const refreshUserProfile = useCallback(() => {
     const latest = sourceRef.current;
     return loadProfile(latest.account, latest.chainId, latest.userRegistry, true);
@@ -165,7 +174,11 @@ export function UserProfileProvider({ children }) {
       return false;
     }
 
-    const sourceKey = makeSourceKey(latest.chainId, latest.account, latest.userRegistry);
+    const sourceKey = deploymentIdentityKey(
+      latest.chainId,
+      contractAddress(latest.userRegistry),
+      latest.account,
+    );
     markPrompted(sourceKey, promptedAccountsRef.current);
     setRegistrationModal({
       isOpen: true,
@@ -184,6 +197,11 @@ export function UserProfileProvider({ children }) {
     const targetWalletKey = normalizeAddress(targetAccount);
     const targetRegistry = latest.userRegistry;
     const targetChainId = latest.chainId;
+
+    if (!walletMatches || !walletReady) {
+      show(`Connect MetaMask and switch to ${CARGO_NETWORK_CONFIG.chainName} before starting an on-chain action.`, 'warning');
+      return false;
+    }
 
     if (!targetWalletKey) {
       show('Connect a wallet before continuing.', 'warning');
@@ -231,7 +249,11 @@ export function UserProfileProvider({ children }) {
       }
       if (profile.isRegistered) return true;
 
-      const sourceKey = makeSourceKey(targetChainId, targetAccount, targetRegistry);
+      const sourceKey = deploymentIdentityKey(
+        targetChainId,
+        contractAddress(targetRegistry),
+        targetAccount,
+      );
       markPrompted(sourceKey, promptedAccountsRef.current);
       setRegistrationModal({
         isOpen: true,
@@ -246,38 +268,10 @@ export function UserProfileProvider({ children }) {
       show(formatProfileReadError(error), 'error');
       return false;
     }
-  }, [deployError, profileState, show]);
+  }, [deployError, profileState, show, walletMatches, walletReady]);
 
-  useEffect(() => {
-    if (!currentSourceKey || !profileMatchesCurrentSource || profileState.status !== 'ready') return;
-
-    if (profileState.profile?.isRegistered) {
-      setRegistrationModal((current) => (
-        current.sourceKey === currentSourceKey ? CLOSED_MODAL : current
-      ));
-      return;
-    }
-    if (wasPrompted(currentSourceKey, promptedAccountsRef.current)) return;
-
-    markPrompted(currentSourceKey, promptedAccountsRef.current);
-    setRegistrationModal((current) => {
-      if (current.isOpen && current.sourceKey === currentSourceKey) return current;
-      return {
-        isOpen: true,
-        mandatory: false,
-        reason: '',
-        walletAddress: account,
-        registry: userRegistry,
-        sourceKey: currentSourceKey,
-      };
-    });
-  }, [
-    account,
-    currentSourceKey,
-    profileMatchesCurrentSource,
-    profileState,
-    userRegistry,
-  ]);
+  // Wallet registration is explicit. Do not open a modal merely because
+  // MetaMask changed accounts; public browsing must remain uninterrupted.
 
   const handleRegistered = useCallback(async (registeredWallet, registeredRegistry) => {
     const latest = sourceRef.current;
@@ -334,6 +328,10 @@ export function UserProfileProvider({ children }) {
         isOpen={isModalOpen}
         walletAddress={registrationModal.walletAddress}
         userRegistry={registrationModal.registry}
+        expectedChainId={chainId}
+        walletChainId={walletChainId}
+        walletBusy={walletBusy}
+        switchNetwork={switchNetwork}
         signer={signer}
         provider={provider}
         mandatory={registrationModal.mandatory}
@@ -364,13 +362,6 @@ function normalizeUserProfile(result) {
 
 function normalizeAddress(address) {
   return typeof address === 'string' ? address.toLowerCase() : '';
-}
-
-function makeSourceKey(chainId, address, registry) {
-  const normalizedAddress = normalizeAddress(address);
-  if (!normalizedAddress || chainId == null || !registry) return '';
-  const registryAddress = normalizeAddress(registry.target?.toString?.() || registry.address || 'registry');
-  return `${chainId}:${registryAddress}:${normalizedAddress}`;
 }
 
 function sessionPromptKey(sourceKey) {
@@ -407,7 +398,7 @@ function formatProfileReadError(error) {
   const normalized = message.toLowerCase();
 
   if (normalized.includes('missing revert data') || normalized.includes('could not decode result data')) {
-    return 'Could not read UserRegistry on this network. Confirm Ganache is running and migrate the latest contracts.';
+    return `Could not read UserRegistry on this network. Confirm ${CARGO_NETWORK_CONFIG.chainName} is running and migrate the latest contracts.`;
   }
   if (normalized.includes('network changed')) {
     return 'The wallet network changed while loading the profile. Try again.';

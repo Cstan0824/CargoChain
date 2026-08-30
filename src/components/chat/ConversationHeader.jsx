@@ -1,21 +1,10 @@
 // src/components/chat/ConversationHeader.jsx — selected delivery conversation context.
 
-import { HiOutlineArrowLeft } from 'react-icons/hi2';
-import { useWallet } from '../../context/Web3Context';
-import { displayNameOrAddress } from '../../hooks/useConversationPresentation';
+import { HiOutlineArrowLeft, HiOutlineArrowTopRightOnSquare } from 'react-icons/hi2';
 import styles from './ConversationHeader.module.css';
 
-export function ConversationHeader({ conversation, presentation, onBack }) {
-  const { account } = useWallet();
+export function ConversationHeader({ conversation, presentation, onBack, onViewShipment }) {
   if (!conversation) return null;
-
-  const isShipper = account?.toLowerCase() === (conversation.shipper_wallet || '').toLowerCase();
-  const otherRole = isShipper ? 'Carrier' : 'Shipper';
-  const otherWallet = isShipper ? conversation.carrier_wallet : conversation.shipper_wallet;
-  const otherName = displayNameOrAddress(
-    isShipper ? presentation?.carrierName : presentation?.shipperName,
-    otherWallet,
-  );
 
   return (
     <header className={styles.header}>
@@ -26,13 +15,21 @@ export function ConversationHeader({ conversation, presentation, onBack }) {
           </button>
         )}
         <div className={styles.copy}>
-          <h1>Request #{conversation.request_id}</h1>
+          <h1>{presentation?.title || `Shipment#${conversation.request_id}`}</h1>
           <p>{presentation?.route || 'Loading route…'}</p>
         </div>
       </div>
-      <div className={styles.participant}>
-        <span>{otherRole}</span>
-        <strong title={otherWallet}>{otherName}</strong>
+      <div className={styles.actions}>
+        <div className={styles.participant}>
+          <span>{presentation?.workLabel || 'Shipment work'}</span>
+          <strong title={presentation?.otherWallet}>{presentation?.otherName || 'Participant'}</strong>
+        </div>
+        {onViewShipment && (
+          <button type="button" className={styles.viewShipment} onClick={onViewShipment}>
+            View shipment
+            <HiOutlineArrowTopRightOnSquare aria-hidden="true" />
+          </button>
+        )}
       </div>
     </header>
   );

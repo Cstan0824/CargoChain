@@ -3,28 +3,33 @@
 // submit button. Works as a controlled input.
 
 import { forwardRef } from 'react';
+import { HiOutlineMagnifyingGlass, HiOutlineXMark } from 'react-icons/hi2';
 import styles from './SearchInput.module.css';
 
 export const SearchInput = forwardRef(function SearchInput(
-  { value, onChange, onSubmit, placeholder = 'Search…', actionLabel = 'Search', className = '' },
+  {
+    value,
+    onChange,
+    onSubmit,
+    placeholder = 'Search…',
+    actionLabel = 'Search',
+    shape = 'pill',
+    className = '',
+  },
   ref
 ) {
-  const handleKey = (e) => {
-    if (e.key === 'Enter' && onSubmit) onSubmit(e.currentTarget.value);
-  };
+  const shapeClass = shape === 'contained' ? styles.contained : '';
+
   return (
     <form
-      className={`${styles.wrap} ${className}`}
+      className={`${styles.wrap} ${shapeClass} ${className}`}
       onSubmit={(e) => {
         e.preventDefault();
         if (onSubmit) onSubmit(value);
       }}
     >
       <span className={styles.icon} aria-hidden="true">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-          <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
-          <path d="m20 20-3-3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        </svg>
+        <HiOutlineMagnifyingGlass />
       </span>
       <input
         ref={ref}
@@ -32,10 +37,20 @@ export const SearchInput = forwardRef(function SearchInput(
         className={styles.input}
         value={value || ''}
         onChange={(e) => onChange?.(e.target.value)}
-        onKeyDown={handleKey}
         placeholder={placeholder}
         aria-label={placeholder}
       />
+      {value && (
+        <button
+          type="button"
+          className={styles.clearBtn}
+          onClick={() => onChange?.('')}
+          aria-label="Clear search"
+          title="Clear search"
+        >
+          <HiOutlineXMark aria-hidden="true" />
+        </button>
+      )}
       {onSubmit && (
         <button type="submit" className={styles.btn}>{actionLabel}</button>
       )}

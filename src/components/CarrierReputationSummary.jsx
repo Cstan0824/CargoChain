@@ -48,24 +48,16 @@ export function CarrierReputationSummary({ carrier, onOpenProfile, compact = fal
 
   if (onOpenProfile && carrier) {
     return (
-      <span
-        role="button"
-        tabIndex={0}
+      <button
+        type="button"
         className={styles.link}
         onClick={(event) => {
           event.stopPropagation();
           onOpenProfile(carrier);
         }}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            event.stopPropagation();
-            onOpenProfile(carrier);
-          }
-        }}
       >
         {content}
-      </span>
+      </button>
     );
   }
 

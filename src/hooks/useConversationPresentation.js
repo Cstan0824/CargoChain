@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 const EMPTY_PRESENTATION = {};
 
-export function useConversationPresentation(conversations, contracts) {
+export function useConversationPresentation(conversations, contracts, account = '') {
   const [presentation, setPresentation] = useState(EMPTY_PRESENTATION);
   const deliveryEscrow = contracts?.deliveryEscrow;
   const userRegistry = contracts?.userRegistry;
@@ -20,7 +20,7 @@ export function useConversationPresentation(conversations, contracts) {
     let cancelled = false;
 
     async function loadPresentation() {
-      if (!conversationKey || !deliveryEscrow || !userRegistry) {
+      if (!conversationKey) {
         if (!cancelled) setPresentation(EMPTY_PRESENTATION);
         return;
       }
@@ -33,6 +33,7 @@ export function useConversationPresentation(conversations, contracts) {
 
       const [routeResults, profileResults] = await Promise.all([
         Promise.all(requestIds.map(async (requestId) => {
+          if (!deliveryEscrow) return [requestId, 'Route unavailable'];
           try {
             const request = await deliveryEscrow.getRequest(BigInt(requestId));
             return [requestId, formatRoute(request.pickupLocation, request.deliveryLocation)];
@@ -41,6 +42,7 @@ export function useConversationPresentation(conversations, contracts) {
           }
         })),
         Promise.all(wallets.map(async (wallet) => {
+          if (!userRegistry) return [wallet, ''];
           try {
             const profile = await userRegistry.getUser(wallet);
             const name = String(profile?.displayName ?? profile?.[1] ?? '').trim();
@@ -59,11 +61,13 @@ export function useConversationPresentation(conversations, contracts) {
       const nextPresentation = {};
 
       for (const conversation of conversations || []) {
-        nextPresentation[conversation.conversation_id] = {
+        nextPresentation[conversation.conversation_id] = buildConversationPresentation({
+          conversation,
+          account,
           route: routesByRequestId[String(conversation.request_id)] || 'Route unavailable',
           shipperName: namesByWallet[normalizeAddress(conversation.shipper_wallet)] || '',
           carrierName: namesByWallet[normalizeAddress(conversation.carrier_wallet)] || '',
-        };
+        });
       }
 
       setPresentation(nextPresentation);
@@ -73,9 +77,34 @@ export function useConversationPresentation(conversations, contracts) {
     return () => {
       cancelled = true;
     };
-  }, [conversationKey, conversations, deliveryEscrow, userRegistry]);
+  }, [account, conversationKey, conversations, deliveryEscrow, userRegistry]);
 
   return presentation;
+}
+
+export function buildConversationPresentation({
+  conversation,
+  account = '',
+  route = 'Route unavailable',
+  shipperName = '',
+  carrierName = '',
+}) {
+  const isShipper = normalizeAddress(account) === normalizeAddress(conversation?.shipper_wallet);
+  const otherRole = isShipper ? 'Carrier' : 'Shipper';
+  const otherWallet = isShipper ? conversation?.carrier_wallet : conversation?.shipper_wallet;
+  const otherName = displayNameOrAddress(isShipper ? carrierName : shipperName, otherWallet);
+  const requestId = conversation?.request_id;
+  return {
+    route,
+    shipperName,
+    carrierName,
+    otherRole,
+    otherWallet,
+    otherName,
+    title: `${otherName}#${requestId}`,
+    workLabel: `${isShipper ? 'Shipper' : 'Carrier'} work`,
+    preview: String(conversation?.latest_message_preview || '').trim() || 'Shipment activity',
+  };
 }
 
 export function displayNameOrAddress(name, walletAddress) {
