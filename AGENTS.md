@@ -64,7 +64,7 @@ The project must include UI integration with deployed smart contracts. A Remix-o
 
 Expected contract files:
 
-- `contracts/DeliveryEscrow.sol` — request lifecycle, ETH escrow, payout, refund (Modules b + c)
+- `contracts/DeliveryEscrow.sol` — request lifecycle, CARGO escrow, payout, refund, and operational reserve (Modules b + c)
 - `contracts/MilestoneVerifier.sol` — proof hash submission, milestone verification, milestone state (Module d)
 - `contracts/LifecycleManager.sol` — deadline tracking, stuck delivery handling, republishing, public timeline (Module b)
 - `contracts/UserRegistry.sol` — address ↔ userId mapping, role tracking (Module a) — *new file, to be added by wx*

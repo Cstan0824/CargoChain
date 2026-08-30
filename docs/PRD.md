@@ -8,13 +8,13 @@
 
 ## 1. Product summary
 
-CargoChain is a decentralised logistics delivery application that uses Ethereum-style ETH escrow and milestone proof. A shipper creates a request; carriers compete with milestone proposals; the shipper funds one accepted plan; the carrier submits photo evidence; and the shipper releases payment checkpoint by checkpoint.
+CargoChain is a decentralised logistics delivery application that uses an ETH-backed CARGO token for business settlement and milestone proof. A shipper creates a request; carriers compete with milestone proposals; the shipper funds one accepted plan; the carrier submits photo evidence; and the shipper releases payment checkpoint by checkpoint. ETH remains the native gas currency.
 
 The product is deliberately scoped for an academic local-chain demonstration. It prioritises traceable agreement state, readable smart contracts, and an end-to-end browser workflow over production logistics scale.
 
 ## 2. Goals
 
-1. Hold the shipper's agreed ETH in a smart contract until evidence-backed delivery checkpoints are verified.
+1. Hold the shipper's agreed CARGO in a smart contract until evidence-backed delivery checkpoints are verified.
 2. Let multiple carriers compete transparently before one plan is selected.
 3. Preserve a traceable history for proposals, proof decisions, payments, amendments, cancellation requests, and refunds.
 4. Let the parties adjust an accepted agreement safely without rewriting completed work.
@@ -42,11 +42,11 @@ A registered wallet can be a shipper for some requests and carrier for others. T
 
 ### 4.2 Request and proposal marketplace
 
-- Shipper creates an open request with route, cargo items, advertised ETH payment, and deadline.
+- Shipper creates an open request with route, cargo items, advertised CARGO payment, and deadline.
 - Carrier browses open requests and may submit one active milestone proposal for each request.
 - Carrier can revoke an active proposal and submit a revised proposal while the request is open.
 - Shipper can sort/inspect proposals, manually reject a proposal with an optional note, or accept exactly one plan.
-- Shipper funds the exact advertised ETH in the same acceptance transaction.
+- Shipper funds the exact advertised CARGO in the same acceptance transaction.
 - All competing active proposals become rejected with a recorded automatic reason.
 
 ### 4.3 Checkpoint proof and payment
@@ -71,7 +71,7 @@ A registered wallet can be a shipper for some requests and carrier for others. T
 
 - Shipper can directly extend a deadline when no negotiation is pending.
 - Either participant can request a mutually approved amendment with a reason and response deadline.
-- Amendments may change the deadline, add ETH to unpaid existing checkpoints, and add newly funded checkpoints.
+- Amendments may change the deadline, add CARGO to unpaid existing checkpoints, and add newly funded checkpoints.
 - A carrier cannot shorten deadline; shipper shortening requires extra funding and carrier acceptance.
 - Each new checkpoint has an immutable new ID. Inserting it changes execution order only and must not rewrite old proofs/payments/payouts.
 - Shipper-staged amendment funding is refunded after rejection, withdrawal, or expiry.
@@ -127,7 +127,7 @@ LifecycleManager is intentionally separate to preserve DeliveryEscrow bytecode h
 - Recipient QR confirmation.
 - Automatic dispute-window payout release.
 - Carrier republishing/recovery/custody transfer.
-- Public marketplace messaging, staking, custom tokens, and mobile wallet connections.
+- Public marketplace messaging, staking, speculative token markets, and mobile wallet connections.
 
 ## 8. Acceptance checks
 
