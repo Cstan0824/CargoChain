@@ -10,6 +10,8 @@
   font-variant-numeric: tabular-nums;
 }
 
+.summary > * { line-height: 20px; }
+
 .summary strong {
   color: var(--text-primary);
   font-size: var(--fs-sm);
@@ -17,9 +19,13 @@
 }
 
 .star {
+  width: 20px;
+  height: 20px;
+  display: inline-grid;
+  place-items: center;
   flex: 0 0 auto;
   color: #c58a1d;
-  font-size: 15px;
+  font-size: var(--fs-base);
 }
 
 .count {
@@ -32,13 +38,30 @@
 
 .link {
   display: inline-flex;
+  min-height: 40px;
+  align-items: center;
   max-width: 100%;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--r-sm);
   color: inherit;
+  background: transparent;
+  font: inherit;
   text-decoration: none;
   cursor: pointer;
+  transition-property: background-color, color, scale;
+  transition-duration: var(--dur-1);
+  transition-timing-function: var(--ease);
+}
+
+.link:hover,
+.link:focus-visible {
+  background: var(--primary-soft);
 }
 
 .link:hover .summary strong,
 .link:focus-visible .summary strong {
   color: var(--primary);
 }
+
+.link:active { scale: 0.96; }

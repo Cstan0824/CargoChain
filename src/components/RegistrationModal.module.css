@@ -3,7 +3,7 @@
 .overlay {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: var(--z-modal);
   display: grid;
   place-items: center;
   padding: var(--s-4);
@@ -81,9 +81,9 @@
 }
 
 .closeButton {
-  width: 40px;
-  height: 40px;
-  flex: 0 0 40px;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -213,6 +213,70 @@
   margin: 0;
   text-wrap: pretty;
 }
+
+.networkNotice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  padding: var(--s-3);
+  color: var(--warning-text, #92400e);
+  background: var(--warning-soft);
+  border-radius: var(--r-lg);
+  box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.18);
+}
+
+.networkNotice > svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  margin-top: 1px;
+}
+
+.networkNoticeContent {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.networkNoticeContent strong {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.networkNoticeContent span {
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.networkButton {
+  align-self: flex-start;
+  min-height: 36px;
+  margin-top: var(--s-2);
+  padding: 7px 12px;
+  color: var(--warning-text, #92400e);
+  background: var(--bg-surface);
+  border: 1px solid rgba(217, 119, 6, 0.32);
+  border-radius: var(--r-md);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-1) var(--ease),
+    border-color var(--dur-1) var(--ease),
+    transform var(--dur-1) var(--ease);
+}
+
+.networkButton:hover:not(:disabled) {
+  background: var(--warning-soft);
+  border-color: var(--warning);
+}
+
+.networkButton:active:not(:disabled) { transform: scale(0.96); }
+.networkButton:disabled { cursor: not-allowed; opacity: 0.6; }
 
 .field {
   display: flex;

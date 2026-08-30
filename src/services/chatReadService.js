@@ -51,6 +51,21 @@ export async function getConversationMessages(conversationId) {
   return data || [];
 }
 
+export async function enrichConversationPreviews(conversations = []) {
+  return Promise.all(conversations.map(async (conversation) => {
+    try {
+      const messages = await getConversationMessages(conversation.conversation_id);
+      const latestMessage = messages[messages.length - 1];
+      return {
+        ...conversation,
+        latest_message_preview: latestMessage?.message_content || '',
+      };
+    } catch {
+      return { ...conversation, latest_message_preview: '' };
+    }
+  }));
+}
+
 /**
  * Retrieves a single conversation by ID if permitted by Supabase RLS.
  */

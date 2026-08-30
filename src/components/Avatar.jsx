@@ -2,6 +2,7 @@
 // Circular avatar. Falls back to colored initials when no image is set.
 
 import { useState } from 'react';
+import { HiOutlineUser } from 'react-icons/hi2';
 import styles from './Avatar.module.css';
 
 function initialsOf(name = '') {
@@ -24,6 +25,7 @@ export function Avatar({ src, name = '', size = 40, className = '' }) {
   const [errored, setErrored] = useState(false);
   const showImg = src && !errored;
   const style = { width: size, height: size, fontSize: Math.round(size * 0.4) };
+  const useNeutralFallback = !name || name === 'Guest' || /^0x[0-9a-f]+$/i.test(name);
   return (
     <span
       className={`${styles.avatar} ${className}`}
@@ -37,6 +39,10 @@ export function Avatar({ src, name = '', size = 40, className = '' }) {
           alt={name || 'avatar'}
           onError={() => setErrored(true)}
         />
+      ) : useNeutralFallback ? (
+        <span className={styles.neutralFallback}>
+          <HiOutlineUser aria-hidden="true" />
+        </span>
       ) : (
         <span
           className={styles.initials}

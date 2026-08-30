@@ -1,0 +1,24 @@
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.mark {
+  width: 29px;
+  height: 32px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: var(--primary);
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.wordmark {
+  font-size: var(--fs-md);
+  font-weight: 750;
+  letter-spacing: -0.035em;
+}

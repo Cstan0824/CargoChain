@@ -52,6 +52,19 @@ export function formatDate(unixSec) {
   );
 }
 
+// formatTime(unixSec) — concise local clock time for message bubbles.
+// Keep this separate from formatDate so conversational timestamps stay
+// compact without changing the full-date treatment used by tables and facts.
+export function formatTime(unixSec) {
+  if (unixSec === null || unixSec === undefined || unixSec === '') return '';
+  const d = new Date(Number(unixSec) * 1000);
+  if (Number.isNaN(d.getTime())) return '';
+  const hour24 = d.getHours();
+  const hour = hour24 % 12 || 12;
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  return `${hour}:${minutes} ${hour24 >= 12 ? 'PM' : 'AM'}`;
+}
+
 // statusLabel(enumVal) — translates the on-chain enum numbers to a
 // human-readable label. Enums are locked in docs/BusinessFlow.md §6 —
 // keep these arrays in sync with the contract and the docs.
@@ -76,11 +89,43 @@ export function milestoneStatus(n) { return lookup(MILESTONE_STATUS, n); }
 export function roleLabel(n)       { return lookup(ROLE, n); }
 export function txAction(n)        { return lookup(TRANSACTION_ACTION, n); }
 
+const REQUEST_STATUS_LABEL = {
+  Open: 'Open',
+  PendingApproval: 'Open',
+  Funded: 'Funded',
+  InProgress: 'In progress',
+  Completed: 'Completed',
+  Cancelled: 'Cancelled',
+  Expired: 'Expired',
+  Refunded: 'Refunded',
+};
+
+const MILESTONE_STATUS_LABEL = {
+  Proposed: 'Planned',
+  PendingProof: 'Awaiting proof',
+  Submitted: 'Awaiting review',
+  Verified: 'Verified',
+  Rejected: 'Changes requested',
+  Paid: 'Completed',
+};
+
+// Keep raw enum names for business logic and simplify them only at the
+// presentation boundary.
+export function requestStatusLabel(n) {
+  const status = requestStatus(n);
+  return REQUEST_STATUS_LABEL[status] || status;
+}
+
+export function milestoneStatusLabel(n) {
+  const status = milestoneStatus(n);
+  return MILESTONE_STATUS_LABEL[status] || status;
+}
+
 // Request status → user-facing tone for the Badge component.
 // Locked in BusinessFlow §6.
 export const REQUEST_TONE = {
   Open:            'success',
-  PendingApproval: 'warning',
+  PendingApproval: 'success',
   Funded:          'info',
   InProgress:      'info',
   Completed:       'success',
@@ -106,6 +151,25 @@ export function formatItems(items = []) {
   return valid
     .map((it) => `${it.itemName || 'Item'}${it.quantity ? ` × ${it.quantity}` : ''}`)
     .join(', ');
+}
+
+// formatRemarks(value) — keeps optional shipment remarks readable at the
+// presentation boundary. Contract/demo data has historically used a hyphen
+// (or another empty-value marker) for an omitted note; exposing that marker
+// makes the UI look unfinished and is not useful to the reader.
+const EMPTY_REMARK_MARKERS = new Set(['', '-', '–', '—', 'n/a', 'na', 'none']);
+
+export function formatRemarks(value) {
+  const remarks = String(value ?? '').trim();
+  if (EMPTY_REMARK_MARKERS.has(remarks.toLowerCase())) return 'No remarks provided.';
+  return remarks;
+}
+
+// Optional remark surfaces (badges, proof metadata, etc.) should disappear
+// when no note exists rather than rendering the fallback as content.
+export function hasRemarks(value) {
+  const remarks = String(value ?? '').trim();
+  return !EMPTY_REMARK_MARKERS.has(remarks.toLowerCase());
 }
 
 // formatMyr(eth) — demo-only ETH→MYR conversion (≈ S$1 ≈ RM3.5, ETH ≈ S$2000

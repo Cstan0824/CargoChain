@@ -9,10 +9,9 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { BrowserProvider, JsonRpcProvider } from 'ethers';
+import { CARGO_NETWORK_CONFIG, switchToCargoNetwork } from '../utils/network.js';
 
 const Web3Context = createContext(null);
-const GANACHE_RPC_URL = import.meta.env.VITE_GANACHE_RPC_URL || 'http://127.0.0.1:7545';
-const CONFIGURED_CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID || 1337);
 
 export function Web3Provider({ children }) {
   const [provider, setProvider] = useState(null);
@@ -27,15 +26,15 @@ export function Web3Provider({ children }) {
   // Create a stable read provider and detect MetaMask on mount.
   useEffect(() => {
     const readProvider = new JsonRpcProvider(
-      GANACHE_RPC_URL,
-      CONFIGURED_CHAIN_ID,
+      CARGO_NETWORK_CONFIG.rpcUrl,
+      CARGO_NETWORK_CONFIG.chainId,
       { staticNetwork: true },
     );
     setProvider(readProvider);
 
     readProvider.getNetwork()
       .then((network) => setRpcChainId(Number(network.chainId)))
-      .catch(() => setError(`Could not connect to Ganache at ${GANACHE_RPC_URL}.`));
+      .catch(() => setError(`Could not connect to ${CARGO_NETWORK_CONFIG.chainName} at ${CARGO_NETWORK_CONFIG.rpcUrl}.`));
 
     if (typeof window === 'undefined' || !window.ethereum) {
       setError('MetaMask not detected. Install the browser extension to use this app.');
@@ -141,10 +140,39 @@ export function Web3Provider({ children }) {
     return operation;
   }, []);
 
+  const switchNetwork = useCallback(async () => {
+    if (typeof window === 'undefined' || !window.ethereum) {
+      setError('MetaMask not detected. Install the browser extension to switch networks.');
+      return false;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      await switchToCargoNetwork(window.ethereum, {
+        ...CARGO_NETWORK_CONFIG,
+      });
+      return true;
+    } catch (switchError) {
+      if (switchError?.code === 4001 || switchError?.code === 'ACTION_REJECTED') {
+        setError('Network switch cancelled in MetaMask.');
+      } else {
+        setError(
+          switchError?.shortMessage
+          || switchError?.message
+          || `Could not switch MetaMask to ${CARGO_NETWORK_CONFIG.chainName}.`,
+        );
+      }
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
   const chainId = walletChainId ?? rpcChainId;
   const isCorrectNetwork = Boolean(
-    rpcChainId === CONFIGURED_CHAIN_ID
-    && walletChainId === CONFIGURED_CHAIN_ID,
+    rpcChainId === CARGO_NETWORK_CONFIG.chainId
+    && walletChainId === CARGO_NETWORK_CONFIG.chainId,
   );
   const value = {
     provider,
@@ -157,6 +185,7 @@ export function Web3Provider({ children }) {
     error,
     busy,
     connect,
+    switchNetwork,
   };
   return <Web3Context.Provider value={value}>{children}</Web3Context.Provider>;
 }

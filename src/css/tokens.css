@@ -8,13 +8,19 @@
   --bg-page:      #f7f7f5;
   --bg-surface:   #ffffff;
   --bg-subtle:    #f4f4f1;
+  /* Light workspace surface for panes that need separation from the page. */
+  --bg-conversation: #fbfcff;
+  /* Loading placeholders stay neutral so they do not imply a data state. */
+  --skeleton-base: #e9ecef;
+  --skeleton-highlight: #f8fafc;
   --border:       #e4e4e0;
   --border-soft:  #efefea;
 
   /* Color: text */
   --text-primary:   #1a1a1a;
   --text-secondary: #6b6b6b;
-  --text-muted:     #9a9a96;
+  /* Muted copy still needs to pass AA on the page and surface backgrounds. */
+  --text-muted:     #6f6f6a;
   --text-inverse:   #ffffff;
 
   /* Color: brand */
@@ -26,7 +32,8 @@
   /* Color: semantic */
   --success:        #15803d;
   --success-soft:   #ecfdf5;
-  --warning:        #d97706;
+  /* Darkened for readable small warning labels on --warning-soft. */
+  --warning:        #b45309;
   --warning-soft:   #fff7ed;
   --info:           #2563eb;
   --info-soft:      #eef3ff;
@@ -35,19 +42,20 @@
 
   /* Color: chart palette (Escrow donut + Earnings line) */
   --chart-1: #2563eb;   /* In Progress (blue)        */
-  --chart-2: #d97706;   /* Awaiting Verify (orange)  */
+  --chart-2: #b45309;   /* Awaiting Verify (orange)  */
   --chart-3: #eab308;   /* Pending (yellow)          */
   --chart-4: #15803d;   /* Completed (green)         */
   --chart-5: #2dd4bf;   /* Earnings growth (teal)    */
 
   /* Typography */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-sans: 'Inter Variable', 'Inter', system-ui, 'Segoe UI', sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-  --fs-xs:   11px;
-  --fs-sm:   13px;
+  --fs-xs:   12px;
+  /* Normal copy gets one pixel more breathing room; metadata remains compact. */
+  --fs-sm:   14px;
   --fs-base: 15px;
   --fs-md:   16px;
-  --fs-lg:   18px;
+  --fs-lg:   20px;
   --fs-xl:   22px;
   --fs-2xl:  28px;
   --fs-3xl:  32px;
@@ -57,8 +65,17 @@
   --fw-bold:     700;
   --lh-tight:  1.25;
   --lh-normal: 1.5;
+  --lh-label:  1.4;
   --tracking-tight:  -0.01em;
   --tracking-normal: 0;
+
+  /* Semantic density */
+  --space-section: 24px;
+  --space-region: 32px;
+  --space-control: 12px;
+
+  /* Dynamic values should not shift their neighbours while updating. */
+  --numeric-style: tabular-nums;
 
   /* Spacing scale (4-px base) */
   --s-1:  4px;
@@ -84,11 +101,26 @@
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
   --shadow-md: 0 2px 8px rgba(15, 23, 42, 0.06);
   --shadow-lg: 0 10px 30px rgba(15, 23, 42, 0.08);
+  /* Layered edge cues keep containers soft without relying on a hard border. */
+  --shadow-border: 0 0 0 1px rgba(15, 23, 42, 0.08), var(--shadow-sm);
+  --shadow-border-hover: 0 0 0 1px rgba(37, 99, 235, 0.2), var(--shadow-md);
+
+  /* Named overlay layers. Descendant z-index values must not replace these. */
+  --z-base:        0;
+  --z-sticky:      10;
+  --z-dropdown:    100;
+  --z-popover:     200;
+  --z-scrim:       400;
+  --z-drawer:      410;
+  --z-modal:       500;
+  --z-toast:       600;
+  --z-skip-link:   700;
 
   /* Layout */
   --sidebar-w:        260px;
   --sidebar-w-mobile: 280px;
   --content-max:      1200px;
+  --page-inline:      var(--s-6);
   --header-h:         64px;
   --topbar-h:         56px;
 
@@ -97,4 +129,8 @@
   --dur-1:   120ms;
   --dur-2:   200ms;
   --dur-3:   300ms;
+}
+
+@media (max-width: 900px) {
+  :root { --page-inline: var(--s-4); }
 }

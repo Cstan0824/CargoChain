@@ -1,26 +1,25 @@
-// src/components/Topbar.jsx — CargoChain
-// Page-level top header: title, optional subtitle, optional right-aligned
-// actions (render-prop), notification bell, avatar. Sits inside the
-// scrollable <main> on every page.
+// src/components/Topbar.jsx — contained page header.
+// Page-specific workflow actions can be placed beside the title through the
+// actions slot. Persistent notification and Account utilities stay shared.
 
+import { Link } from 'react-router-dom';
+import { HiOutlineBellAlert, HiOutlineUserCircle } from 'react-icons/hi2';
 import { useWallet } from '../hooks/useWallet.js';
 import { useToast } from '../hooks/useToast.js';
 import { Avatar } from './Avatar.jsx';
-import { ConnectButton } from './ConnectButton.jsx';
 import { pickAvatar } from '../utils/avatar.js';
-import { HiOutlineBellAlert } from 'react-icons/hi2';
 import styles from './Topbar.module.css';
 
-export function Topbar({ title, subtitle, actions }) {
-  const { account, role } = useWallet();
+export function Topbar({ title, subtitle, actions = null }) {
+  const { account } = useWallet();
   const { show } = useToast();
 
   const onBell = () => {
     if (!account) {
-      show('Connect your wallet to see notifications', 'info');
+      show('Connect your wallet to see notifications.', 'info');
       return;
     }
-    show('No new notifications', 'info');
+    show('No new notifications.', 'info');
   };
 
   return (
@@ -32,11 +31,20 @@ export function Topbar({ title, subtitle, actions }) {
 
       <div className={styles.right}>
         {actions && <div className={styles.actions}>{actions}</div>}
-        <ConnectButton />
-        <button type="button" className={styles.bellBtn} onClick={onBell} aria-label="Notifications">
-          <HiOutlineBellAlert className={styles.bellIcon} aria-hidden="true" />
+        <button type="button" className={styles.utilityButton} onClick={onBell} aria-label="Notifications">
+          <HiOutlineBellAlert aria-hidden="true" />
         </button>
-        <Avatar src={pickAvatar(role, account)} name={account || ''} size={40} className={styles.avatar} />
+        <Link
+          to="/account"
+          className={styles.utilityButton}
+          aria-label={account ? 'Open account profile' : 'Open wallet profile'}
+        >
+          {account ? (
+            <Avatar src={pickAvatar(null, account)} name={account} size={30} className={styles.avatar} />
+          ) : (
+            <HiOutlineUserCircle aria-hidden="true" />
+          )}
+        </Link>
       </div>
     </header>
   );

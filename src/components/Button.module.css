@@ -10,18 +10,24 @@
   font-weight: var(--fw-semibold);
   cursor: pointer;
   white-space: nowrap;
-  transition: background var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease);
+  transition-property: background-color, border-color, color, transform;
+  transition-duration: var(--dur-1);
+  transition-timing-function: var(--ease);
   text-decoration: none;
 }
 .btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+.btn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
 .btn:active:not(:disabled) { transform: scale(0.96); }
 
 /* sizes */
-.s_sm { padding: 6px 12px;  font-size: var(--fs-sm);   height: 32px; }
-.s_md { padding: 8px 16px;  font-size: var(--fs-sm);   height: 38px; }
+.s_sm { padding: 6px 12px; font-size: var(--fs-sm); min-height: 44px; }
+.s_md { padding: 8px 16px; font-size: var(--fs-sm); min-height: 44px; }
 
 /* primary */
 .v_primary {
@@ -39,6 +45,32 @@
 }
 .v_secondary:hover:not(:disabled) { background: var(--bg-subtle); }
 
+/* Soft action treatments keep row/dialog actions distinct without competing
+   with the page's primary CTA. */
+.v_softNeutral {
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  border-color: var(--border);
+  box-shadow: var(--shadow-border);
+}
+.v_softNeutral:hover:not(:disabled) {
+  background: var(--bg-surface);
+  border-color: var(--border);
+  box-shadow: var(--shadow-border-hover);
+}
+
+.v_softPrimary {
+  background: color-mix(in srgb, var(--primary) 10%, var(--bg-surface));
+  color: var(--primary-text);
+  border-color: color-mix(in srgb, var(--primary) 24%, var(--border));
+  box-shadow: var(--shadow-border);
+}
+.v_softPrimary:hover:not(:disabled) {
+  background: var(--primary-soft);
+  border-color: color-mix(in srgb, var(--primary) 36%, var(--border));
+  box-shadow: var(--shadow-border-hover);
+}
+
 /* ghost */
 .v_ghost {
   background: transparent;
@@ -54,3 +86,15 @@
   border-color: var(--danger);
 }
 .v_danger:hover:not(:disabled) { filter: brightness(0.95); }
+
+.v_softDanger {
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg-surface));
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 25%, var(--border));
+  box-shadow: var(--shadow-border);
+}
+.v_softDanger:hover:not(:disabled) {
+  background: var(--danger-soft);
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--border));
+  box-shadow: var(--shadow-border-hover);
+}

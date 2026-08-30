@@ -208,7 +208,7 @@
 
 .chev {
   color: var(--text-muted);
-  font-size: 22px;
+  font-size: var(--fs-xl);
   line-height: 1;
   font-weight: 300;
 }
@@ -276,7 +276,7 @@
   position: fixed;
   inset: 0;
   background: rgba(15, 23, 42, 0.4);
-  z-index: 100;
+  z-index: var(--z-dropdown);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -325,8 +325,8 @@
 }
 
 .modalClose {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: var(--r-sm);
   background: transparent;
   border: 0;

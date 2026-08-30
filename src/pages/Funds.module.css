@@ -1,0 +1,229 @@
+/* src/pages/Funds.module.css — wallet financial activity. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-6);
+  padding-bottom: var(--s-8);
+}
+
+.sectionHeading,
+.cardHeading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s-4);
+}
+
+.sectionHeading h2,
+.cardHeading h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  letter-spacing: var(--tracking-tight);
+  text-wrap: balance;
+}
+
+.sectionHeading p,
+.cardHeading p {
+  max-width: 390px;
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+  text-align: right;
+  text-wrap: pretty;
+}
+
+.eyebrow {
+  display: block;
+  margin-bottom: var(--s-1);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.kpiGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s-3);
+  margin-top: var(--s-3);
+}
+
+.earningsCard {
+  min-height: 230px;
+}
+
+.cardHeading {
+  align-items: flex-start;
+  margin-bottom: var(--s-4);
+}
+
+.utilityCard {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-4);
+  padding: var(--s-4) var(--s-5);
+}
+
+.utilityItem {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.utilityLabel {
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.utilityItem code {
+  max-width: 260px;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.utilityCard button:first-of-type { margin-left: auto; }
+
+.historySection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.historyCard { overflow: hidden; }
+
+.historyState {
+  padding: var(--s-8) var(--s-5);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+.tableWrap { width: 100%; overflow-x: auto; }
+
+.table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.table th,
+.table td {
+  padding: 14px 16px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.table th {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-surface) 96%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border-soft);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+}
+
+.tableRow {
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-soft);
+  transition-property: background-color;
+  transition-duration: var(--dur-1);
+  transition-timing-function: var(--ease);
+}
+
+.tableRow:last-child { border-bottom: 0; }
+.tableRow:hover { background: var(--bg-subtle); }
+.tableRow:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+
+.requestId,
+.numeric,
+.muted {
+  font-variant-numeric: tabular-nums;
+}
+
+.requestId { color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--fs-xs); }
+.numeric { color: var(--text-primary); font-weight: var(--fw-semibold); }
+.muted { color: var(--text-secondary); }
+
+.hashButton {
+  min-height: 44px;
+  padding: 0 8px;
+  color: var(--primary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-sm);
+}
+
+.hashButton:hover { background: var(--primary-soft); }
+
+.compactState {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  padding: var(--s-5) var(--s-6);
+}
+
+.compactState > div { flex: 1; min-width: 0; }
+.compactState h2 { margin: 0; color: var(--text-primary); font-size: var(--fs-md); font-weight: var(--fw-semibold); text-wrap: balance; }
+.compactState p { margin: 4px 0 0; color: var(--text-secondary); font-size: var(--fs-sm); line-height: 1.45; text-wrap: pretty; }
+
+.stateIcon {
+  display: inline-grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-radius: var(--r-lg);
+}
+
+.stateIcon svg { width: 22px; height: 22px; }
+
+.inlineNotice {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: rgba(185, 28, 28, 0.14);
+  font-size: var(--fs-sm);
+  text-wrap: pretty;
+}
+
+.inlineNotice svg { width: 20px; height: 20px; flex: 0 0 auto; }
+
+@media (max-width: 800px) {
+  .kpiGrid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 600px) {
+  .sectionHeading,
+  .cardHeading { align-items: flex-start; flex-direction: column; }
+  .sectionHeading p,
+  .cardHeading p { text-align: left; }
+  .utilityCard { align-items: flex-start; flex-direction: column; }
+  .utilityCard button:first-of-type { margin-left: 0; }
+  .utilityCard button { width: 100%; }
+  .compactState { flex-wrap: wrap; padding: var(--s-4); }
+  .compactState button { width: 100%; }
+}

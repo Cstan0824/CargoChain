@@ -121,6 +121,37 @@ describe('sendWalletContractTransaction', () => {
     await vi.waitFor(() => expect(signer.sendUncheckedTransaction).toHaveBeenCalledTimes(2));
     await expect(second).resolves.toMatchObject({ hash: '0xsecond' });
   });
+
+  it('rejects a failed receipt instead of allowing a success state', async () => {
+    const contract = {
+      getFunction: vi.fn().mockReturnValue({
+        populateTransaction: vi.fn().mockResolvedValue({
+          to: '0x0000000000000000000000000000000000000001',
+          data: '0x1234',
+        }),
+      }),
+    };
+    const provider = {
+      getNetwork: vi.fn().mockResolvedValue({ chainId: 1337n }),
+      estimateGas: vi.fn().mockResolvedValue(100_000n),
+      getTransactionCount: vi.fn().mockResolvedValue(8),
+      getFeeData: vi.fn().mockResolvedValue({ gasPrice: 1n }),
+      waitForTransaction: vi.fn().mockResolvedValue({ status: 0, blockNumber: 10 }),
+    };
+    const signer = {
+      provider: { getNetwork: vi.fn().mockResolvedValue({ chainId: 1337n }) },
+      getAddress: vi.fn().mockResolvedValue('0x0000000000000000000000000000000000000002'),
+      sendUncheckedTransaction: vi.fn().mockResolvedValue('0xfailed'),
+    };
+
+    const transaction = await sendWalletContractTransaction({
+      contract,
+      method: 'verifyMilestone',
+      signer,
+      provider,
+    });
+    await expect(transaction.wait()).rejects.toThrow('reverted on-chain');
+  });
 });
 
 describe('resolveWalletSigner', () => {
@@ -138,6 +169,11 @@ describe('resolveWalletSigner', () => {
 });
 
 describe('formatWalletTransactionError', () => {
+  it('distinguishes a rejected MetaMask signature from an on-chain failure', () => {
+    expect(formatWalletTransactionError({ code: 4001 }, 'Fallback'))
+      .toBe('Transaction cancelled in MetaMask.');
+  });
+
   it('surfaces a nested Ganache revert reason instead of the coalescing wrapper', () => {
     const error = {
       shortMessage: 'could not coalesce error',

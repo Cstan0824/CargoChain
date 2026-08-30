@@ -5,6 +5,12 @@
   padding-bottom: var(--s-8);
 }
 
+.contentToolbar {
+  display: flex;
+  justify-content: flex-start;
+  min-height: 40px;
+}
+
 .backIcon {
   width: 16px;
   height: 16px;
@@ -184,8 +190,7 @@
   font-size: var(--fs-sm);
 }
 
-.itemRow p,
-.instructions p {
+.itemRow p {
   margin: 3px 0 0;
   color: var(--text-secondary);
   font-size: var(--fs-sm);
@@ -201,8 +206,56 @@
   font-variant-numeric: tabular-nums;
 }
 
+.instructions {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--s-3);
+  margin: var(--s-4) var(--s-5) var(--s-5);
+  padding: var(--s-2);
+  border-radius: var(--r-xl);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--primary-soft) 82%, var(--bg-surface)), var(--bg-surface));
+  box-shadow: var(--shadow-border), var(--shadow-md);
+}
+
+.instructionsIcon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-md);
+  color: var(--primary);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.instructionsIcon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.instructionsBody {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--s-1) 0;
+}
+
+.instructionsLabel {
+  color: var(--primary-text);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
 .instructions p {
+  margin: 0;
   color: var(--text-primary);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
 
 .footer {
@@ -221,7 +274,7 @@
   border-radius: var(--r-pill);
   background: rgba(255, 255, 255, 0.2);
   color: inherit;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
@@ -290,14 +343,6 @@
   background: var(--border);
 }
 
-.instructions {
-  margin: 0 var(--s-5) var(--s-5);
-  padding: var(--s-3) var(--s-4);
-  border-radius: var(--r-md);
-  background: var(--primary-soft);
-  box-shadow: inset 3px 0 0 var(--primary);
-}
-
 .escrowCard {
   display: flex;
   flex-direction: column;
@@ -354,6 +399,47 @@
   font-family: var(--font-sans);
   font-size: var(--fs-xs);
   font-weight: var(--fw-normal);
+}
+
+/* Keep the carrier's primary action in the desktop summary rail. The footer
+   copy remains the mobile fallback so the narrow layout keeps its existing
+   action order. */
+.summaryAction {
+  display: none;
+  gap: var(--s-2);
+  padding: var(--s-4);
+  border-radius: var(--r-lg);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--primary-soft) 82%, var(--bg-surface)), var(--bg-surface));
+  box-shadow: var(--shadow-border), var(--shadow-sm);
+}
+
+.summaryActionKicker {
+  color: var(--primary-text);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.summaryAction strong {
+  color: var(--text-primary);
+  font-size: var(--fs-md);
+  text-wrap: balance;
+}
+
+.summaryAction p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+  text-wrap: pretty;
+}
+
+.summaryAction :global(button) { width: 100%; margin-top: var(--s-1); }
+
+@media (min-width: 768px) {
+  .summaryAction { display: grid; }
+  .footerProposalAction { display: none; }
 }
 
 @media (max-width: 700px) {

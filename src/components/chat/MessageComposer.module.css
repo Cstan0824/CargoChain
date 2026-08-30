@@ -25,8 +25,8 @@
 
 .actions { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .send {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -42,7 +42,7 @@
 .send:active:not(:disabled) { transform: scale(0.96); }
 .send:disabled { opacity: 0.45; cursor: not-allowed; }
 .send svg { width: 19px; height: 19px; transform: translate(1px, -1px); }
-.count { color: var(--text-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.count { color: var(--text-muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 .countError { color: var(--danger); font-weight: var(--fw-semibold); }
 .error { margin: 0 0 var(--s-2); color: var(--danger); font-size: var(--fs-xs); }
 

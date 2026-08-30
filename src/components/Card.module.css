@@ -2,9 +2,25 @@
 
 .card {
   background: var(--bg-surface);
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-border);
+  transition-property: box-shadow, transform;
+  transition-duration: var(--dur-2);
+  transition-timing-function: var(--ease);
+}
+
+.card:hover {
+  box-shadow: var(--shadow-border-hover);
 }
 
 .padded { padding: var(--s-5); }
+
+.compact { padding: var(--s-4); }
+
+.grouped {
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.035),
+    0 2px 6px rgba(15, 23, 42, 0.04),
+    0 8px 18px rgba(15, 23, 42, 0.035);
+}

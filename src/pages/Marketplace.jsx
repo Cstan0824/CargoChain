@@ -5,37 +5,59 @@
 // under My Shipments.
 
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
+  HiOutlineArrowRight,
   HiOutlineBars3,
+  HiOutlineChevronRight,
+  HiOutlineExclamationTriangle,
   HiOutlineSquares2X2,
 } from 'react-icons/hi2';
 import { useContracts } from '../hooks/useContracts.js';
 import { useWallet } from '../hooks/useWallet.js';
-import { useToast } from '../hooks/useToast.js';
 import { Topbar } from '../components/Topbar.jsx';
 import { SearchInput } from '../components/SearchInput.jsx';
 import { Button } from '../components/Button.jsx';
 import { Table } from '../components/Table.jsx';
+import { CargoPreview } from '../components/CargoPreview.jsx';
 import { EmptyState } from '../components/EmptyState.jsx';
 import { Card } from '../components/Card.jsx';
-import { formatEth, formatDate, formatDaysLeft, formatRelative } from '../utils/format.js';
+import { Skeleton } from '../components/Skeleton.jsx';
+import {
+  formatEth,
+  formatDate,
+  formatDaysLeft,
+  formatRelative,
+  hasRemarks,
+} from '../utils/format.js';
 import { CreateRequestModal } from '../components/CreateRequestModal.jsx';
-import { deliveryTruckCity } from '../assets';
+import { marketplaceOperations } from '../assets';
 import styles from './Marketplace.module.css';
 
 export function Marketplace() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { contracts, deployError } = useContracts();
-  const { account } = useWallet();
-  const { show } = useToast();
+  const { account, connect } = useWallet();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [search, setSearch] = useState('');
-  const [view, setView] = useState('list');
+  const search = searchParams.get('q') || '';
+  const view = searchParams.get('view') === 'cards' ? 'cards' : 'list';
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const readAccount = account;
+  const canCreateRequest = Boolean(account);
+
+  const openCreateRequest = () => {
+    if (!canCreateRequest) {
+      connect();
+      return;
+    }
+    setIsCreateModalOpen(true);
+  };
+
+  const createRequestLabel = account ? 'Create request' : 'Connect wallet to create';
 
   useEffect(() => {
     if (!contracts?.deliveryEscrow) {
@@ -47,7 +69,7 @@ export function Marketplace() {
     setLoading(true);
     setError(null);
 
-    loadOpenRequests(contracts.deliveryEscrow, account)
+    loadOpenRequests(contracts.deliveryEscrow, readAccount)
       .then((nextRows) => {
         if (!cancelled) setRows(nextRows);
       })
@@ -64,7 +86,7 @@ export function Marketplace() {
     return () => {
       cancelled = true;
     };
-  }, [account, contracts, refreshKey]);
+  }, [contracts, readAccount, refreshKey]);
 
   const filtered = useMemo(() => {
     return rows.filter((r) => {
@@ -85,29 +107,125 @@ export function Marketplace() {
     navigate(`/requests/${row.id}`);
   };
 
+  const updateQuery = (key, value, defaultValue = '') => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (!value || value === defaultValue) next.delete(key);
+      else next.set(key, value);
+      return next;
+    }, { replace: true });
+  };
+
+  const marketplaceColumns = [
+    {
+      key: 'id',
+      header: 'ID',
+      width: '8%',
+      skeleton: { width: '48%' },
+      render: (r) => (
+        <span className={styles.tableId}>#{String(r.id).padStart(4, '0')}</span>
+      ),
+    },
+    {
+      key: 'route',
+      header: 'Route',
+      width: '25%',
+      skeleton: { width: '82%' },
+      render: (r) => (
+        <div className={styles.tableRouteRow}>
+          <span className={styles.tableRouteLabel} title={r.from}>{r.from}</span>
+          <span className={styles.tableRouteArrow}>→</span>
+          <span className={styles.tableRouteLabel} title={r.to}>{r.to}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'cargo',
+      header: 'Shipment contents',
+      width: '20%',
+      skeleton: { variant: 'block', width: '88%', height: 40 },
+      render: (r) => <CargoPreview items={r.items} />,
+    },
+    {
+      key: 'payment',
+      header: 'Planned payment',
+      width: '18%',
+      skeleton: { width: '70%' },
+      render: (r) => (
+        <div className={styles.rewardCell}>
+          <div className={styles.rewardMain}>{formatEth(r.proposedAmountWei)}</div>
+          <div className={styles.rewardSub}>Not funded yet</div>
+        </div>
+      ),
+    },
+    {
+      key: 'deadline',
+      header: 'Deadline',
+      width: '16%',
+      skeleton: { width: '76%' },
+      render: (r) => (
+        <div className={styles.deadlineCell}>
+          <div className={styles.deadlineMain}>{formatDaysLeft(r.deadlineMs)}</div>
+          <div className={styles.deadlineSub}>{formatDate(Math.floor(r.deadlineMs / 1000))}</div>
+        </div>
+      ),
+    },
+    {
+      key: 'action',
+      // The action column intentionally stays visually blank. Keep a semantic
+      // name for screen-reader users so the icon-only cell has context.
+      header: <span className="visually-hidden">Open request</span>,
+      width: '10%',
+      align: 'right',
+      skeleton: { width: '56%' },
+      render: (r) => (
+        <button
+          type="button"
+          className={styles.rowAction}
+          onClick={(event) => {
+            event.stopPropagation();
+            openDetails(r);
+          }}
+          onKeyDown={(event) => event.stopPropagation()}
+          title="Open request"
+          aria-label={`Open request ${r.id}`}
+        >
+          <HiOutlineChevronRight aria-hidden="true" />
+        </button>
+      ),
+    },
+  ];
+  const showInitialLoading = loading && rows.length === 0;
+
   return (
     <div className={styles.page}>
       <Topbar
         title="Marketplace"
         subtitle="Find open delivery jobs posted by shippers and propose a milestone plan."
-        actions={<Button onClick={() => setIsCreateModalOpen(true)}>Create request</Button>}
+        actions={<Button onClick={openCreateRequest}>{createRequestLabel}</Button>}
       />
 
-      <Card className={styles.filterBar} padded={false}>
+      <Card
+        className={styles.filterBar}
+        padded={false}
+        role="search"
+        aria-label="Filter marketplace requests"
+      >
         <div className={styles.filterRow}>
           <SearchInput
             value={search}
-            onChange={setSearch}
-            onSubmit={() => {/* live filter only */}}
+            onChange={(value) => updateQuery('q', value)}
             placeholder="Search routes or keyword…"
-            actionLabel="Search"
+            shape="contained"
+            className={styles.search}
           />
           <div className={styles.viewToggle} aria-label="Marketplace view">
             <button
               type="button"
               className={`${styles.viewToggleBtn} ${view === 'list' ? styles.viewToggleActive : ''}`}
-              onClick={() => setView('list')}
+              onClick={() => updateQuery('view', 'list', 'list')}
               aria-pressed={view === 'list'}
+              aria-label="List view"
               title="List view"
             >
               <HiOutlineBars3 aria-hidden="true" />
@@ -116,8 +234,9 @@ export function Marketplace() {
             <button
               type="button"
               className={`${styles.viewToggleBtn} ${view === 'cards' ? styles.viewToggleActive : ''}`}
-              onClick={() => setView('cards')}
+              onClick={() => updateQuery('view', 'cards', 'list')}
               aria-pressed={view === 'cards'}
+              aria-label="Card view"
               title="Card view"
             >
               <HiOutlineSquares2X2 aria-hidden="true" />
@@ -127,57 +246,71 @@ export function Marketplace() {
         </div>
       </Card>
 
-      {loading && (
-        <Card className={styles.notice}>
-          <span className={styles.muted}>Loading open requests from DeliveryEscrow…</span>
-        </Card>
-      )}
-
       {deployError && (
-        <Card className={styles.notice}>
-          <strong>Contract connection unavailable.</strong>{' '}
-          <span className={styles.muted}>{deployError}</span>
+        <Card className={styles.notice} role="alert">
+          <strong>Local blockchain unavailable.</strong>{' '}
+          <span className={styles.muted}>Start the CargoChain demo environment, then reload this page.</span>
         </Card>
       )}
 
       {error && !deployError && (
-        <Card className={styles.notice}><span className={styles.muted}>Couldn't load on-chain data: {error}.</span></Card>
+        <Card className={styles.notice} role="alert">
+          <div>
+            <strong>Open requests could not be loaded.</strong>{' '}
+            <span className={styles.muted}>Check the local chain connection and try again.</span>
+          </div>
+          <Button variant="secondary" size="sm" onClick={() => setRefreshKey((value) => value + 1)}>
+            Retry
+          </Button>
+        </Card>
       )}
 
-      <div className={styles.tableCard}>
-        {loading ? null : filtered.length === 0 ? (
-          <Card padded={false} className={styles.emptyCard}>
+      <div className={styles.tableCard} aria-busy={loading || undefined}>
+        {loading && rows.length > 0 && (
+          <span className="visually-hidden" role="status">Refreshing open delivery requests…</span>
+        )}
+        {showInitialLoading ? (
+          view === 'cards' ? <MarketplaceCardSkeletons /> : (
+            <Table
+              columns={marketplaceColumns}
+              rows={[]}
+              loading
+              loadingRows={4}
+              loadingLabel="Loading open delivery requests…"
+            />
+          )
+        ) : filtered.length === 0 ? (
+          <div className={styles.emptyCard}>
             <EmptyState
-              illustration={deliveryTruckCity}
+              compact
+              illustration={marketplaceOperations}
               title={emptyTitle({ deployError, error, rows, search })}
               description={
                 deployError
-                  ? deployError
+                  ? 'CargoChain cannot reach the local blockchain contracts.'
                   : rows.length === 0
-                    ? 'Published delivery requests will appear here after shipper wallets submit createRequest().'
-                    : 'No open requests match your current filters. Try clearing the search or picking a different route.'
+                    ? 'No delivery requests are available yet. Connected shippers can publish the first request.'
+                    : 'No open requests match your search. Try clearing the search or choosing a different route.'
               }
               action={
-                !deployError && rows.length === 0 ? (
-                  <Button variant="secondary" onClick={() => setIsCreateModalOpen(true)}>
-                    Create request
-                  </Button>
-                ) : !deployError && (
-                  <Button variant="secondary" onClick={() => setSearch('')}>
-                    Clear filters
-                  </Button>
-                )
+                error
+                  ? <Button variant="secondary" onClick={() => setRefreshKey((value) => value + 1)}>Retry</Button>
+                  : !deployError && rows.length === 0
+                  ? <Button variant="secondary" onClick={openCreateRequest}>{createRequestLabel}</Button>
+                  : !deployError && (
+                    <Button variant="secondary" onClick={() => updateQuery('q', '')}>
+                      Clear search
+                    </Button>
+                  )
               }
             />
-          </Card>
+          </div>
         ) : view === 'cards' ? (
           <div className={styles.cardGrid}>
             {filtered.map((r) => (
-              <button
+              <article
                 key={r.id}
-                type="button"
                 className={styles.jobCard}
-                onClick={() => openDetails(r)}
               >
                 <div className={styles.cardTop}>
                   <span className={styles.cardId}>#{String(r.id).padStart(4, '0')}</span>
@@ -192,17 +325,15 @@ export function Marketplace() {
 
                 {r.items && r.items.length > 0 && (
                   <div className={styles.cardCargo}>
-                    <span className={styles.cargoIcon}>📦</span>
-                    <span className={styles.cargoText} title={r.itemsLabel}>
-                      {r.itemsLabel}
-                    </span>
+                    <CargoPreview items={r.items} />
                   </div>
                 )}
 
-                {r.specialInstruction && (
-                  <div className={styles.specialBadge} title={r.specialInstruction}>
-                    <span className={styles.warningIcon}>⚠️</span>
-                    <span className={styles.specialText}>{r.specialInstruction}</span>
+                {hasRemarks(r.specialInstruction) && (
+                  <div className={styles.specialBadge} title={`Remarks: ${String(r.specialInstruction).trim()}`}>
+                    <HiOutlineExclamationTriangle className={styles.warningIcon} aria-hidden="true" />
+                    <span className={styles.specialLabel}>Remarks</span>
+                    <span className={styles.specialText}>{String(r.specialInstruction).trim()}</span>
                   </div>
                 )}
 
@@ -218,66 +349,21 @@ export function Marketplace() {
                     <strong className={styles.footerVal}>{formatDaysLeft(r.deadlineMs)}</strong>
                   </div>
                 </div>
-              </button>
+
+                <button
+                  type="button"
+                  className={styles.cardOpenButton}
+                  onClick={() => openDetails(r)}
+                >
+                  View request <HiOutlineArrowRight aria-hidden="true" />
+                </button>
+              </article>
             ))}
           </div>
         ) : (
           <Table
             onRowClick={openDetails}
-            columns={[
-              {
-                key: 'id',
-                header: 'ID',
-                width: '8%',
-                render: (r) => (
-                  <span className={styles.tableId}>#{String(r.id).padStart(4, '0')}</span>
-                ),
-              },
-              {
-                key: 'route',
-                header: 'Route',
-                width: '25%',
-                render: (r) => (
-                  <div className={styles.tableRouteRow}>
-                    <span className={styles.tableRouteLabel} title={r.from}>{r.from}</span>
-                    <span className={styles.tableRouteArrow}>→</span>
-                    <span className={styles.tableRouteLabel} title={r.to}>{r.to}</span>
-                  </div>
-                ),
-              },
-              {
-                key: 'cargo',
-                header: 'Cargo',
-                width: '20%',
-                render: (r) => (
-                  <span className={styles.tableCargoLabel} title={r.itemsLabel}>
-                    {r.itemsLabel}
-                  </span>
-                ),
-              },
-              {
-                key: 'payment',
-                header: 'Planned payment',
-                width: '18%',
-                render: (r) => (
-                  <div className={styles.rewardCell}>
-                    <div className={styles.rewardMain}>{formatEth(r.proposedAmountWei)}</div>
-                    <div className={styles.rewardSub}>Awaiting escrow</div>
-                  </div>
-                ),
-              },
-              {
-                key: 'deadline',
-                header: 'Deadline',
-                width: '16%',
-                render: (r) => (
-                  <div className={styles.deadlineCell}>
-                    <div className={styles.deadlineMain}>{formatDaysLeft(r.deadlineMs)}</div>
-                    <div className={styles.deadlineSub}>{formatDate(Math.floor(r.deadlineMs / 1000))}</div>
-                  </div>
-                ),
-              },
-            ]}
+            columns={marketplaceColumns}
             rows={filtered}
             emptyMessage="No open requests match the current filters."
           />
@@ -293,17 +379,54 @@ export function Marketplace() {
   );
 }
 
-async function loadOpenRequests(deliveryEscrow, account) {
+function MarketplaceCardSkeletons() {
+  return (
+    <div className={styles.cardGrid} aria-busy="true">
+      <span className="visually-hidden" role="status">Loading open delivery requests…</span>
+      {[1, 2, 3].map((key) => (
+        <article key={key} className={`${styles.jobCard} ${styles.skeletonCard}`} aria-hidden="true">
+          <div className={styles.cardTop}>
+            <Skeleton width={52} height={20} />
+            <Skeleton width={72} height={12} />
+          </div>
+          <div className={styles.cardRoute}>
+            <Skeleton width="34%" height={16} />
+            <Skeleton width={16} height={12} />
+            <Skeleton width="34%" height={16} />
+          </div>
+          <div className={styles.cardCargo}><Skeleton variant="block" width="100%" height={40} /></div>
+          <div className={styles.cardDivider} />
+          <div className={styles.cardFooter}>
+            <Skeleton width="34%" height={28} />
+            <Skeleton width="28%" height={28} />
+          </div>
+          <Skeleton width={112} height={18} />
+        </article>
+      ))}
+    </div>
+  );
+}
+
+export async function loadOpenRequests(deliveryEscrow, account) {
   const ids = await deliveryEscrow.getOpenRequests(0n, 50n);
   const rows = await Promise.all(
     ids.map(async (idValue) => {
       const id = BigInt(idValue);
-      const [request, items, milestones, proposals] = await Promise.all([
+      const [request, items, milestones] = await Promise.all([
         deliveryEscrow.getRequest(id),
         deliveryEscrow.getItems(id),
         deliveryEscrow.getMilestones(id),
-        account ? deliveryEscrow.getProposals(id) : Promise.resolve([]),
       ]);
+      let proposals = [];
+      if (account) {
+        try {
+          proposals = await deliveryEscrow.getProposals(id);
+        } catch {
+          // Proposal ownership is optional enrichment. A wallet-specific RPC
+          // failure must not hide public open requests from this account.
+          proposals = [];
+        }
+      }
       return mapMarketplaceRow(request, items, milestones, proposals, account);
     }),
   );
@@ -359,8 +482,8 @@ function mapMarketplaceRow(request, items, milestones, proposals, account) {
 
 function emptyTitle({ deployError, error, rows, search }) {
   if (deployError) return 'Contracts not deployed';
-  if (error) return 'Marketplace unavailable';
+  if (error) return 'Open requests could not be loaded';
   if (rows.length === 0) return 'No open requests yet';
-  if (search) return 'No matches';
+  if (search) return 'No requests match your search';
   return 'No open requests yet';
 }

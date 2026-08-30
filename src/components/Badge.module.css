@@ -4,13 +4,20 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  min-height: 24px;
   padding: 3px 8px;
-  border-radius: var(--r-pill);
+  border-radius: var(--r-sm);
+  border: 1px solid;
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
+  line-height: 1.2;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+.outlined {
+  background: var(--bg-surface);
 }
 
 .icon {

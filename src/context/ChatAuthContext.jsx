@@ -8,8 +8,8 @@ import { SiweMessage } from 'siwe';
 import { useWallet } from './Web3Context';
 import { CHAT_TOKEN_STORAGE_KEY } from '../lib/supabaseClient';
 import { getCurrentChatUser, requestAuthNonce, verifyAuthSiwe } from '../lib/chatApiClient';
+import { CARGO_NETWORK_CONFIG } from '../utils/network.js';
 
-const CONFIGURED_CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID || 1337);
 const CHAT_WALLET_KEY = 'cargochain_chat_wallet';
 const CHAT_EXP_KEY = 'cargochain_chat_exp';
 
@@ -65,7 +65,7 @@ export function ChatAuthProvider({ children }) {
       return false;
     }
 
-    if (walletChainId && Number(walletChainId) !== CONFIGURED_CHAIN_ID) {
+    if (walletChainId && Number(walletChainId) !== CARGO_NETWORK_CONFIG.chainId) {
       clearChatSession();
       setAuthStatus('unauthenticated');
       return false;
@@ -137,10 +137,10 @@ export function ChatAuthProvider({ children }) {
       return;
     }
 
-    if (walletChainId && Number(walletChainId) !== CONFIGURED_CHAIN_ID) {
+    if (walletChainId && Number(walletChainId) !== CARGO_NETWORK_CONFIG.chainId) {
       clearChatSession();
       setAuthStatus('unauthenticated');
-      setAuthError('Wrong network: Please switch MetaMask to Chain ID 1337');
+      setAuthError(`Wrong network: Please switch MetaMask to ${CARGO_NETWORK_CONFIG.chainName}`);
       return;
     }
 
@@ -188,8 +188,8 @@ export function ChatAuthProvider({ children }) {
       throw new Error(msg);
     }
 
-    if (activeChainId && Number(activeChainId) !== CONFIGURED_CHAIN_ID) {
-      const msg = `Wrong network. Please switch MetaMask to Chain ID ${CONFIGURED_CHAIN_ID}.`;
+    if (activeChainId && Number(activeChainId) !== CARGO_NETWORK_CONFIG.chainId) {
+      const msg = `Wrong network. Please switch MetaMask to ${CARGO_NETWORK_CONFIG.chainName} (chain ID ${CARGO_NETWORK_CONFIG.chainId}).`;
       setAuthError(msg);
       setAuthStatus('error');
       throw new Error(msg);
@@ -212,8 +212,8 @@ export function ChatAuthProvider({ children }) {
           throw new Error('The active MetaMask account changed before chat sign-in.');
         }
         const signerNetwork = await activeSigner.provider?.getNetwork();
-        if (signerNetwork && Number(signerNetwork.chainId) !== CONFIGURED_CHAIN_ID) {
-          throw new Error(`Wrong network. Please switch MetaMask to Chain ID ${CONFIGURED_CHAIN_ID}.`);
+        if (signerNetwork && Number(signerNetwork.chainId) !== CARGO_NETWORK_CONFIG.chainId) {
+          throw new Error(`Wrong network. Please switch MetaMask to ${CARGO_NETWORK_CONFIG.chainName} (chain ID ${CARGO_NETWORK_CONFIG.chainId}).`);
         }
 
       // 1. Request nonce from Express server
@@ -232,7 +232,7 @@ export function ChatAuthProvider({ children }) {
         statement: 'Sign in to CargoChain Chat',
         uri: origin,
         version: '1',
-        chainId: CONFIGURED_CHAIN_ID,
+        chainId: CARGO_NETWORK_CONFIG.chainId,
         nonce,
         issuedAt: now.toISOString(),
         expirationTime: expirationTime.toISOString(),
@@ -248,13 +248,13 @@ export function ChatAuthProvider({ children }) {
       if (
         operationId !== authOperationRef.current
         || latest.account?.toLowerCase() !== normalizedAccount
-        || latest.walletChainId !== CONFIGURED_CHAIN_ID
+        || latest.walletChainId !== CARGO_NETWORK_CONFIG.chainId
         || latestSignerAddress.toLowerCase() !== normalizedAccount
       ) {
         throw new Error('The wallet account or network changed during chat sign-in. Please try again.');
       }
 
-      // 4. Verify signature with Express backend
+      // 4. Verify the wallet signature with the Express backend.
       const result = await verifyAuthSiwe(messageToSign, signature);
 
       if (!result.token || !result.walletAddress) {
@@ -265,12 +265,11 @@ export function ChatAuthProvider({ children }) {
       if (verifiedWallet !== normalizedAccount) {
         throw new Error('Authenticated wallet address mismatch');
       }
-
       const finalSource = sourceRef.current;
       if (
         operationId !== authOperationRef.current
         || finalSource.account?.toLowerCase() !== normalizedAccount
-        || finalSource.walletChainId !== CONFIGURED_CHAIN_ID
+        || finalSource.walletChainId !== CARGO_NETWORK_CONFIG.chainId
       ) {
         throw new Error('The wallet account or network changed before chat sign-in completed.');
       }

@@ -10,20 +10,16 @@ import {
 import { useWallet } from '../hooks/useWallet.js';
 import { useUserProfile } from '../hooks/useUserProfile.js';
 import { shortAddress } from '../utils/format.js';
+import { CARGO_NETWORK_CONFIG } from '../utils/network.js';
 import styles from './ConnectButton.module.css';
 
-const CHAIN_NAMES = {
-  1: 'Mainnet',
-  11155111: 'Sepolia',
-  1337: 'Ganache',
-  5777: 'Ganache',
-};
-
 export function ConnectButton() {
-  const { account, chainId, error, busy, connect } = useWallet();
+  const { account, chainId, error, busy, connect, switchNetwork, isCorrectNetwork } = useWallet();
   const { displayName, isRegistered, isProfileLoading } = useUserProfile();
-  const expectedLocal = chainId === 1337 || chainId === 5777;
-  const chainLabel = CHAIN_NAMES[chainId] || (chainId ? `Chain ${chainId}` : 'No network');
+  const expectedLocal = Boolean(isCorrectNetwork);
+  const chainLabel = chainId === CARGO_NETWORK_CONFIG.chainId
+    ? CARGO_NETWORK_CONFIG.chainName
+    : (chainId ? `Chain ${chainId}` : 'No network');
 
   if (!account) {
     return (
@@ -32,10 +28,10 @@ export function ConnectButton() {
         className={`${styles.button} ${styles.disconnected}`}
         onClick={connect}
         disabled={busy}
-        title={error || 'Connect MetaMask wallet'}
+        title={error || 'Connect wallet'}
       >
         <HiOutlineWallet className={styles.icon} aria-hidden="true" />
-        <span>{busy ? 'Connecting…' : 'Connect Wallet'}</span>
+        <span>{busy ? 'Connecting…' : 'Connect wallet'}</span>
       </button>
     );
   }
@@ -44,15 +40,17 @@ export function ConnectButton() {
     <button
       type="button"
       className={`${styles.button} ${styles.connected} ${expectedLocal ? styles.ready : styles.warning}`}
-      onClick={connect}
+      onClick={expectedLocal ? connect : switchNetwork}
       disabled={busy}
-      title={expectedLocal ? 'Wallet connected' : 'Switch MetaMask to Ganache Local (chain 1337)'}
+      title={expectedLocal ? 'Wallet connected' : `Switch MetaMask to ${CARGO_NETWORK_CONFIG.chainName}`}
     >
       {expectedLocal
         ? <HiOutlineCheckCircle className={styles.icon} aria-hidden="true" />
         : <HiOutlineExclamationCircle className={styles.icon} aria-hidden="true" />}
       <span className={styles.address} title={account}>
-        {isRegistered && displayName ? displayName : (isProfileLoading ? 'Loading…' : shortAddress(account))}
+        {busy
+          ? (expectedLocal ? 'Connecting…' : 'Switching…')
+          : (isRegistered && displayName ? displayName : (isProfileLoading ? 'Loading…' : shortAddress(account)))}
       </span>
       <span className={styles.chain}>{chainLabel}</span>
     </button>

@@ -3,6 +3,7 @@
 // card (per the BusinessFlow §4 happy path: shipper must verify each proof),
 // Recent Shipments table, Escrow Overview donut, and the bottom notice.
 
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   HiOutlineArrowDownTray,
@@ -12,6 +13,8 @@ import {
   HiOutlineCheckBadge,
   HiOutlineChevronRight,
   HiOutlinePhoto,
+  HiOutlineLockClosed,
+  HiOutlineBanknotes,
 } from 'react-icons/hi2';
 import { Topbar } from '../components/Topbar.jsx';
 import { Card } from '../components/Card.jsx';
@@ -23,12 +26,7 @@ import { DonutChart } from '../components/DonutChart.jsx';
 import { useToast } from '../hooks/useToast.js';
 import { formatEth, formatRelative, requestStatus, REQUEST_TONE, MILESTONE_TONE } from '../utils/format.js';
 import { CreateRequestModal } from '../components/CreateRequestModal.jsx';
-import {
-  escrowFundedTile,
-  lockedTile,
-  paymentReleasedTile,
-  verificationLaptopUser,
-} from '../assets';
+import { proofVerification } from '../assets';
 import styles from './Shipper.module.css';
 
 // Statuses that surface a Badge in the recent shipments table.
@@ -68,19 +66,18 @@ export function Shipper() {
       <Topbar
         title="Shipper Dashboard"
         subtitle="Manage your shipments, escrow and milestones."
-        actions={
-          <>
-            <Button variant="secondary" onClick={() => show('Export coming soon.', 'info')}>
-              <HiOutlineArrowDownTray className={styles.btnIcon} aria-hidden="true" /> Export
-            </Button>
-            <Button onClick={() => setIsCreateModalOpen(true)}>+ Create request</Button>
-          </>
-        }
       />
 
+      <div className={styles.pageToolbar}>
+        <Button variant="secondary" onClick={() => show('Export coming soon.', 'info')}>
+          <HiOutlineArrowDownTray className={styles.btnIcon} aria-hidden="true" /> Export
+        </Button>
+        <Button onClick={() => setIsCreateModalOpen(true)}>+ Create request</Button>
+      </div>
+
       <div className={styles.kpiRow}>
-        <KpiCard label="Active requests" value="8"   delta="2 from last week" tone="positive" icon={lockedTile} />
-        <KpiCard label="Escrow locked"  value="12.45 ETH" sub="≈ S$24,890.00" delta="2 from last week" tone="positive" icon={escrowFundedTile} />
+        <KpiCard label="Active requests" value="8"   delta="2 from last week" tone="positive" icon={HiOutlineLockClosed} />
+        <KpiCard label="Escrow locked"  value="12.45 ETH" sub="≈ S$24,890.00" delta="2 from last week" tone="positive" icon={HiOutlineBanknotes} />
         <KpiCard
           label="Pending verifications"
           value={String(PENDING_VERIFICATIONS.length)}
@@ -88,7 +85,7 @@ export function Shipper() {
           tone="negative"
           icon={HiOutlineExclamationCircle}
         />
-        <KpiCard label="Completed (this month)" value="15" delta="5 this month" tone="positive" icon={paymentReleasedTile} />
+        <KpiCard label="Completed (this month)" value="15" delta="5 this month" tone="positive" icon={HiOutlineCheckBadge} />
       </div>
 
       <Card className={styles.pending} padded={false}>
@@ -185,7 +182,7 @@ export function Shipper() {
             </div>
           </div>
         </div>
-        <img src={verificationLaptopUser} alt="" className={styles.noticeArt} />
+        <img src={proofVerification} alt="" className={styles.noticeArt} />
       </Card>
       
       <CreateRequestModal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} />

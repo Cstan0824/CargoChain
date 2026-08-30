@@ -12,12 +12,27 @@
 .loadingState {
   display: flex;
   min-height: 100%;
-  align-items: center;
-  justify-content: center;
-  gap: var(--s-3);
-  color: var(--text-secondary);
-  font-size: var(--fs-sm);
-  font-weight: var(--fw-medium);
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.timelineSkeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding: var(--s-5) 0;
+}
+.timelineSkeletonMessage {
+  display: flex;
+  max-width: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.timelineSkeletonMessage > :last-child { border-radius: 14px 14px 14px 3px; }
+.timelineSkeletonOwn { align-items: flex-end; }
+.timelineSkeletonOwn > :last-child { border-radius: 14px 14px 3px 14px; }
+.loadingSpinner {
+  display: none;
 }
 .loadingSpinner {
   width: 20px;
@@ -39,7 +54,14 @@
 .message { display: flex; flex-direction: column; align-items: flex-start; margin: var(--s-3) 0; }
 .own { align-items: flex-end; }
 .meta { margin: 0 4px 3px; color: var(--text-muted); font-size: var(--fs-xs); }
-.bubble { max-width: min(75%, 560px); margin: 0; padding: 10px 14px; border-radius: 14px 14px 14px 3px; background: var(--bg-subtle); color: var(--text-primary); font-size: var(--fs-sm); line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05); }
+.bubble { position: relative; max-width: min(75%, 560px); margin: 0; padding: 10px 112px 26px 14px; border-radius: 14px 14px 14px 3px; background: var(--bg-subtle); color: var(--text-primary); font-size: var(--fs-sm); line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05); }
+.bubbleContent { display: block; }
+.bubbleMeta { position: absolute; right: 12px; bottom: 7px; display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: var(--fs-xs); line-height: 1; white-space: nowrap; }
+.bubbleTime { font-variant-numeric: tabular-nums; }
+.bubbleStatus { font-weight: var(--fw-semibold); }
 .own .bubble { border-radius: 14px 14px 3px 14px; background: var(--primary); color: var(--text-inverse); }
+.own .bubbleMeta { color: color-mix(in srgb, var(--text-inverse) 72%, var(--primary)); }
+.failed .bubble { background: var(--danger-soft); color: var(--text-primary); box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 28%, transparent); }
+.failed .bubbleMeta { color: var(--danger); }
 
 @media (max-width: 640px) { .scrollArea { padding: var(--s-3) var(--s-4); } .bubble { max-width: 86%; } }

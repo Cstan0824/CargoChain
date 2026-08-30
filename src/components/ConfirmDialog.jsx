@@ -1,10 +1,11 @@
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import {
   HiOutlineExclamationTriangle,
   HiOutlineInformationCircle,
   HiOutlineXMark,
 } from 'react-icons/hi2';
 import { Button } from './Button.jsx';
+import { useDialogFocus } from '../hooks/useDialogFocus.js';
 import styles from './ConfirmDialog.module.css';
 
 export function ConfirmDialog({
@@ -20,25 +21,15 @@ export function ConfirmDialog({
   const cancelButtonRef = useRef(null);
   const isDanger = tone === 'danger';
   const Icon = isDanger ? HiOutlineExclamationTriangle : HiOutlineInformationCircle;
-
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    (isDanger ? cancelButtonRef.current : confirmButtonRef.current)?.focus();
-
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape') onCancel();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener('keydown', onKeyDown);
-    };
-  }, [isDanger, onCancel]);
+  const dialogRef = useDialogFocus({
+    onClose: onCancel,
+    initialFocusRef: isDanger ? cancelButtonRef : confirmButtonRef,
+  });
 
   return (
     <div className={styles.scrim} onMouseDown={onCancel}>
       <section
+        ref={dialogRef}
         className={styles.dialog}
         role="alertdialog"
         aria-modal="true"

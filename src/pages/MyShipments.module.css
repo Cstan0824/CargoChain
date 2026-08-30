@@ -7,12 +7,15 @@
   padding-bottom: var(--s-10);
 }
 
-/* ─── Toolbar (search + filters + create) ─────────────────────── */
+/* ─── Toolbar (search + filters) ─────────────────────────────── */
 .toolbar {
   display: flex;
   align-items: center;
-  gap: var(--s-3);
+  gap: var(--s-2);
   flex-wrap: wrap;
+  min-width: 0;
+  padding: var(--s-2);
+  border-radius: var(--r-xl);
 }
 
 .searchWrap {
@@ -27,6 +30,8 @@
   align-items: center;
   gap: var(--s-2);
   flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .pill {
@@ -34,6 +39,7 @@
   align-items: center;
   gap: 5px;
   padding: 6px 14px;
+  min-height: 44px;
   border-radius: var(--r-pill);
   border: 1px solid var(--border);
   background: var(--bg-surface);
@@ -77,7 +83,7 @@
   padding: 0 5px;
   border-radius: var(--r-pill);
   background: rgba(255, 255, 255, 0.25);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
   font-variant-numeric: tabular-nums;
 }
@@ -88,12 +94,46 @@
 
 @media (max-width: 800px) {
   .toolbar { flex-direction: column; align-items: stretch; }
-  .searchWrap { max-width: 100%; }
-  .filterPills { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 2px; }
+  .searchWrap { max-width: 100%; min-width: 0; }
+  .filterPills {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding: 0 2px 2px;
+    scrollbar-width: thin;
+  }
+}
+
+@media (max-width: 640px) {
+  .table { min-width: 900px; }
+
+  .table th:first-child,
+  .table td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: calc(var(--z-sticky) + 1);
+    background: var(--bg-surface);
+    box-shadow: 1px 0 0 var(--border-soft);
+  }
+
+  .table th:last-child,
+  .table td:last-child {
+    position: sticky;
+    right: 0;
+    z-index: calc(var(--z-sticky) + 1);
+    background: var(--bg-surface);
+    box-shadow: -1px 0 0 var(--border-soft);
+  }
+
+  .table tbody tr:hover td:first-child,
+  .table tbody tr:hover td:last-child { background: var(--bg-subtle); }
 }
 
 /* ─── Notice banner ───────────────────────────────────────────── */
 .notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
   font-size: var(--fs-sm);
   padding: var(--s-3) var(--s-4);
   background: var(--warning-soft);
@@ -103,7 +143,11 @@
 .muted { color: var(--text-secondary); }
 
 /* ─── Table card ──────────────────────────────────────────────── */
-.tableCard { overflow: hidden; }
+.tableCard {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
 
 .loadingState {
   padding: var(--s-8);
@@ -112,29 +156,74 @@
   font-size: var(--fs-sm);
 }
 
+/* The header owns the desktop connection/create action. Keep the contextual
+   empty-state action available on smaller screens where the header action may
+   be out of view, and give the empty table a calmer desktop balance. */
+@media (min-width: 768px) {
+  .emptyState {
+    min-height: 248px;
+    box-sizing: border-box;
+    justify-content: center;
+  }
+
+  .disconnectedEmptyAction { display: none; }
+}
+
+.skeletonRow td { height: 72px; }
+.skeletonRoute,
+.skeletonNextAction,
+.skeletonDeadline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.skeletonRoute {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+.skeletonRoute > :last-child { grid-column: 1 / -1; }
+
 .tableWrap {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
 }
 
 /* ─── Table ───────────────────────────────────────────────────── */
 .table {
   width: 100%;
+  min-width: 900px;
   border-collapse: collapse;
   font-size: var(--fs-sm);
 }
 
 .table th {
-  padding: 12px 16px;
+  padding: 14px 16px;
   text-align: left;
   font-size: var(--fs-xs);
   font-weight: var(--fw-semibold);
   color: var(--text-secondary);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  background: var(--bg-subtle);
-  border-bottom: 1px solid var(--border-soft);
+  letter-spacing: 0.04em;
+  background: color-mix(in srgb, var(--bg-surface) 96%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
   white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+}
+
+/* Keep the guidance column useful without allowing secondary copy to make
+   shipment rows unexpectedly tall. */
+.table th:nth-child(6),
+.table td:nth-child(6) {
+  width: 156px;
+  max-width: 156px;
 }
 
 .table td {
@@ -149,10 +238,13 @@
 /* Row hover + click */
 .row {
   cursor: pointer;
-  transition: background var(--dur-1) var(--ease);
+  transition-property: background-color;
+  transition-duration: var(--dur-1);
+  transition-timing-function: var(--ease);
 }
 .row:hover { background: var(--bg-subtle); }
 .row:active { background: rgba(37, 99, 235, 0.03); }
+.row:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 
 /* ─── Cell styles ─────────────────────────────────────────────── */
 .idCell {
@@ -195,6 +287,11 @@
   font-variant-numeric: tabular-nums;
 }
 
+.milestoneEmpty {
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+
 .numCell {
   font-variant-numeric: tabular-nums;
   font-weight: var(--fw-semibold);
@@ -216,17 +313,58 @@
   white-space: nowrap;
 }
 
+.statusCell {
+  display: flex;
+  min-width: 104px;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.nextActionCell {
+  display: flex;
+  max-width: 156px;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  line-height: 1.35;
+  text-wrap: pretty;
+}
+
+.nextActionLabel {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nextActionDetail {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-wrap: pretty;
+}
+
 .actionCell {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 4px;
+  gap: var(--s-1);
+  flex-wrap: wrap;
 }
 
 /* ─── Icon action buttons ─────────────────────────────────────── */
 .iconBtn {
   width: 40px;
+  min-width: 40px;
   height: 40px;
+  min-height: 40px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -242,11 +380,13 @@
     border-color var(--dur-1) var(--ease),
     transform var(--dur-1) var(--ease);
 }
+.iconBtn svg { width: 17px; height: 17px; }
 .iconBtn:hover {
   background: var(--bg-subtle);
   color: var(--text-primary);
   border-color: var(--border-soft);
 }
+.iconBtn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .iconBtn:active { transform: scale(0.96); }
 
 .chevBtn:hover {
@@ -255,12 +395,35 @@
   border-color: rgba(37, 99, 235, 0.15);
 }
 
+.shipmentChatButton {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  flex: 0 0 40px;
+  padding: 0;
+}
+
+.shipmentChatButton :global(svg) { width: 17px; height: 17px; }
+
+.editBtn {
+  border-color: var(--border);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-border);
+}
+
+.editBtn:hover {
+  border-color: color-mix(in srgb, var(--primary) 32%, var(--border));
+  background: var(--bg-subtle);
+  box-shadow: var(--shadow-border-hover);
+}
+
 .historyClose:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
 /* ─── Carrier proposal history modal ─────────────────────────── */
 .historyOverlay {
   position: fixed;
-  z-index: 40;
+  z-index: var(--z-modal);
   inset: 0;
   display: grid;
   place-items: center;
@@ -299,9 +462,9 @@
 
 .historyClose {
   display: inline-grid;
-  width: 40px;
-  height: 40px;
-  flex: 0 0 40px;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
   place-items: center;
   border: 0;
   border-radius: var(--r-md);

@@ -5,6 +5,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   HiArrowLeft,
   HiOutlineCube,
+  HiOutlineInformationCircle,
   HiOutlineMapPin,
 } from 'react-icons/hi2';
 import { Topbar } from '../components/Topbar.jsx';
@@ -21,16 +22,18 @@ import {
   formatDaysLeft,
   formatEth,
   formatRelative,
+  formatRemarks,
   requestStatus,
+  requestStatusLabel,
   REQUEST_TONE,
 } from '../utils/format.js';
-import { deliveryTruckCity } from '../assets';
+import { marketplaceOperations } from '../assets';
 import styles from './RequestDetail.module.css';
 
 export function RequestDetail() {
   const { id: idParam } = useParams();
   const navigate = useNavigate();
-  const { account } = useWallet();
+  const { account, busy: walletBusy, connect } = useWallet();
   const { contracts, deployError } = useContracts();
   const [request, setRequest] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -74,7 +77,7 @@ export function RequestDetail() {
 
     const isOwnActiveProposal = request.proposals.some((proposal) => (
       proposal.status === 'Active'
-      && proposal.carrier.toLowerCase() === account.toLowerCase()
+      && proposal.carrier?.toLowerCase() === account.toLowerCase()
     ));
 
     if (isOwnActiveProposal) {
@@ -88,7 +91,7 @@ export function RequestDetail() {
     return (
       <div className={styles.page}>
         <Topbar title={`Request #${String(idParam || '').padStart(4, '0')}`} />
-        <Card><div className={styles.muted}>Loading request from DeliveryEscrow...</div></Card>
+        <Card><div className={styles.muted}>Loading request details…</div></Card>
       </div>
     );
   }
@@ -99,7 +102,7 @@ export function RequestDetail() {
         <Topbar title={`Request #${String(idParam || '').padStart(4, '0')}`} />
         <Card padded={false}>
           <EmptyState
-            illustration={deliveryTruckCity}
+            illustration={marketplaceOperations}
             title="Request unavailable"
             description={deployError || error || 'This request could not be found.'}
             action={<Button variant="secondary" onClick={goBack}>Back to marketplace</Button>}
@@ -110,6 +113,21 @@ export function RequestDetail() {
   }
 
   const isShipper = Boolean(account && account.toLowerCase() === request.shipper.toLowerCase());
+  const hasOwnActiveProposal = request.proposals.some((proposal) => (
+    account
+      && proposal.status === 'Active'
+      && proposal.carrier?.toLowerCase() === account.toLowerCase()
+  ));
+  const canPropose = Boolean(account);
+  const openProposal = () => {
+    if (!canPropose) {
+      connect();
+      return;
+    }
+    navigate(`/shipments/${request.id}/propose`);
+  };
+  const proposalActionLabel = account ? 'Propose milestones' : 'Connect wallet to propose';
+  const showProposalAction = request.status === 'Open' && !isShipper && !hasOwnActiveProposal;
   const displayedPayment = request.escrow > 0n ? request.escrow : request.proposedAmount;
   const shipperIdentity = walletIdentityLabel(request.shipper, walletIdentities);
 
@@ -118,13 +136,14 @@ export function RequestDetail() {
       <Topbar
         title={`Request #${String(request.id).padStart(4, '0')}`}
         subtitle="Review the shipment requirements before proposing milestones."
-        actions={
-          <Button variant="secondary" onClick={goBack}>
-            <HiArrowLeft className={styles.backIcon} aria-hidden="true" />
-            Marketplace
-          </Button>
-        }
       />
+
+      <div className={styles.contentToolbar}>
+        <Button variant="secondary" onClick={goBack}>
+          <HiArrowLeft className={styles.backIcon} aria-hidden="true" />
+          Marketplace
+        </Button>
+      </div>
 
       <div className={styles.dashboardGrid}>
         <div className={styles.leftColumn}>
@@ -174,13 +193,17 @@ export function RequestDetail() {
                 </div>
               ))}
             </div>
-            {request.specialInstruction && (
-              <div className={styles.instructions}>
-                <span className={styles.label}>Special instructions</span>
-                <p>{request.specialInstruction}</p>
+            <section className={styles.instructions} aria-labelledby="request-remarks-title">
+              <span className={styles.instructionsIcon} aria-hidden="true">
+                <HiOutlineInformationCircle />
+              </span>
+              <div className={styles.instructionsBody}>
+                <span id="request-remarks-title" className={styles.instructionsLabel}>Remarks</span>
+                <p>{formatRemarks(request.specialInstruction)}</p>
               </div>
-            )}
+            </section>
           </Card>
+
         </div>
 
         <div className={styles.rightColumn}>
@@ -199,7 +222,7 @@ export function RequestDetail() {
               label="Request status"
               value={
                 <Badge tone={REQUEST_TONE[request.status] || 'neutral'}>
-                  {requestStatus(request.status)}
+                  {requestStatusLabel(request.status)}
                 </Badge>
               }
             />
@@ -228,17 +251,31 @@ export function RequestDetail() {
               }
             />
           </Card>
+
+          {showProposalAction && (
+            <div className={styles.summaryAction}>
+              <span className={styles.summaryActionKicker}>Next action</span>
+              <strong>{account ? 'Submit a milestone plan' : 'Connect wallet to propose'}</strong>
+              <p>Send a checkpoint plan for the shipper to review.</p>
+              <Button onClick={openProposal} disabled={walletBusy}>
+                {walletBusy ? 'Connecting…' : proposalActionLabel}
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 
       <div className={styles.footer}>
-        <Button variant="secondary" onClick={goBack}>Back</Button>
-        {request.proposals && request.proposals.some(p => account && p.carrier.toLowerCase() === account.toLowerCase()) && (
+        {request.proposals && request.proposals.some(p => account && p.carrier?.toLowerCase() === account.toLowerCase()) && (
           <ChatButton requestId={request.id} label="Message Shipper" variant="primary" />
         )}
-        {request.status === 'Open' && !isShipper && !request.proposals.some(p => account && p.carrier.toLowerCase() === account.toLowerCase()) && (
-          <Button onClick={() => navigate(`/shipments/${request.id}/propose`)}>
-            Propose milestones
+        {showProposalAction && (
+          <Button
+            className={styles.footerProposalAction}
+            onClick={openProposal}
+            disabled={walletBusy}
+          >
+            {walletBusy ? 'Connecting…' : proposalActionLabel}
           </Button>
         )}
         {request.status === 'Open' && isShipper && (

@@ -1,40 +1,47 @@
-// src/context/ToastContext.jsx — CargoChain
-// Minimal toast queue. useToast() returns a `show(msg, kind)` function.
-// <Toast /> renders the live list (mounted once in Navbar.jsx).
+// src/context/ToastContext.jsx — CargoChain's Sonner-backed feedback bridge.
+// Existing callers keep using show(message, kind); Sonner owns the queue,
+// timing, dismissal, live-region announcements, and presentation.
 
-import { createContext, useCallback, useContext, useState } from 'react';
+import { createContext, useCallback, useContext, useMemo } from 'react';
+import { Toaster, toast as sonnerToast } from 'sonner';
+import { startTransactionToast } from '../utils/transactionToast.js';
 
 const ToastContext = createContext(null);
 
-let _id = 0;
+const TOAST_METHODS = {
+  success: sonnerToast.success,
+  error: sonnerToast.error,
+  warning: sonnerToast.warning,
+  info: sonnerToast.info,
+};
 
 export function ToastProvider({ children }) {
-  const [toasts, setToasts] = useState([]);
-
-  const show = useCallback((message, kind = 'info', ttl = 4000) => {
-    const id = ++_id;
-    setToasts((cur) => [...cur, { id, message, kind }]);
-    if (ttl > 0) {
-      setTimeout(() => {
-        setToasts((cur) => cur.filter((t) => t.id !== id));
-      }, ttl);
-    }
+  const show = useCallback((message, kind = 'info', ttl = undefined) => {
+    const method = TOAST_METHODS[kind] || sonnerToast;
+    const options = typeof ttl === 'number' ? { duration: ttl } : undefined;
+    return method(message, options);
   }, []);
 
-  const dismiss = useCallback((id) => {
-    setToasts((cur) => cur.filter((t) => t.id !== id));
-  }, []);
+  const dismiss = useCallback((id) => sonnerToast.dismiss(id), []);
+  const beginTransaction = useCallback((copy) => startTransactionToast(copy), []);
+
+  const value = useMemo(() => ({
+    show,
+    dismiss,
+    beginTransaction,
+  }), [beginTransaction, dismiss, show]);
 
   return (
-    <ToastContext.Provider value={{ show, dismiss }}>
+    <ToastContext.Provider value={value}>
       {children}
-      <div className="toast-container">
-        {toasts.map((t) => (
-          <div key={t.id} className={`toast toast-${t.kind}`} onClick={() => dismiss(t.id)}>
-            {t.message}
-          </div>
-        ))}
-      </div>
+      <Toaster
+        position="top-right"
+        closeButton
+        duration={4000}
+        visibleToasts={4}
+        offset={{ top: 16, right: 16, bottom: 16, left: 16 }}
+        toastOptions={{ className: 'cargochain-toast' }}
+      />
     </ToastContext.Provider>
   );
 }

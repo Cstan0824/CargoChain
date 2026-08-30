@@ -92,10 +92,11 @@ export async function requestAuthNonce(walletAddress) {
 /**
  * Verify SIWE signature and receive an 8-hour JWT.
  */
-export async function verifyAuthSiwe(message, signature) {
+export async function verifyAuthSiwe(message, signature, accountToken = null) {
   return request('/api/auth/verify', {
     method: 'POST',
     skipAuth: true,
+    headers: accountToken ? { 'X-CargoChain-Account-Token': accountToken } : undefined,
     body: { message, signature },
   });
 }

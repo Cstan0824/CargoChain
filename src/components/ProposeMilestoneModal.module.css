@@ -3,7 +3,7 @@
 .overlay {
   position: fixed;
   inset: 0;
-  z-index: 1000;
+  z-index: var(--z-modal);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -89,7 +89,13 @@
 }
 
 .closeBtn {
-  font-size: 24px;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-xl);
   line-height: 1;
   color: var(--text-muted);
   background: transparent;
@@ -104,7 +110,7 @@
 }
 
 .closeBtn:active {
-  transform: scale(0.9);
+  transform: scale(0.96);
 }
 
 .body {
@@ -174,7 +180,7 @@
 }
 
 .input {
-  min-height: 38px;
+  min-height: 44px;
   width: 100%;
   padding: 8px 12px;
   border: 1px solid var(--border);
@@ -212,8 +218,8 @@
 }
 
 .removeBtn {
-  min-height: 38px;
-  min-width: 38px;
+  min-height: 44px;
+  min-width: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -236,7 +242,7 @@
 }
 
 .removeBtn:active:not(:disabled) {
-  transform: scale(0.94);
+  transform: scale(0.96);
 }
 
 .removeIcon {
@@ -245,6 +251,7 @@
 }
 
 .addBtn {
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;

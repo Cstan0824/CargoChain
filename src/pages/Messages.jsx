@@ -9,7 +9,8 @@ import { ConversationList } from '../components/chat/ConversationList';
 import { ConversationHeader } from '../components/chat/ConversationHeader';
 import { MessageTimeline } from '../components/chat/MessageTimeline';
 import { MessageComposer } from '../components/chat/MessageComposer';
-import { listConversations } from '../services/chatReadService';
+import { Skeleton } from '../components/Skeleton.jsx';
+import { enrichConversationPreviews, listConversations } from '../services/chatReadService';
 import { getConversationAccess } from '../lib/chatApiClient';
 import { supabase } from '../lib/supabaseClient';
 import { useWallet } from '../context/Web3Context';
@@ -22,15 +23,15 @@ export function Messages() {
   const { conversationId } = useParams();
   const navigate = useNavigate();
   const { account, rpcChainId: chainId, provider } = useWallet();
-  const { contracts } = useContracts();
+  const { contracts, deployError } = useContracts();
   const { isChatAuthenticated } = useChatAuth();
   const [conversations, setConversations] = useState([]);
   const [loadingConversations, setLoadingConversations] = useState(false);
   const [conversationError, setConversationError] = useState(null);
   const [access, setAccess] = useState({ writable: false, reason: 'Checking access…' });
-  const [deliveredMessage, setDeliveredMessage] = useState(null);
+  const [timelineMessage, setTimelineMessage] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
-  const presentationById = useConversationPresentation(conversations, contracts);
+  const presentationById = useConversationPresentation(conversations, contracts, account);
 
   const displayNames = useMemo(() => Object.fromEntries(
     conversations.flatMap((conversation) => {
@@ -50,26 +51,36 @@ export function Messages() {
 
   const loadConversations = useCallback(async () => {
     const contractAddress = contracts?.deliveryEscrow?.target;
-    if (!isChatAuthenticated || !account || !chainId || !contractAddress) {
+    if (!isChatAuthenticated || !account || !chainId) {
       setConversations([]);
+      setLoadingConversations(false);
+      return;
+    }
+
+    if (!contractAddress) {
+      setConversations([]);
+      setConversationError(deployError || null);
+      setLoadingConversations(!deployError);
       return;
     }
 
     setLoadingConversations(true);
     setConversationError(null);
     try {
-      setConversations(await listConversations({ chainId, contractAddress }));
+      const visibleConversations = await listConversations({ chainId, contractAddress });
+      setConversations(await enrichConversationPreviews(visibleConversations));
     } catch (error) {
       setConversationError(error.message || 'Could not load conversations.');
     } finally {
       setLoadingConversations(false);
     }
-  }, [account, chainId, contracts, isChatAuthenticated]);
+  }, [account, chainId, contracts, deployError, isChatAuthenticated]);
 
   useEffect(() => {
     if (isChatAuthenticated) loadConversations();
     else {
       setConversations([]);
+      setLoadingConversations(false);
       setConversationError(null);
     }
   }, [isChatAuthenticated, loadConversations]);
@@ -98,17 +109,18 @@ export function Messages() {
 
     const channel = supabase.channel(`realtime_conversations_${wallet}`);
     channel
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, async (payload) => {
         const row = payload.new;
         if (!row?.conversation_id
           || Number(row.chain_id) !== Number(chainId)
           || String(row.contract_address || '').toLowerCase() !== contractAddress) return;
 
+        const [rowWithPreview] = await enrichConversationPreviews([row]);
         setConversations((previous) => {
           const existingIndex = previous.findIndex((item) => item.conversation_id === row.conversation_id);
           const next = existingIndex >= 0
-            ? previous.map((item, index) => (index === existingIndex ? { ...item, ...row } : item))
-            : [row, ...previous];
+            ? previous.map((item, index) => (index === existingIndex ? { ...item, ...rowWithPreview } : item))
+            : [rowWithPreview, ...previous];
           return next.sort((a, b) => new Date(b.last_message_at || b.created_at) - new Date(a.last_message_at || a.created_at));
         });
       })
@@ -118,17 +130,36 @@ export function Messages() {
   }, [account, chainId, contracts, isChatAuthenticated]);
 
   const selectedConversation = conversations.find((conversation) => conversation.conversation_id === conversationId);
-  const handleMessageSent = (message) => {
-    if (message) setDeliveredMessage(message);
+  const showInitialConversationLoading = loadingConversations && conversations.length === 0;
+  const handleMessagePending = (message) => {
+    if (message) setTimelineMessage(message);
+  };
+
+  const handleMessageSent = (message, metadata = {}) => {
+    if (message) {
+      setTimelineMessage({
+        ...message,
+        client_message_id: metadata.clientMessageId,
+        deliveryStatus: 'sent',
+        optimistic: false,
+      });
+    }
     refreshAccess(conversationId);
     loadConversations();
   };
 
+  const handleMessageFailed = (message) => {
+    if (message) setTimelineMessage(message);
+  };
+
   return (
     <div className={styles.page}>
-      <Topbar title="Messages" subtitle="Private conversations linked to each delivery." />
-      <ChatAuthGate>
-        <div className={styles.shell}>
+      <Topbar
+        title="Messages"
+        subtitle="Private conversations linked to each delivery."
+      />
+      <ChatAuthGate preview={<MessageWorkspacePreview />}>
+        <div className={styles.shell} data-testid="messages-workspace">
           {(!isMobile || !conversationId) && (
             <aside className={styles.sidebar}>
               <ConversationList
@@ -150,6 +181,7 @@ export function Messages() {
                     conversation={selectedConversation}
                     presentation={presentationById[conversationId]}
                     onBack={isMobile ? () => navigate('/messages') : null}
+                    onViewShipment={() => navigate(`/track/${selectedConversation.request_id}`)}
                   />
                   <MessageTimeline
                     key={conversationId}
@@ -160,19 +192,24 @@ export function Messages() {
                     lifecycleManager={contracts?.lifecycleManager}
                     reputationRegistry={contracts?.reputationRegistry}
                     provider={provider}
-                    appendedMessage={deliveredMessage}
+                    appendedMessage={timelineMessage}
                     displayNames={displayNames}
                   />
                   <MessageComposer
                     conversationId={conversationId}
                     isWritable={access.writable === true}
+                    senderWallet={account}
+                    onMessagePending={handleMessagePending}
                     onMessageSent={handleMessageSent}
+                    onMessageFailed={handleMessageFailed}
                   />
                 </>
+              ) : showInitialConversationLoading ? (
+                <ConversationWorkspaceSkeleton />
               ) : conversationId && !loadingConversations ? (
                 <EmptyConversation onClick={() => navigate('/messages')} unavailable />
               ) : (
-                <EmptyConversation />
+                <EmptyConversation emptyList={conversations.length === 0} />
               )}
             </main>
           )}
@@ -182,14 +219,64 @@ export function Messages() {
   );
 }
 
-function EmptyConversation({ unavailable = false, onClick }) {
+function ConversationWorkspaceSkeleton() {
+  return (
+    <div className={styles.workspaceSkeleton} aria-busy="true">
+      <span className="visually-hidden" role="status">Loading conversation workspace…</span>
+      <div className={styles.workspaceSkeletonHeader} aria-hidden="true">
+        <Skeleton variant="circle" width={36} height={36} />
+        <div>
+          <Skeleton width={150} height={14} />
+          <Skeleton width={210} height={11} />
+        </div>
+        <Skeleton width={92} height={32} />
+      </div>
+      <div className={styles.workspaceSkeletonTimeline} aria-hidden="true">
+        <Skeleton width="46%" height={50} />
+        <Skeleton className={styles.workspaceSkeletonOwn} width="58%" height={68} />
+        <Skeleton width="36%" height={44} />
+        <Skeleton className={styles.workspaceSkeletonOwn} width="42%" height={52} />
+      </div>
+      <div className={styles.workspaceSkeletonComposer} aria-hidden="true">
+        <Skeleton variant="block" width="100%" height={48} />
+        <Skeleton variant="block" width={44} height={44} />
+      </div>
+    </div>
+  );
+}
+
+function EmptyConversation({ unavailable = false, onClick, emptyList = false }) {
   const Icon = unavailable ? HiOutlineLockClosed : HiOutlineChatBubbleLeftRight;
   return (
     <div className={styles.emptyConversation}>
       <Icon aria-hidden="true" />
-      <h2>{unavailable ? 'Conversation unavailable' : 'Choose a delivery conversation'}</h2>
-      <p>{unavailable ? 'This conversation no longer belongs to the connected wallet.' : 'Select a conversation to read its delivery messages.'}</p>
+      <h2>{unavailable ? 'Conversation unavailable' : 'No conversation selected'}</h2>
+      <p>{unavailable
+        ? 'This conversation no longer belongs to the connected wallet.'
+        : emptyList
+          ? 'Shipment messages will appear here once a conversation starts.'
+          : 'Choose a conversation from the list to read and reply.'}</p>
       {onClick && <button type="button" onClick={onClick}>View conversations</button>}
+    </div>
+  );
+}
+
+function MessageWorkspacePreview() {
+  return (
+    <div className={`${styles.shell} ${styles.previewShell}`}>
+      <aside className={styles.sidebar}>
+        <div className={styles.previewHeader} />
+        <div className={styles.previewList}>
+          <span /><span /><span /><span />
+        </div>
+      </aside>
+      <main className={styles.conversation}>
+        <div className={styles.previewConversation}>
+          <span className={styles.previewLine} />
+          <span className={styles.previewLine} />
+          <span className={styles.previewLineShort} />
+        </div>
+      </main>
     </div>
   );
 }

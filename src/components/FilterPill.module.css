@@ -28,7 +28,7 @@
 
 .value { font-weight: var(--fw-semibold); }
 
-.caret { color: currentColor; transition: transform var(--dur-1) var(--ease); }
+.caret { width: 14px; height: 14px; color: currentColor; transition: transform var(--dur-1) var(--ease); }
 .pillOpen .caret { transform: rotate(180deg); }
 
 .menu {
@@ -43,7 +43,7 @@
   list-style: none;
   margin: 0;
   padding: 4px;
-  z-index: 30;
+  z-index: var(--z-dropdown);
   max-height: 240px;
   overflow-y: auto;
 }

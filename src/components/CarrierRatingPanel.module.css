@@ -1,24 +1,24 @@
 .actionBar { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: var(--s-3); margin-top: var(--s-5); padding: var(--s-4); border: 0; border-radius: var(--r-lg); background: linear-gradient(145deg, var(--primary-soft), var(--bg-surface)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 18%, transparent), 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 22px rgba(15, 23, 42, 0.06); }
 .actionCopy { display: contents; }
-.actionIcon { width: 44px; height: 44px; display: grid; place-items: center; color: var(--primary); background: var(--bg-surface); border-radius: var(--r-md); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 16%, transparent); font-size: 22px; }
+.actionIcon { width: 44px; height: 44px; display: grid; place-items: center; color: var(--primary); background: var(--bg-surface); border-radius: var(--r-md); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 16%, transparent); font-size: var(--fs-xl); }
 .actionCopy div { min-width: 0; display: grid; gap: 2px; }
 .actionKicker { color: var(--primary); font-size: var(--fs-xs); font-weight: var(--fw-bold); letter-spacing: 0.04em; text-transform: uppercase; }
 .actionCopy strong { color: var(--text-primary); font-size: var(--fs-sm); text-wrap: balance; }
 .actionCopy p { margin: 2px 0 0; color: var(--text-secondary); font-size: var(--fs-xs); line-height: 1.45; text-wrap: pretty; }
-.actionBar > button { min-height: 40px; height: 40px; flex: 0 0 auto; }
+.actionBar > button { min-height: 44px; flex: 0 0 auto; }
 .actionBar > button svg { width: 17px; height: 17px; }
-.overlay { position: fixed; inset: 0; z-index: 900; display: grid; place-items: center; padding: var(--s-5); background: rgba(15, 23, 42, .42); }
+.overlay { position: fixed; inset: 0; z-index: var(--z-modal); display: grid; place-items: center; padding: var(--s-5); background: rgba(15, 23, 42, .42); }
 .modal { width: min(100%, 560px); max-height: min(720px, calc(100vh - 40px)); overflow: auto; padding: var(--s-6); background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); }
 .modalHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s-4); margin-bottom: var(--s-5); }
 .kicker { display: block; color: var(--text-secondary); font-size: var(--fs-xs); font-weight: var(--fw-semibold); letter-spacing: .05em; text-transform: uppercase; }
 .modal h2 { margin: 2px 0 3px; font-size: var(--fs-lg); line-height: var(--lh-tight); }
-.closeButton { width: 32px; height: 32px; padding: 0; color: var(--text-secondary); background: transparent; border: 0; font-size: 25px; line-height: 1; }
+.closeButton { width: 44px; height: 44px; padding: 0; color: var(--text-secondary); background: transparent; border: 0; font-size: var(--fs-xl); line-height: 1; }
 .formBody { display: flex; flex-direction: column; gap: var(--s-5); }
 .formBody fieldset { margin: 0; padding: 0; border: 0; }
 .formBody legend { margin-bottom: var(--s-3); color: var(--text-primary); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
 .formBody legend span { color: var(--text-muted); font-weight: var(--fw-normal); }
 .starPicker { display: flex; gap: var(--s-2); }
-.starButton { display: grid; width: 42px; height: 42px; place-items: center; padding: 0; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--r-md); }
+.starButton { display: grid; width: 44px; height: 44px; place-items: center; padding: 0; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--r-md); }
 .starButton:hover, .starButton[aria-pressed="true"] { background: var(--warning-soft); border-color: #e8c47d; }
 .starButton svg { width: 23px; height: 23px; }
 .starFilled { color: #c58a1d; }

@@ -17,7 +17,7 @@ function getJwtSecret() {
   return secret;
 }
 
-function issueToken(rawAddress) {
+function issueToken(rawAddress, accountId = null) {
   const address = getAddress(rawAddress).toLowerCase();
   const secret = getJwtSecret();
   const now = Math.floor(Date.now() / 1000);
@@ -31,6 +31,7 @@ function issueToken(rawAddress) {
     iat: now,
     exp: now + JWT_EXPIRES_IN_SECONDS,
   };
+  if (accountId) payload.account_id = String(accountId);
 
   const token = jwt.sign(payload, secret, { algorithm: 'HS256' });
 
@@ -40,6 +41,7 @@ function issueToken(rawAddress) {
     expiresIn: JWT_EXPIRES_IN_SECONDS,
     expiresAt: new Date((now + JWT_EXPIRES_IN_SECONDS) * 1000).toISOString(),
     walletAddress: address,
+    accountId: accountId || null,
   };
 }
 
@@ -67,6 +69,7 @@ function verifyToken(token) {
 
   return {
     walletAddress: normalizedAddress,
+    accountId: decoded.account_id || null,
     claims: decoded,
   };
 }

@@ -11,10 +11,10 @@ export function RequireWallet({ children }) {
     return (
       <main>
         <h1>Wallet required</h1>
-        <p className="muted">Connect MetaMask to use this page.</p>
+        <p className="muted">Connect wallet to use this page.</p>
         {error && <p className="error">{error}</p>}
         <button onClick={connect} disabled={busy}>
-          {busy ? 'Connecting…' : 'Connect Wallet'}
+          {busy ? 'Connecting…' : 'Connect wallet'}
         </button>
       </main>
     );

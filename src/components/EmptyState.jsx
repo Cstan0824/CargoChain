@@ -4,11 +4,14 @@
 
 import styles from './EmptyState.module.css';
 
-export function EmptyState({ illustration, title, description, action }) {
+export function EmptyState({ illustration, icon: Icon, title, description, action, compact = false, className = '', ...rest }) {
   return (
-    <div className={styles.wrap}>
+    <div className={`${styles.wrap} ${compact ? styles.compact : ''} ${className}`} {...rest}>
       {illustration && (
         <img className={styles.illustration} src={illustration} alt="" />
+      )}
+      {!illustration && Icon && (
+        <span className={styles.icon} aria-hidden="true"><Icon /></span>
       )}
       {title && <h2 className={styles.title}>{title}</h2>}
       {description && <p className={styles.desc}>{description}</p>}
