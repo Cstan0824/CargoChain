@@ -63,7 +63,8 @@ describe('Account', () => {
     });
     expect(screen.queryByRole('button', { name: /recent activity/i })).toBeNull();
     expect(screen.getByText('Available balance')).toBeTruthy();
-    expect(screen.getAllByText('0 ETH')).toHaveLength(3);
+    expect(screen.getAllByText('0 ETH')).toHaveLength(1);
+    expect(screen.getAllByText('0 CARGO')).toHaveLength(3);
     expect(screen.getByRole('list', { name: 'Account roles' }).textContent).toBe('ShipperCarrier');
     expect(screen.queryByText('Profile setup')).toBeNull();
     expect(screen.queryByText('Registered')).toBeNull();

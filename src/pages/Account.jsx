@@ -14,6 +14,7 @@ import {
   HiOutlineXMark,
   HiStar,
 } from 'react-icons/hi2';
+import { parseEther } from 'ethers';
 import { useNavigate } from 'react-router-dom';
 import { Topbar } from '../components/Topbar.jsx';
 import { Card } from '../components/Card.jsx';
@@ -34,7 +35,7 @@ import { pickAvatar } from '../utils/avatar.js';
 import { loadCarrierReputationProfile } from '../services/reputationService.js';
 import { formatRatingAverage } from '../utils/reputation.js';
 import { CARGO_NETWORK_CONFIG } from '../utils/network.js';
-import { formatDate, formatEth, requestStatusLabel, REQUEST_TONE } from '../utils/format.js';
+import { formatCargo, formatDate, formatEth, requestStatusLabel, REQUEST_TONE } from '../utils/format.js';
 import {
   loadPaymentHistory,
   paymentActionLabel,
@@ -49,13 +50,16 @@ const MAX_DISPLAY_NAME_WORDS = 8;
 
 const EMPTY_SNAPSHOT = {
   balance: null,
+  cargoBalance: null,
   lockedEscrow: null,
   transactions: [],
   balanceError: null,
+  cargoError: null,
   lockedError: null,
   historyError: null,
   initialLoading: false,
   balanceLoading: false,
+  cargoLoading: false,
   lockedLoading: false,
   historyLoading: false,
 };
@@ -80,6 +84,8 @@ export function Account() {
   const [walletRevealed, setWalletRevealed] = useState(false);
   const [walletCopied, setWalletCopied] = useState(false);
   const [snapshot, setSnapshot] = useState(EMPTY_SNAPSHOT);
+  const [cargoAmount, setCargoAmount] = useState('');
+  const [cargoAction, setCargoAction] = useState(null);
   const snapshotRef = useRef(snapshot);
   const inFlightRef = useRef(null);
   const sourceRevisionRef = useRef(0);
@@ -89,6 +95,7 @@ export function Account() {
 
   const walletAddress = selectedWallet?.wallet_address || account || null;
   const deliveryEscrow = contracts?.deliveryEscrow;
+  const cargoToken = contracts?.cargoToken;
   const walletIdentityRegistered = Boolean(isRegistered && walletMatches && displayName);
   const profileName = walletIdentityRegistered ? displayName : 'Display name not set';
   const avatarSrc = pickAvatar(null, walletAddress);
@@ -109,6 +116,7 @@ export function Account() {
         ...previous,
         initialLoading: true,
         balanceLoading: true,
+        cargoLoading: true,
         lockedLoading: true,
         historyLoading: true,
         balanceError: null,
@@ -123,7 +131,7 @@ export function Account() {
     };
 
     try {
-      const balancePromise = provider.getBalance(walletAddress)
+    const balancePromise = provider.getBalance(walletAddress)
         .then((value) => updateSnapshot({
           balance: BigInt(value),
           balanceError: null,
@@ -133,6 +141,18 @@ export function Account() {
           balanceError: formatBalanceError(error),
           balanceLoading: false,
         }));
+      const cargoPromise = cargoToken
+        ? cargoToken.balanceOf(walletAddress)
+          .then((value) => updateSnapshot({
+            cargoBalance: BigInt(value),
+            cargoError: null,
+            cargoLoading: false,
+          }))
+          .catch((error) => updateSnapshot({
+            cargoError: formatBalanceError(error),
+            cargoLoading: false,
+          }))
+        : Promise.resolve();
       const lockedPromise = deliveryEscrow.getLockedEscrow(walletAddress)
         .then((value) => updateSnapshot({
           lockedEscrow: mapLockedEscrow(value),
@@ -154,12 +174,12 @@ export function Account() {
           historyLoading: false,
         }));
 
-      await Promise.all([balancePromise, lockedPromise, historyPromise]);
+      await Promise.all([balancePromise, cargoPromise, lockedPromise, historyPromise]);
       updateSnapshot({ initialLoading: false });
     } finally {
       if (inFlightRef.current === operation) inFlightRef.current = null;
     }
-  }, [chainId, deliveryEscrow, provider, walletAddress]);
+  }, [cargoToken, chainId, deliveryEscrow, provider, walletAddress]);
 
   useEffect(() => {
     const revision = ++sourceRevisionRef.current;
@@ -239,7 +259,51 @@ export function Account() {
     () => earningsPayments.reduce((total, payment) => total + BigInt(payment.amount), 0n),
     [earningsPayments],
   );
-  const financialError = snapshot.balanceError || snapshot.lockedError;
+  const financialError = snapshot.balanceError || snapshot.cargoError || snapshot.lockedError;
+
+  const runCargoAction = async (action) => {
+    if (!cargoToken || !signer || !provider || cargoAction) return;
+    let amount;
+    try {
+      amount = parseEther(cargoAmount.trim());
+    } catch {
+      show('Enter a valid CARGO amount.', 'error');
+      return;
+    }
+    if (amount <= 0n) {
+      show('Enter a CARGO amount greater than zero.', 'error');
+      return;
+    }
+
+    setCargoAction(action);
+    let transactionToast;
+    try {
+      transactionToast = startTransactionToast({
+        wallet: action === 'deposit' ? 'Confirm the ETH deposit in MetaMask…' : 'Confirm the CARGO redemption in MetaMask…',
+        submitted: action === 'deposit' ? 'Converting ETH to CARGO…' : 'Redeeming CARGO for ETH…',
+        success: action === 'deposit' ? 'CARGO balance updated.' : 'CARGO redeemed for ETH.',
+      });
+      const tx = await sendWalletContractTransaction({
+        contract: cargoToken,
+        method: action === 'deposit' ? 'deposit' : 'redeem',
+        args: action === 'deposit' ? [] : [amount],
+        overrides: action === 'deposit' ? { value: amount } : undefined,
+        signer,
+        provider,
+      });
+      transactionToast.submitted();
+      await tx.wait();
+      transactionToast.success();
+      setCargoAmount('');
+      await loadSnapshot({ initial: false, revision: sourceRevisionRef.current });
+    } catch (error) {
+      const message = formatWalletTransactionError(error, 'The CARGO wallet transaction failed.');
+      if (transactionToast) transactionToast.error(message);
+      else show(message, 'error');
+    } finally {
+      setCargoAction(null);
+    }
+  };
 
   if (!walletAddress) {
     return (
@@ -359,16 +423,60 @@ export function Account() {
             {financialError && <Button variant="secondary" size="sm" onClick={retrySnapshot}>Try again</Button>}
           </div>
 
+          <section className={styles.cargoWallet} aria-labelledby="cargo-wallet-title">
+            <div className={styles.cargoWalletHeader}>
+              <div>
+                <span className={styles.metricLabel}>Cargo wallet</span>
+                <h2 id="cargo-wallet-title">CARGO balance</h2>
+              </div>
+              <strong className={styles.cargoBalanceValue} data-numeric="true">
+                {snapshot.cargoLoading && snapshot.cargoBalance == null
+                  ? 'Loading…'
+                  : formatCargo(snapshot.cargoBalance ?? 0n)}
+              </strong>
+            </div>
+            <p className={styles.cargoWalletHint}>CARGO pays for delivery compensation, escrow, refunds, and tips. Keep ETH available for gas.</p>
+            <div className={styles.cargoWalletControls}>
+              <label htmlFor="cargo-amount">{cargoAction === 'redeem' ? 'CARGO to redeem' : 'ETH to convert'}</label>
+              <input
+                id="cargo-amount"
+                inputMode="decimal"
+                value={cargoAmount}
+                onChange={(event) => setCargoAmount(event.target.value)}
+                placeholder={cargoAction === 'redeem' ? '0.00 CARGO' : '0.00 ETH'}
+                disabled={Boolean(cargoAction) || !cargoToken}
+              />
+              <div className={styles.cargoWalletButtons}>
+                <Button
+                  size="sm"
+                  disabled={Boolean(cargoAction) || !cargoToken || !signer}
+                  onClick={() => runCargoAction('deposit')}
+                >
+                  Convert ETH to CARGO
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={Boolean(cargoAction) || !cargoToken || !signer}
+                  onClick={() => runCargoAction('redeem')}
+                >
+                  Redeem CARGO
+                </Button>
+              </div>
+            </div>
+            <span className={styles.cargoRate}>Fixed rate: 1 ETH = 10,000 CARGO</span>
+          </section>
+
           <div className={styles.financialGrid}>
             <FinancialMetric
               label="Locked escrow"
-              value={formatEth(snapshot.lockedEscrow?.totalLocked ?? 0n)}
+              value={formatCargo(snapshot.lockedEscrow?.totalLocked ?? 0n)}
               sub={snapshot.lockedEscrow ? `${snapshot.lockedEscrow.activeRequestCount} active request${snapshot.lockedEscrow.activeRequestCount === 1 ? '' : 's'}` : 'No escrow data'}
               loading={snapshot.lockedLoading && snapshot.lockedEscrow == null}
             />
             <FinancialMetric
               label="Released earnings"
-              value={formatEth(totalEarnings)}
+              value={formatCargo(totalEarnings)}
               sub={`${earningsPayments.length} payment${earningsPayments.length === 1 ? '' : 's'} received`}
               loading={snapshot.historyLoading && snapshot.transactions.length === 0}
             />
@@ -521,7 +629,7 @@ function TxHistoryTable({ rows, loading, error, onRetry, onRowClick, show }) {
                 </div>
               </td>
               <td><span className={styles.requestId}>#{String(row.requestId).padStart(4, '0')}</span></td>
-              <td className={styles.numeric}>{formatEth(row.amount)}</td>
+              <td className={styles.numeric}>{formatCargo(row.amount)}</td>
               <td>
                 <div className={styles.statusCell}>
                   <Badge tone={REQUEST_TONE[row.requestStatus] || 'neutral'}>{requestStatusLabel(row.requestStatus)}</Badge>
@@ -663,9 +771,10 @@ function mapLockedEscrow(result) {
 
 export function accountSnapshotsEqual(left, right) {
   if (String(left.balance ?? '') !== String(right.balance ?? '')) return false;
+  if (String(left.cargoBalance ?? '') !== String(right.cargoBalance ?? '')) return false;
   if (left.lockedEscrow?.totalLocked !== right.lockedEscrow?.totalLocked) return false;
   if (left.lockedEscrow?.activeRequestCount !== right.lockedEscrow?.activeRequestCount) return false;
-  if (left.balanceError !== right.balanceError || left.lockedError !== right.lockedError || left.historyError !== right.historyError || left.initialLoading !== right.initialLoading) return false;
+  if (left.balanceError !== right.balanceError || left.cargoError !== right.cargoError || left.lockedError !== right.lockedError || left.historyError !== right.historyError || left.initialLoading !== right.initialLoading) return false;
   const leftRows = left.transactions || [];
   const rightRows = right.transactions || [];
   if (leftRows.length !== rightRows.length) return false;

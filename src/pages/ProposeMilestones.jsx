@@ -36,7 +36,7 @@ import {
   proposalValidationMessage,
 } from '../utils/proposalPresentation.js';
 import {
-  formatEth,
+  formatCargo,
   formatDate,
   formatDaysLeft,
   requestStatus,
@@ -777,7 +777,7 @@ export function ProposeMilestones() {
                               )}
                             </div>
 
-                            {/* Column 2: Payout Percentage & calculated ETH */}
+                            {/* Column 2: Payout Percentage and calculated CARGO */}
                             <div className={styles.field}>
                               <label className={styles.label} htmlFor={`${m.id}-payoutPercentage`}>Payout</label>
                               <div className={styles.percentWrap}>
@@ -802,7 +802,7 @@ export function ProposeMilestones() {
                                 <span className={styles.percentUnit}>%</span>
                               </div>
                               <span className={styles.calculatedEth}>
-                                {payoutWei > 0n ? formatEth(payoutWei) : '0.00 ETH'}
+                                {payoutWei > 0n ? formatCargo(payoutWei) : '0.00 CARGO'}
                               </span>
                               {allocation.firstInvalidIndex === i && allocation.firstInvalidField === 'payoutPercentage' && (
                                 <span id={`${m.id}-payout-error`} className={styles.fieldError} role="alert">{proposalValidationMessage(allocation)}</span>
@@ -896,7 +896,7 @@ export function ProposeMilestones() {
                 <HiOutlineCurrencyDollar className={styles.infoIcon} />
                 <div>
                   <div className={styles.infoLabel}>Planned budget</div>
-                  <strong className={styles.infoVal}>{formatEth(request.proposedAmountWei)}</strong>
+                  <strong className={styles.infoVal}>{formatCargo(request.proposedAmountWei)}</strong>
                 </div>
               </div>
               <div className={styles.infoDivider} />

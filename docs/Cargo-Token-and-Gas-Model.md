@@ -3,7 +3,9 @@
 **Status:** Planned — not yet implemented  
 **Decision date:** 2026-08-22  
 **Scope:** Replace ETH as CargoChain's business payment currency with a fixed-rate, ETH-backed ERC-20 token; retain ETH as the native gas currency  
-**Coordination note:** This document records the agreed design while another teammate is working on the repository. Implementation should begin only after the active work is merged and the affected contracts are re-inspected.
+**Coordination note:** The Pinata/IPFS proof implementation was merged in commit `51ada6f`. CARGO and gas allocation remain planned. Their implementation should preserve the merged encrypted-proof flow and re-inspect the affected contract and API interfaces before changes.
+
+The current proof-storage baseline uses browser-side AES-256-GCM encryption and Pinata Public IPFS for new images. Supabase Postgres remains responsible for private chat and wrapped proof-key records, not new proof-image uploads. Existing HTTPS/Supabase proof references remain readable for compatibility. See [IPFS-Pinata-Execution-Plan.md](IPFS-Pinata-Execution-Plan.md) for the selected storage design.
 
 ## 1. Purpose
 
@@ -152,13 +154,17 @@ The ETH held by `CargoToken` is collateral. It must not be reused as delivery es
 
 ### 3.4 Decimals and display
 
-Recommended representation:
+Agreed representation:
 
 - ERC-20 decimals: `18`
+- Token name: `CargoChain CARGO`
+- Token symbol: `CARGO`
 - Normal UI precision: `2` decimal places
 - Display format: `1,250.50 CARGO`
 
 With both ETH and CARGO using 18 decimal places, depositing one wei mints `10,000` CARGO base units. Redemption must define an explicit divisibility or dust rule so integer division cannot silently lose user value.
+
+The agreed redemption rule is strict divisibility. A redemption amount must be divisible by `10,000` CARGO base units. The contract reverts for smaller non-divisible amounts, and the UI displays the largest redeemable amount while leaving any sub-unit remainder in the wallet.
 
 ## 4. Planned contract architecture
 
@@ -174,6 +180,8 @@ A new contract will provide:
 - Reentrancy protection
 - Failed ETH-transfer handling
 - Transparent reserve information
+
+ETH enters the token only through an explicit `deposit()` call. Direct ETH transfers to `receive()` or `fallback()` revert so an accidental transfer cannot create an unclear conversion or leave funds without a corresponding mint event.
 
 Conceptual events:
 
@@ -226,6 +234,11 @@ The delivery request does not need a per-request payment-token field because eve
 4. Return it to the original funder if rejected or expired.
 
 This contract-to-contract custody path is one of the most sensitive parts of the migration.
+
+The CARGO migration uses a fresh local deployment. Existing ETH requests, balances,
+proof-key records, and chat records are not silently converted. Earlier Git commits
+remain the rollback point for the ETH version, and deployment instructions must make
+the reset boundary explicit.
 
 ### 4.4 Other contract modules
 
@@ -294,9 +307,9 @@ The following do not submit blockchain state changes and therefore require no ga
 - Reading transaction events
 - SIWE message signatures
 - Sending or reading off-chain chat messages
-- Uploading a file directly to Supabase
+- Encrypting an evidence file in the browser and uploading its ciphertext to Pinata/IPFS
 
-A proof upload only incurs blockchain gas when its proof reference is submitted on-chain.
+A proof upload only incurs blockchain gas when its proof reference is submitted on-chain. Pinning and gateway service costs are separate from blockchain gas and are not part of the planned gas reimbursement.
 
 ### 6.3 Gas cannot normally be paid in CARGO
 
@@ -564,6 +577,9 @@ enum AmendmentGasPolicy {
 }
 ```
 
+The frontend defaults to `EachPaysOwn`. A requester must explicitly choose
+`RequesterCoversResponse` when staging a response allowance.
+
 #### `EachPaysOwn`
 
 ```text
@@ -704,7 +720,9 @@ Proof URL/reference:         maximum 512 bytes
 Proof remark:                maximum 500 bytes
 ```
 
-The actual image remains in Supabase. Only its reference and related metadata are recorded on-chain.
+New proof images are encrypted in the browser and pinned to IPFS through Pinata. The contract stores the canonical `ipfs://` reference with encryption and integrity metadata, not the image bytes or decryption key. Express authorizes proof-key access against the current request and milestone; Supabase Postgres stores only the wrapped key and associated metadata. Authorized browsers retrieve and decrypt the evidence in memory.
+
+The merged uploader currently supports JPEG, PNG, WebP, GIF, AVIF, and BMP images up to 2 MiB. The CARGO migration should preserve that validation and existing HTTPS proof compatibility. The planned one-reference contract limit and proof-withdrawal rules still need implementation, with any URI/API changes coordinated with the encrypted-proof readers.
 
 ### 13.3 Proof terminology
 
@@ -768,6 +786,10 @@ Resetting the withdrawal counter must never reset `proofSubmissionReimbursed`.
 ### 13.7 History without unbounded active storage
 
 The milestone stores only its current proof. A submission counter and events should preserve an auditable sequence without requiring later critical functions to iterate through an unbounded proof-history array.
+
+Only the proof reference currently recorded on-chain is decryptable through the proof
+key API. Withdrawn or replaced proofs remain represented by events, but historical
+proof images are not released by the v1 key endpoint.
 
 Conceptual events:
 
@@ -865,86 +887,233 @@ Implementation must explicitly cover:
 - Contract and test READMEs
 - Security guidance
 
-## 16. Deferred implementation phases
+## 16. CARGO implementation phases
 
-### Phase 1 — Reinspect and freeze APIs
+**Plan revised:** 2026-08-31. All nine phases below remain planned. This sequence supersedes the earlier phase order in this document and is separate from the desktop UI phase documents.
 
-- Pull the teammate's completed work.
-- Reinspect all current contract APIs and statuses.
-- Resolve overlapping changes before editing payment contracts.
-- Freeze CARGO conversion, proof, allowance, and amendment rules.
-- Add this proposal to the main architecture references.
+The user chose to skip the pre-implementation live IPFS smoke test and use the merged teammate implementation as the baseline. That test is not a prerequisite for Phase 1 and must not be described as passed. This does not remove automated regression tests for CARGO changes that touch the proof workflow.
 
-### Phase 2 — Gas benchmarking and explicit limits
+### Phase overview
 
-- Measure successful proof-submission gas with minimum and maximum valid inputs.
-- Measure amendment accept/reject gas.
-- Measure CARGO conversion and redemption gas.
-- Choose gas-unit caps with documented safety margins.
-- Choose base-fee floor and priority-fee buffer.
-- Finalize URL, remark, milestone-name, item, and amendment input limits.
+| Phase | Deliverable | Main risk |
+|---|---|---|
+| 1 | Baseline review and agreed APIs/accounting | Conflicting assumptions between contracts and IPFS |
+| 2 | Backed CARGO token | Collateral loss or incorrect redemption |
+| 3 | Bounded proposals and proof lifecycle | Blocked acceptance, stale review, or broken key access |
+| 4 | CARGO delivery and amendment settlement | Incorrect transfers or refunds across two contracts |
+| 5 | Operational gas allowance | Underfunding, repeated claims, or exhausted future reserves |
+| 6 | Amendment response reimbursement | Mixing funders, response budgets, and delivery compensation |
+| 7 | Cargo Wallet and payment UI | Wrong units, allowances, or wallet transaction sequencing |
+| 8 | Cross-module integration | Stale deployments or inconsistent proof/chat/reputation state |
+| 9 | Final verification and documentation | Untested settlement branches and inaccurate submission claims |
 
-### Phase 3 — CargoToken contract
+Phases 4, 5, and 6 carry the largest payment and accounting risk. Phase 7 also touches many files, but it should consume contract rules already established by those phases.
 
-- Implement ERC-20 token behaviour.
-- Implement ETH deposit and fixed-rate minting.
-- Implement CARGO burning and ETH redemption.
-- Protect collateral and redemption.
-- Add token-specific tests and invariant checks.
+### Working rules for every phase
 
-### Phase 4 — CARGO escrow migration
+- Start each phase only after the user authorizes it. Recording this plan does not start implementation.
+- Keep contract changes and their focused tests together; do not postpone testing until Phase 9.
+- Prefer an isolated test Ganache instance. Do not reset the user's demonstration chain merely to run tests.
+- Preserve the user's local changes and existing stash. Do not apply the documentation stash blindly over newer files.
+- Report which changes need redeployment. A new deployment does not migrate old requests, ETH escrow, CARGO balances, or proof-key identities automatically.
+- Check deployed bytecode size after substantial contract changes. If another contract split is needed, explain it before expanding the architecture.
+- At each phase handoff, report changes, verification results, manual checks, unresolved issues, and redeployment requirements.
 
-- Deploy CargoToken before escrow.
-- Pass the token address into payment-related contracts.
-- Replace native ETH funding, payout, refund, and tip paths.
-- Update payment events and summaries.
-- Verify contract sizes.
+### Phase 1: Confirm the baseline and settle contract details
 
-### Phase 5 — Lifecycle and amendment migration
+Scope:
 
-- Replace staged amendment ETH with staged CARGO.
-- Implement response gas policies.
-- Implement mandatory response allowance calculations.
-- Return unused/expired staged CARGO correctly.
-- Add allowance for newly created checkpoint work.
+- Use commit `51ada6f` and its Pinata/IPFS implementation as the starting proof-storage design. Do not repeat the skipped live IPFS smoke test as an entry gate.
+- Inspect the current escrow, lifecycle, reputation, proof API, and `/account` integrations.
+- Record existing contract sizes and current regression-test results without modifying live services.
+- Agree the CARGO constructor links, token approval spenders, payment methods, events, and amount units.
+- Define separate accounting for delivery compensation, operational allowance, pending amendment compensation, and amendment response allowance.
+- Settle redemption divisibility and dust handling. Users must not silently lose token value through integer rounding.
+- Settle how a larger operational allowance affects the covered gas-price cap and how top-ups affect remaining checkpoints.
+- Define historical proof access after withdrawal or replacement. The merged key endpoint checks the current on-chain proof reference; retained database keys alone do not guarantee historical access.
+- Preserve the chosen Pinata provider, encryption format, wrapped-key storage, and legacy HTTPS compatibility.
 
-### Phase 6 — Bounded execution and proof rules
+Primary sources: `contracts/`, `server/services/chainReader.js`, `server/routes/proofs.js`, `src/lib/proofApiClient.js`, `src/pages/Account.jsx`, and this document.
 
-- Remove proposal-history iteration from acceptance.
-- Add accepted-proposal identity and effective proposal status.
-- Enforce 10 initial and 20 total milestones.
-- Enforce one proof file/reference.
-- Add five proof withdrawals per review round.
-- Preserve last rejection state and proof timeline events.
-- Ensure proof reimbursement never resets.
+Completion gate: the agreed APIs, reserve formulas, fund ownership, proof compatibility, and deployment approach are documented in the existing CARGO plan. Any unresolved financial choice is raised before implementation depends on it.
 
-### Phase 7 — Operational gas allowance
+### Phase 2: Build CargoToken
 
-- Calculate mandatory minimum allowance on-chain.
-- Allow shipper-provided buffer and active top-ups.
-- Implement measured-and-capped reimbursement.
-- Protect future-action reserves.
-- Reimburse only first successful proof submission per checkpoint.
-- Refund unused allowance on every terminal path.
+Scope:
 
-### Phase 8 — Cargo Wallet and frontend currency migration
+- Add ERC-20 balances, transfers, allowances, and metadata with 18 decimals.
+- Accept ETH deposits and mint at the fixed rate of `1 ETH = 10,000 CARGO`.
+- Burn CARGO during redemption and return the matching ETH under the Phase 1 rounding rule.
+- Add conversion/redemption events, failed-transfer handling, and reentrancy protection.
+- Prevent unbacked minting and administrative withdrawal of ETH reserves.
+- Keep the existing shipment payment flow unchanged during this isolated token phase.
 
-- Add CARGO/ETH balance display.
-- Add conversion and redemption flows.
-- Add exact ERC-20 approval flow.
-- Replace ETH business values throughout the UI.
-- Retain clear ETH gas-balance information and warnings.
-- Display delivery compensation and operational allowances separately.
+Primary files: new `contracts/CargoToken.sol` and token-specific Truffle tests. Add only the dependency versions needed for the selected standard ERC-20 implementation.
 
-### Phase 9 — Full verification and documentation
+Verification:
 
-- Run complete Truffle and frontend test suites.
-- Test with two browser profiles and separate Ganache accounts.
-- Test underfunding, overfunding, top-up, reimbursement, and refund scenarios.
-- Test many historical proposals without affecting acceptance.
-- Test proof withdrawal and rejection cycles.
-- Check bytecode size and production build.
-- Update all human-facing documentation and API references.
+- Correct deposit and redemption ratios at small and large values.
+- ERC-20 transfers and insufficient balance/allowance failures.
+- Correct dust handling, failed redemption rollback, and reentrancy protection.
+- Every outstanding CARGO redemption liability remains covered after sequences of deposits, transfers, and redemptions.
+
+Completion gate: the token tests pass independently and no owner action can remove backing or create unbacked supply.
+
+### Phase 3: Bound proposal processing and add proof controls
+
+Scope:
+
+- Record the accepted proposal ID and remove the acceptance loop over all historical proposals.
+- Define effective rejection for non-selected proposals while preserving explicitly rejected or revoked history.
+- Enforce at most 10 initial milestones and 20 total milestones after amendments.
+- Enforce exactly one proof reference per submission and bounded URI/remark sizes compatible with the encrypted IPFS URI.
+- Prefer retaining the `proofUris` array interface with a length-one rule initially, unless Phase 1 identifies a reason to change it. This limits unnecessary changes to the merged proof readers.
+- Add carrier proof withdrawal, five withdrawals per review round, and reset on shipper rejection.
+- Preserve the previous rejection reason when a corrected proof is withdrawn.
+- Add submission identity and audit events. Reimbursement eligibility must not reset when proof state changes.
+- Protect against stale shipper review, so a transaction prepared for one proof cannot unknowingly approve a replacement.
+- Coordinate any changed proof-state reads with the existing key-authorization service.
+
+Verification:
+
+- Acceptance remains executable with a large historical proposal set.
+- Proposal and amendment milestone limits are enforced on-chain.
+- Unauthorized, paid, terminal, and out-of-window proof withdrawals fail.
+- The sixth withdrawal in a round fails; rejection resets only the withdrawal counter.
+- Stale review and stale proof-key requests do not authorize the wrong evidence.
+
+Completion gate: bounded contract actions and the proof state machine pass focused tests without weakening IPFS participant checks.
+
+### Phase 4: Migrate delivery payments to CARGO
+
+This phase changes `DeliveryEscrow` and `LifecycleManager` together. Gas reimbursement is not enabled yet.
+
+Checkpoint 4A, token wiring and funding:
+
+- Deploy CargoToken before payment contracts and pass the same token address to both.
+- Replace payable proposal acceptance with CARGO allowance validation and `safeTransferFrom` funding.
+- Keep the advertised request amount, checkpoint allocations, and payment-summary units consistent.
+- Reject accidental native ETH on business-payment calls rather than silently retaining it.
+
+Checkpoint 4B, delivery settlement:
+
+- Migrate checkpoint payouts, partial refunds, mutual-cancellation settlement, deadline refunds, and completion tips to CARGO.
+- Keep tips separate from delivery escrow totals.
+- Keep released compensation final; it cannot be refunded again to the shipper.
+- Reserve separate accounting fields for later gas budgets without allowing them to enter checkpoint compensation.
+
+Checkpoint 4C, amendment custody:
+
+- Migrate shipper-staged amendment funds to CARGO.
+- Collect carrier-requested compensation from the shipper on amendment acceptance.
+- Transfer accepted staged funding into escrow with clearly defined token approvals or transfers between contracts.
+- Return rejected, withdrawn, and expired staged compensation to its original funder.
+- Preserve stale-progress checks, negotiation locks, and stable checkpoint identities.
+
+Primary files: `DeliveryEscrow.sol`, `LifecycleManager.sol`, their interfaces, `PaymentEvents.sol`, migrations, and corresponding contract tests.
+
+Completion gate: the existing financial scenarios pass with CARGO, aggregate liabilities match contract token balances, and all linked contracts compile and deploy within size limits. Any temporary frontend incompatibility must be identified before the user runs this intermediate branch.
+
+### Phase 5: Add operational allowance and reimbursement
+
+Checkpoint 5A, minimum reserve and coverage:
+
+- Calculate and enforce the mandatory minimum allowance when a proposal is accepted.
+- Save the request's agreed gas-price coverage and future-action reserves.
+- Permit a larger refundable budget and shipper top-ups, but not withdrawals that reduce active coverage.
+- Keep reimbursement funds separate from compensation and from other requests' balances.
+
+Checkpoint 5B, measurement and payouts:
+
+- Benchmark the new CARGO proof-submission path using minimum and maximum permitted IPFS references and remarks.
+- Select and document the gas-unit caps, overhead, gas-price floor, priority buffer, and absolute safety caps.
+- Implement measured-and-capped CARGO reimbursement for the first successful on-chain proof submission per milestone.
+- Preserve the minimum reserve for future eligible actions.
+- Exclude Pinata service charges, file encryption, proof withdrawals, repeat submissions, and failed transactions.
+
+Checkpoint 5C, terminal settlement:
+
+- Return unused operational allowance on completion, mutual cancellation, and deadline refund.
+- Ensure settlement cannot double-refund an allowance or consume another request's reserve.
+- Define and test capped payout behaviour when the actual gas price exceeds funded coverage.
+
+Verification: underfunding fails; extra funding remains refundable; gas-price manipulation and repeated claims cannot drain the budget; top-ups preserve accounting; later checkpoints retain their reserve.
+
+Completion gate: measured reimbursements and all remaining liabilities reconcile with funded CARGO. Final gas constants must be rechecked after Phase 6 and final integration if those changes affect measured execution.
+
+### Phase 6: Add amendment response gas allocation
+
+Checkpoint 6A, policy and funding:
+
+- Add `EachPaysOwn` and `RequesterCoversResponse` to formal amendment records.
+- Require the calculated minimum response allowance when reimbursement is offered.
+- Record the response-budget funder separately from the funder of additional delivery compensation.
+- Support both shipper-requested and carrier-requested amendments without silently deducting costs from existing payouts.
+
+Checkpoint 6B, response and refund:
+
+- Reimburse one successful acceptance or rejection under the selected policy.
+- Cap measured gas and gas price and return the unused response allowance to its funder.
+- Return all unused response allowance after withdrawal or unanswered expiry.
+- Preserve rollback on invalid responses and stale amendment acceptance.
+
+Checkpoint 6C, new carrier work:
+
+- Require operational allowance for each newly added checkpoint.
+- Do not add another proof allowance for a deadline-only change or an existing-checkpoint top-up.
+- Treat a counteroffer as a new formal amendment after the previous one closes; no separate counteroffer contract is required.
+
+Verification: exercise both policies, both requester roles, acceptance, rejection, withdrawal, expiry, stale progress, new checkpoints, and separate funder refunds. Benchmark the final accept/reject paths.
+
+Completion gate: every response and compensation budget has an identifiable owner and settlement path, and reimbursement never uses existing checkpoint compensation.
+
+### Phase 7: Cargo Wallet and payment interface
+
+Scope:
+
+- Use the current canonical `/account` page rather than building on the retired Profile/Funds routes.
+- Add CARGO balance, ETH gas balance, conversion, redemption, and low-ETH warnings.
+- Offer `Add CARGO to MetaMask` if useful for the demonstration.
+- Introduce explicit CARGO parsing/formatting helpers; retain ETH formatting only for native gas and conversion.
+- Show the token approval and funding stages separately, approving only the required amount for the correct spender.
+- Update Marketplace, request creation, proposal editing/review, My Shipments, Track, payment history, amendments, refunds, and tips.
+- Show compensation, minimum allowance, selected allowance, and total funding as separate values.
+- Provide response gas-policy controls and operational top-up controls.
+- Add proof-withdrawal controls, remaining-round count, and reimbursement state from Phase 3 onward.
+- If a minimum funding quote changes before execution, refresh it and ask for confirmation rather than silently increasing the amount.
+
+Completion gate: users can perform all CARGO actions through the current desktop interface with clear transaction stages, accurate units, and no duplicate legacy payment paths.
+
+### Phase 8: Integrate proof, chat, and reputation
+
+Scope:
+
+- Verify compatibility of CARGO-era request/checkpoint reads with the merged proof API and key service.
+- Ensure withdrawal/replacement cannot attach an old key or review to the wrong submission.
+- Preserve encryption, integrity metadata, legacy HTTPS viewing, and participant restrictions.
+- Format payment, amendment, tip, reimbursement, and allowance-refund activity in CARGO.
+- Keep chat events filtered to the correct request/carrier pair.
+- Keep reputation eligibility tied to completed requests, independent of CARGO balances and gas compensation.
+- Validate deployment links for the token, escrow, lifecycle, and reputation contracts.
+- Keep conversation and proof-key identities scoped to the correct chain and escrow deployment. Do not delete or silently reassign old records.
+
+Completion gate: server and frontend integration tests agree on request state, asset units, proof identity, and participant access. The skipped pre-implementation live IPFS smoke test remains a recorded scope choice, not a passed test.
+
+### Phase 9: Final verification and documentation
+
+Scope:
+
+- Run token, escrow, lifecycle, reputation, server, and frontend regression suites.
+- Test conversion/redemption, unauthorized calls, insufficient balance/allowance, and failed transfer rollback.
+- Test both amendment gas policies and every operational/response allowance settlement path.
+- Stress proposal-history growth, checkpoint limits, proof withdrawal rounds, rejection resets, and repeated reimbursement attempts.
+- Rebenchmark final reimbursed actions and record the difference between measured reimbursement and receipt fees.
+- Check final bytecode size and the production build.
+- Prepare the two-wallet manual scenario in Section 17 and record what was actually tested. Do not mark steps complete from code inspection alone.
+- Update the existing API, architecture, business-flow, security, feature, and test documents to match the final implementation.
+- Preserve unfinished reputation and other future ideas instead of deleting them during documentation cleanup.
+
+Completion gate: no required accounting or authorization test remains failing, reported limitations match the code, and the user receives the final manual-test checklist plus deployment instructions. Report any unperformed live checks explicitly.
 
 ## 17. Required manual end-to-end scenario
 
@@ -969,19 +1138,27 @@ Implementation must explicitly cover:
 
 ## 18. Items still requiring benchmark decisions
 
-The following values are intentionally not finalized in this document:
+The initial proof-submission constants selected for the current local
+implementation are:
 
-- Exact gas-unit cap for proof submission
+- Proof gas-unit cap: `250,000`
+- Measurement overhead: `50,000` gas units
+- Minimum gas-price floor: `2 gwei`
+- Priority-fee buffer: `1 gwei`
+- Maximum proof reimbursement per action: `10 CARGO`
+
+These values still need a final receipt-versus-measurement benchmark after the
+remaining payment paths are integrated.
+
+The following values still require benchmark or compatibility decisions:
+
 - Exact gas-unit cap for amendment responses
-- Minimum gas-price floor
-- Priority-fee buffer
-- Reimbursement overhead constant
 - Maximum optional allowance or coverage multiplier
 - Exact URI, remark, and other string limits after measuring current URLs and UI validation
 - Exact dust/divisibility rule for CARGO redemption
 - Whether direct ETH transfers to CargoToken automatically convert or must use an explicit function
 
-These values must be derived from the final implementation and automated gas measurements, not guessed while another teammate is changing the repository.
+These values must be derived from the final CARGO implementation and automated gas measurements. Proof-reference limits must accommodate the merged IPFS URI format and its encryption and integrity metadata.
 
 ## 19. Final agreed model
 

@@ -43,7 +43,7 @@ import { useDialogFocus } from '../hooks/useDialogFocus.js';
 import { useChatAuth } from '../context/ChatAuthContext.jsx';
 import {
   formatDate,
-  formatEth,
+  formatCargo,
   formatRemarks,
   hasRemarks,
   milestoneStatusLabel,
@@ -55,6 +55,7 @@ import { loadEncryptedProof } from '../lib/proofApiClient.js';
 import { getConfiguredGatewayBases, parseProofUri } from '../utils/proofUri.js';
 import {
   formatWalletTransactionError,
+  ensureTokenAllowance,
   sendWalletContractTransaction,
 } from '../utils/walletTransaction.js';
 import { startTransactionToast } from '../utils/transactionToast.js';
@@ -303,15 +304,21 @@ export function Track() {
       )) return;
 
       transactionToast = startTransactionToast({
-        wallet: 'Confirm proposal and escrow funding in MetaMask…',
+        wallet: 'Confirm CARGO allowance and escrow funding in MetaMask…',
         submitted: 'Funding shipment…',
         success: 'Proposal accepted and escrow funded.',
+      });
+      await ensureTokenAllowance({
+        token: contracts.cargoToken,
+        spender: contracts.deliveryEscrow.target,
+        amount: proposedAmount,
+        signer,
+        provider,
       });
       const tx = await sendWalletContractTransaction({
         contract: contracts.deliveryEscrow,
         method: 'approveAndFund',
         args: [BigInt(shipment.id), BigInt(proposalId)],
-        overrides: { value: proposedAmount },
         signer,
         provider,
       });
@@ -378,7 +385,7 @@ export function Track() {
     try {
       tipValue = parseEther(tipAmountEth.trim());
     } catch {
-      show('Enter a valid tip amount in ETH.', 'error');
+      show('Enter a valid tip amount in CARGO.', 'error');
       return false;
     }
     if (tipValue <= 0n) {
@@ -407,15 +414,21 @@ export function Track() {
       }
 
       transactionToast = startTransactionToast({
-        wallet: 'Confirm the completion tip in MetaMask…',
+        wallet: 'Confirm the CARGO allowance and completion tip in MetaMask…',
         submitted: 'Sending completion tip…',
         success: 'Completion tip sent.',
+      });
+      await ensureTokenAllowance({
+        token: contracts.cargoToken,
+        spender: contracts.deliveryEscrow.target,
+        amount: tipValue,
+        signer,
+        provider,
       });
       const tx = await sendWalletContractTransaction({
         contract: contracts.deliveryEscrow,
         method: 'tipCarrier',
-        args: [BigInt(shipment.id)],
-        overrides: { value: tipValue },
+        args: [BigInt(shipment.id), tipValue],
         signer,
         provider,
       });
@@ -469,6 +482,15 @@ export function Track() {
         submitted: 'Cancelling shipment request…',
         success: 'Request cancelled.',
       });
+      if (value > 0n && (method === 'requestAmendment' || method === 'acceptAmendment')) {
+        await ensureTokenAllowance({
+          token: contracts.cargoToken,
+          spender: contracts.lifecycleManager.target,
+          amount: value,
+          signer,
+          provider,
+        });
+      }
       const tx = await sendWalletContractTransaction({
         contract: contracts.deliveryEscrow,
         method: 'cancelRequest',
@@ -590,7 +612,7 @@ export function Track() {
   const acceptMutualCancellation = async (cancellationId) => {
     if (!await confirmAction({
       title: 'Accept shipment cancellation?',
-      message: `${formatEth(shipment.released)} already released remains with the carrier. ${formatEth(shipment.remaining)} remaining escrow will return to the shipper.`,
+      message: `${formatCargo(shipment.released)} already released remains with the carrier. ${formatCargo(shipment.remaining)} remaining escrow will return to the shipper.`,
       confirmLabel: 'Accept cancellation',
       tone: 'danger',
     })) return false;
@@ -676,7 +698,6 @@ export function Track() {
         contract: contracts.lifecycleManager,
         method,
         args,
-        overrides: value > 0n ? { value } : undefined,
         signer,
         provider,
       });
@@ -731,7 +752,7 @@ export function Track() {
       ],
       value: isShipper ? additionalFunding : 0n,
       progressMessage: isShipper && additionalFunding > 0n
-        ? `Staging ${formatEth(additionalFunding)} with the amendment request...`
+        ? `Staging ${formatCargo(additionalFunding)} with the amendment request...`
         : 'Recording the amendment request on-chain...',
       successMessage: 'Amendment request sent.',
     });
@@ -742,10 +763,10 @@ export function Track() {
     if (!await confirmAction({
       title: 'Accept this agreement change?',
       message: shipperMustFund && amendment.additionalFunding > 0n
-        ? `${formatEth(amendment.additionalFunding)} will be added to escrow and the proposed agreement will take effect.`
+        ? `${formatCargo(amendment.additionalFunding)} will be added to escrow and the proposed agreement will take effect.`
         : 'The proposed deadline and milestone funding plan will replace the current agreement terms.',
       confirmLabel: shipperMustFund && amendment.additionalFunding > 0n
-        ? `Add ${formatEth(amendment.additionalFunding)} and accept`
+        ? `Add ${formatCargo(amendment.additionalFunding)} and accept`
         : 'Accept agreement change',
     })) return false;
     return sendAmendmentTransaction({
@@ -790,7 +811,7 @@ export function Track() {
 
     if (!await confirmAction({
       title: 'Claim remaining escrow?',
-      message: `${formatEth(shipment.remaining)} will be returned to the shipper wallet. This refund cannot be reversed.`,
+      message: `${formatCargo(shipment.remaining)} will be returned to the shipper wallet. This refund cannot be reversed.`,
       confirmLabel: 'Claim refund',
       tone: 'danger',
     })) return;
@@ -821,7 +842,7 @@ export function Track() {
       transactionToast = startTransactionToast({
         wallet: 'Confirm the escrow refund in MetaMask…',
         submitted: 'Refunding remaining escrow…',
-        success: `${formatEth(latestRemaining)} refunded to the shipper wallet.`,
+        success: `${formatCargo(latestRemaining)} refunded to the shipper wallet.`,
       });
       const tx = await sendWalletContractTransaction({
         contract: contracts.deliveryEscrow,
@@ -931,8 +952,8 @@ export function Track() {
       : 0n;
     if (approve && !await confirmAction({
       title: 'Release checkpoint payment?',
-      message: `Approving “${milestone?.name || 'this checkpoint'}” releases ${formatEth(payout)} to ${walletIdentityLabel(shipment.carrier, walletIdentities)}.`,
-      confirmLabel: `Approve & release ${formatEth(payout)}`,
+      message: `Approving “${milestone?.name || 'this checkpoint'}” releases ${formatCargo(payout)} to ${walletIdentityLabel(shipment.carrier, walletIdentities)}.`,
+      confirmLabel: `Approve & release ${formatCargo(payout)}`,
     })) return;
 
     setActionStage(
@@ -988,6 +1009,38 @@ export function Track() {
       const message = formatActionError(actionError);
       if (transactionToast) transactionToast.error(message);
       else show(message, 'error');
+    } finally {
+      setActionStage('idle');
+    }
+  };
+
+  const withdrawMilestoneProof = async (milestoneId) => {
+    if (busy || !shipment || !signer || !contracts?.deliveryEscrow || !isCarrier) return false;
+    setActionStage('withdrawing-proof');
+    let transactionToast;
+    try {
+      transactionToast = startTransactionToast({
+        wallet: 'Confirm proof withdrawal in MetaMask…',
+        submitted: 'Withdrawing photo proof…',
+        success: 'Photo proof withdrawn.',
+      });
+      const tx = await sendWalletContractTransaction({
+        contract: contracts.deliveryEscrow,
+        method: 'withdrawProof',
+        args: [BigInt(shipment.id), BigInt(milestoneId)],
+        signer,
+        provider,
+      });
+      transactionToast.submitted();
+      await tx.wait();
+      transactionToast.success();
+      setRefreshKey((value) => value + 1);
+      return true;
+    } catch (actionError) {
+      const message = formatActionError(actionError);
+      if (transactionToast) transactionToast.error(message);
+      else show(message, 'error');
+      return false;
     } finally {
       setActionStage('idle');
     }
@@ -1080,7 +1133,7 @@ export function Track() {
         <dl className={styles.detailFacts}>
           <DetailFact label="Created" value={formatDate(shipment.createdAt)} />
           <DetailFact label="Deadline" value={formatDate(shipment.deadline)} />
-          <DetailFact label={shipment.escrow > 0n ? 'Escrow' : 'Planned payment'} value={formatEth(displayedValue)} />
+          <DetailFact label={shipment.escrow > 0n ? 'Escrow' : 'Planned payment'} value={formatCargo(displayedValue)} />
           <DetailFact label="Shipper" value={walletIdentityLabel(shipment.shipper, walletIdentities)} title={shipment.shipper} />
           <DetailFact
             label="Carrier"
@@ -1128,9 +1181,9 @@ export function Track() {
                   <h2>Checkpoints</h2>
                 </div>
                 <div className={styles.checkpointPaymentSummary} aria-label="Escrow summary">
-                  <PaymentMetric label="Escrow" value={formatEth(shipment.escrow)} />
-                  <PaymentMetric label="Released" value={formatEth(shipment.released)} />
-                  <PaymentMetric label="Remaining" value={formatEth(shipment.remaining)} />
+                  <PaymentMetric label="Escrow" value={formatCargo(shipment.escrow)} />
+                  <PaymentMetric label="Released" value={formatCargo(shipment.released)} />
+                  <PaymentMetric label="Remaining" value={formatCargo(shipment.remaining)} />
                 </div>
               </div>
 
@@ -1146,6 +1199,7 @@ export function Track() {
                 busy={busy}
                 onVerify={verifyMilestone}
                 onSubmitProof={submitMilestoneProof}
+                onWithdrawProof={withdrawMilestoneProof}
                 ratingRequestId={shipment.id}
                 ratingCarrier={shipment.carrier}
                 ratingIsShipper={isShipper}
@@ -1264,7 +1318,7 @@ export function Track() {
             </h2>
             <p>
               {canClaimRefund
-                ? `${formatEth(shipment.remaining)} remains available to refund.`
+                ? `${formatCargo(shipment.remaining)} remains available to refund.`
                 : 'Cancellation is available until a proposal is approved and funded.'}
             </p>
           </div>
@@ -1524,10 +1578,10 @@ function AmendmentPanel({
         .reduce((total, allocation) => total + allocation[allocation.length - 1], 0n);
 
       if (additionalFunding > 0n && additionalFunding < MIN_ADDITIONAL_FUNDING_WEI) {
-        throw new Error('New amendment funding must total at least 0.01 ETH.');
+        throw new Error('New amendment funding must total at least 0.01 CARGO.');
       }
       if (deadline < shipment.deadline && additionalFunding < MIN_ADDITIONAL_FUNDING_WEI) {
-        throw new Error('A shorter deadline requires at least 0.01 ETH of new funding.');
+        throw new Error('A shorter deadline requires at least 0.01 CARGO of new funding.');
       }
       if (deadline === shipment.deadline && additionalFunding === 0n) {
         throw new Error('Change the deadline or add new escrow funding.');
@@ -1605,7 +1659,7 @@ function AmendmentPanel({
               />
             </label>
             <label>
-              <span>Funded ETH</span>
+              <span>Funded CARGO</span>
               <div className={styles.amendmentEthInput}>
                 <input
                   type="number"
@@ -1620,7 +1674,7 @@ function AmendmentPanel({
                   ))}
                   placeholder="0.00"
                 />
-                <span>ETH</span>
+                <span>CARGO</span>
               </div>
             </label>
             <button
@@ -1673,7 +1727,7 @@ function AmendmentPanel({
             </div>
             <div>
               <span>New escrow</span>
-              <strong>{formatEth(pending.additionalFunding)}</strong>
+              <strong>{formatCargo(pending.additionalFunding)}</strong>
             </div>
             <div>
               <span>Answer before</span>
@@ -1808,7 +1862,7 @@ function AmendmentPanel({
                 </h3>
                 <p>
                   {fundingPlanOpen
-                    ? 'Add ETH on top of unpaid payouts, insert a funded checkpoint, or append a new final checkpoint.'
+                    ? 'Add CARGO on top of unpaid payouts, insert a funded checkpoint, or append a new final checkpoint.'
                     : 'Expand to review existing allocations or add newly funded milestones.'}
                 </p>
               </div>
@@ -1903,20 +1957,20 @@ function AmendmentPanel({
                                     disabled={milestone.status === 'Paid'}
                                     placeholder={milestone.status === 'Paid' ? 'Paid' : '0.00'}
                                   />
-                                  <span>ETH</span>
+                                  <span>CARGO</span>
                                 </div>
                               </label>
                             </div>
                             <div className={styles.amendmentFundingEquation}>
                               {milestone.status === 'Paid' ? (
-                                <strong>{formatEth(oldFunding)}</strong>
+                                <strong>{formatCargo(oldFunding)}</strong>
                               ) : (
                                 <>
-                                  <span>{formatEth(oldFunding)}</span>
+                                  <span>{formatCargo(oldFunding)}</span>
                                   <span aria-hidden="true">+</span>
-                                  <span>{formatEth(newFunding)}</span>
+                                  <span>{formatCargo(newFunding)}</span>
                                   <span aria-hidden="true">=</span>
-                                  <strong>{formatEth(combinedFunding)}</strong>
+                                  <strong>{formatCargo(combinedFunding)}</strong>
                                 </>
                               )}
                             </div>
@@ -2057,13 +2111,13 @@ function AmendmentAllocations({ amendment, milestones }) {
       {amendment.existingFunding.map((allocation) => (
         <div key={`existing-${allocation.milestoneId}`}>
           <span>Extra for {milestoneReferenceLabel(allocation.milestoneId, milestones)}</span>
-          <strong>+{formatEth(allocation.amount)}</strong>
+          <strong>+{formatCargo(allocation.amount)}</strong>
         </div>
       ))}
       {amendment.newMilestones.map((milestone, index) => (
         <div key={`new-${index}-${milestone.name}`}>
           <span>New: {milestone.name} · {insertionReferenceLabel(milestone.insertBeforeMilestoneId, milestones)}</span>
-          <strong>{formatEth(milestone.amount)}</strong>
+          <strong>{formatCargo(milestone.amount)}</strong>
         </div>
       ))}
     </div>
@@ -2097,7 +2151,7 @@ function AmendmentChangeSummary({ amendment, milestones }) {
       {amendment.existingFunding.map((allocation) => (
         <li key={`history-existing-${allocation.milestoneId}`}>
           <span>{milestoneReferenceLabel(allocation.milestoneId, milestones)} funding increased</span>
-          <strong>+{formatEth(allocation.amount)}</strong>
+          <strong>+{formatCargo(allocation.amount)}</strong>
         </li>
       ))}
       {amendment.newMilestones.map((milestone, index) => (
@@ -2105,7 +2159,7 @@ function AmendmentChangeSummary({ amendment, milestones }) {
           <span>
             New milestone · {insertionReferenceLabel(milestone.insertBeforeMilestoneId, milestones)}
           </span>
-          <strong>{milestone.name} · {formatEth(milestone.amount)}</strong>
+          <strong>{milestone.name} · {formatCargo(milestone.amount)}</strong>
         </li>
       ))}
     </ul>
@@ -2217,14 +2271,14 @@ function AmendmentConfirmationModal({
         </blockquote>
         <div className={styles.amendmentConfirmFunding}>
           <span>Additional escrow required</span>
-          <strong>{formatEth(draft.additionalFunding)}</strong>
+          <strong>{formatCargo(draft.additionalFunding)}</strong>
         </div>
         <p className={styles.amendmentConfirmWarning}>
           {draft.directExtension
             ? 'This deadline-only extension is applied immediately by the shipper.'
             : isShipper
-              ? 'The new ETH is staged with this request and only enters escrow if the carrier accepts.'
-              : 'If the shipper accepts, they must fund the new ETH allocation in the acceptance transaction.'}
+              ? 'The new CARGO is staged with this request and only enters escrow if the carrier accepts.'
+              : 'If the shipper accepts, they must fund the new CARGO allocation in the acceptance transaction.'}
         </p>
 
         <footer className={styles.amendmentConfirmFooter}>
@@ -2251,7 +2305,7 @@ function AgreementSnapshot({ title, deadline, escrow, milestones, changed = fals
       </div>
       <dl>
         <div><dt>Deadline</dt><dd>{formatDate(deadline)}</dd></div>
-        <div><dt>Funded escrow</dt><dd>{formatEth(escrow)}</dd></div>
+        <div><dt>Funded escrow</dt><dd>{formatCargo(escrow)}</dd></div>
       </dl>
       <ol className={styles.agreementSnapshotMilestones}>
         {milestones.map((milestone, index) => (
@@ -2260,8 +2314,8 @@ function AgreementSnapshot({ title, deadline, escrow, milestones, changed = fals
             <div>
               <strong>{milestone.name}</strong>
               <small>
-                {formatEth(milestone.amount)}
-                {milestone.isNew ? ' · New funded milestone' : milestone.added > 0n ? ` · +${formatEth(milestone.added)}` : ''}
+                {formatCargo(milestone.amount)}
+                {milestone.isNew ? ' · New funded milestone' : milestone.added > 0n ? ` · +${formatCargo(milestone.added)}` : ''}
               </small>
             </div>
           </li>
@@ -2397,13 +2451,13 @@ function CancellationPanel({
           <div className={styles.cancellationSettlement}>
             <div>
               <span>Already released</span>
-              <strong>{formatEth(shipment.released)}</strong>
+              <strong>{formatCargo(shipment.released)}</strong>
               <small>Remains with carrier</small>
             </div>
             <HiOutlineArrowRight aria-hidden="true" />
             <div>
               <span>Remaining escrow</span>
-              <strong>{formatEth(shipment.remaining)}</strong>
+              <strong>{formatCargo(shipment.remaining)}</strong>
               <small>Returns to shipper if accepted</small>
             </div>
           </div>
@@ -3118,7 +3172,7 @@ function ProposalDetailModal({
             </div>
             <div className={styles.proposalMetricTile}>
               <span>Planned escrow</span>
-              <strong>{formatEth(proposedAmount)}</strong>
+              <strong>{formatCargo(proposedAmount)}</strong>
             </div>
           </div>
           <ol className={styles.proposalSteps}>
@@ -3131,7 +3185,7 @@ function ProposalDetailModal({
                   </div>
                   <div className={styles.proposalStepMeta}>
                     <span>{milestone.payoutPercentage}% of payment</span>
-                    <strong>{formatEth(calculateProposedPayout(
+                    <strong>{formatCargo(calculateProposedPayout(
                       proposedAmount,
                       milestone.payoutPercentage,
                       index,
@@ -3226,6 +3280,7 @@ function TimelinePanel({
   onVerify,
   canSubmitProof,
   onSubmitProof,
+  onWithdrawProof,
   ratingRequestId,
   ratingCarrier,
   ratingIsShipper,
@@ -3280,7 +3335,7 @@ function TimelinePanel({
                       {eventMilestone && (
                         <span className={styles.tlEscrowAllocation}>
                           <span>Escrow allocation</span>
-                          <strong>{formatEth(milestoneEscrowAllocation(eventMilestone))}</strong>
+                          <strong>{formatCargo(milestoneEscrowAllocation(eventMilestone))}</strong>
                           <small>
                             {eventMilestone.addedByAmendment
                               ? 'Amendment funded'
@@ -3341,7 +3396,7 @@ function TimelinePanel({
                 <div className={styles.sidebarCheckpointAmount}>
                   <span>{checkpointPaymentState(selectedMilestone.status)}</span>
                   <strong>
-                    {formatEth(
+                    {formatCargo(
                       selectedMilestone.payoutAmount
                         + selectedMilestone.additionalPayoutAmount,
                     )}
@@ -3396,7 +3451,7 @@ function TimelinePanel({
               <div className={styles.sidebarVerifyPanel}>
                 <span className={styles.sidebarLabel}>Shipper verification required</span>
                 <p className={styles.sidebarVerifyHint}>
-                  Approve to release {formatEth(
+                  Approve to release {formatCargo(
                     selectedMilestone
                       ? selectedMilestone.payoutAmount + selectedMilestone.additionalPayoutAmount
                       : 0n,
@@ -3456,6 +3511,20 @@ function TimelinePanel({
                     </Button>
                   )}
                 </div>
+              </div>
+            )}
+            {selectedEvent.status === 'pending' && canSubmitProof && hasPhotoProof && (
+              <div className={styles.sidebarVerifyPanel}>
+                <span className={styles.sidebarLabel}>Proof submitted</span>
+                <p className={styles.sidebarVerifyHint}>Withdraw this proof before shipper review if you need to replace the image.</p>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => onWithdrawProof(selectedMilestone.milestoneId)}
+                >
+                  {busy && actionStage === 'withdrawing-proof' ? 'Withdrawing…' : 'Withdraw proof'}
+                </Button>
               </div>
             )}
             {(selectedEvent.status === 'verified' || selectedEvent.status === 'paid') && (
@@ -3915,23 +3984,23 @@ function EscrowActivityPanel({
           <div className={styles.paymentsHeaderBody}>
             {shipment.escrow > 0n
               ? amendmentFunding > 0n
-                ? `${formatEth(shipment.escrow)} is funded, including ${formatEth(amendmentFunding)} added through agreement changes.`
-                : `${formatEth(shipment.escrow)} was locked after proposal approval.`
-              : `${formatEth(shipment.proposedAmount)} is planned but not funded yet.`}
+                ? `${formatCargo(shipment.escrow)} is funded, including ${formatCargo(amendmentFunding)} added through agreement changes.`
+                : `${formatCargo(shipment.escrow)} was locked after proposal approval.`
+              : `${formatCargo(shipment.proposedAmount)} is planned but not funded yet.`}
           </div>
         </div>
       </div>
       <PaymentRow
         label={shipment.escrow > 0n ? 'Original escrow' : 'Planned payment'}
-        value={formatEth(shipment.proposedAmount)}
+        value={formatCargo(shipment.proposedAmount)}
       />
-      <PaymentRow label="Added through amendments" value={formatEth(amendmentFunding)} />
-      <PaymentRow label="Current funded escrow" value={formatEth(shipment.escrow)} />
-      <PaymentRow label="Released so far" value={formatEth(shipment.released)} />
-      <PaymentRow label="Refunded" value={formatEth(shipment.refunded)} />
-      <PaymentRow label="Remaining escrow" value={formatEth(shipment.remaining)} />
+      <PaymentRow label="Added through amendments" value={formatCargo(amendmentFunding)} />
+      <PaymentRow label="Current funded escrow" value={formatCargo(shipment.escrow)} />
+      <PaymentRow label="Released so far" value={formatCargo(shipment.released)} />
+      <PaymentRow label="Refunded" value={formatCargo(shipment.refunded)} />
+      <PaymentRow label="Remaining escrow" value={formatCargo(shipment.remaining)} />
       {shipment.tipAmount > 0n && (
-        <PaymentRow label="Completion tip" value={formatEth(shipment.tipAmount)} />
+        <PaymentRow label="Completion tip" value={formatCargo(shipment.tipAmount)} />
       )}
 
       {(canTip || shipment.tipAmount > 0n) && (
@@ -3952,7 +4021,7 @@ function EscrowActivityPanel({
                 </h3>
                 <p>
                   {shipment.tipAmount > 0n
-                    ? `${formatEth(shipment.tipAmount)} was sent directly to the carrier.`
+                    ? `${formatCargo(shipment.tipAmount)} was sent directly to the carrier.`
                     : 'Send one optional tip directly to the carrier after successful delivery.'}
                 </p>
               </div>
@@ -3974,7 +4043,7 @@ function EscrowActivityPanel({
                       aria-describedby="carrier-tip-help"
                       disabled={busy}
                     />
-                    <span>ETH</span>
+                    <span>CARGO</span>
                   </div>
                   <Button type="submit" disabled={busy || !tipAmountEth.trim()}>
                     {actionStage === 'tipping' ? 'Sending tip...' : 'Send one-time tip'}
@@ -4036,6 +4105,7 @@ async function loadShipment(deliveryEscrow, lifecycleManager, idParam) {
     proposalResult,
     itemResult,
     tipAmountResult,
+    paymentSummary,
     cancellationResult,
     amendmentResult,
   ] = await Promise.all([
@@ -4044,6 +4114,7 @@ async function loadShipment(deliveryEscrow, lifecycleManager, idParam) {
     deliveryEscrow.getProposals(requestId),
     deliveryEscrow.getItems(requestId),
     deliveryEscrow.tipAmounts(requestId),
+    deliveryEscrow.getPaymentSummary(requestId),
     lifecycleManager.getCancellationRequests(requestId),
     lifecycleManager.getAmendmentRequests(requestId),
   ]);
@@ -4057,6 +4128,16 @@ async function loadShipment(deliveryEscrow, lifecycleManager, idParam) {
   const released = BigInt(request.releasedAmount ?? request[6] ?? 0n);
   const refunded = BigInt(request.refundedAmount ?? request[12] ?? 0n);
   const createdAt = Number(request.createdAt ?? request[10] ?? 0n);
+  const operationalAllowance = BigInt(
+    paymentSummary?.operationalAllowance ?? request.operationalAllowance ?? request[13] ?? 0n,
+  );
+  const operationalSpent = BigInt(
+    paymentSummary?.operationalSpent ?? request.operationalSpent ?? request[14] ?? 0n,
+  );
+  const operationalRemaining = BigInt(
+    paymentSummary?.operationalRemaining
+      ?? (operationalAllowance > operationalSpent ? operationalAllowance - operationalSpent : 0n),
+  );
   const milestones = Array.from(milestoneResult || []).map((milestone, index) => ({
     index,
     milestoneId: Number(milestone.milestoneId ?? milestone[11] ?? index),
@@ -4069,11 +4150,15 @@ async function loadShipment(deliveryEscrow, lifecycleManager, idParam) {
     status: MILESTONE_STATUS[Number(milestone.status ?? milestone[6])] || 'Unknown',
     submittedAt: Number(milestone.submittedAt ?? milestone[7] ?? 0n),
     verifiedAt: Number(milestone.verifiedAt ?? milestone[8] ?? 0n),
-    additionalPayoutAmount: BigInt(
-      milestone.additionalPayoutAmount ?? milestone[9] ?? 0n,
-    ),
-    addedByAmendment: Boolean(milestone.addedByAmendment ?? milestone[10] ?? false),
-  }));
+     additionalPayoutAmount: BigInt(
+       milestone.additionalPayoutAmount ?? milestone[9] ?? 0n,
+     ),
+     addedByAmendment: Boolean(milestone.addedByAmendment ?? milestone[10] ?? false),
+     proofSubmissionNumber: Number(milestone.proofSubmissionNumber ?? milestone[12] ?? 0n),
+     proofWithdrawalsThisRound: Number(milestone.proofWithdrawalsThisRound ?? milestone[13] ?? 0n),
+     submittedAfterRejection: Boolean(milestone.submittedAfterRejection ?? milestone[14] ?? false),
+     proofSubmissionReimbursed: Boolean(milestone.proofSubmissionReimbursed ?? milestone[15] ?? false),
+   }));
   const proposals = await Promise.all(Array.from(proposalResult || []).map(async (proposal, id) => {
     const proposalMilestoneResult = await deliveryEscrow.getProposalMilestones(requestId, id);
     return {
@@ -4186,6 +4271,9 @@ async function loadShipment(deliveryEscrow, lifecycleManager, idParam) {
     refunded,
     remaining: escrow - released - refunded,
     tipAmount: BigInt(tipAmountResult ?? 0n),
+    operationalAllowance,
+    operationalSpent,
+    operationalRemaining,
     items,
     milestones,
     proposals,
@@ -4226,7 +4314,7 @@ function parsePositiveEth(value) {
   try {
     parsed = parseEther(value);
   } catch {
-    throw new Error('Enter valid funding amounts in ETH.');
+    throw new Error('Enter valid funding amounts in CARGO.');
   }
   if (parsed <= 0n) throw new Error('Funding amounts must be greater than zero.');
   return parsed;
@@ -4257,7 +4345,7 @@ function buildTimelineEvents({ shipper, carrier, createdAt, proposedAmount, mile
     statusLabel: 'Published',
     timestamp: createdAt,
     actor: shipper,
-    details: `The shipper published this request with a planned payment of ${formatEth(proposedAmount)}.`,
+    details: `The shipper published this request with a planned payment of ${formatCargo(proposedAmount)}.`,
     milestoneId: null,
   }];
 
@@ -4274,8 +4362,8 @@ function buildTimelineEvents({ shipper, carrier, createdAt, proposedAmount, mile
       timestamp: milestone.verifiedAt || milestone.submittedAt || null,
       actor: carrier,
       details: milestone.addedByAmendment
-        ? `${formatEth(payout)} funded through an accepted agreement change. ${firstMeaningfulRemark(milestone.remark, milestone.rejectionReason) || milestoneDescription(milestone.status)}`
-        : `${milestone.payoutPercentage}% payout (${formatEth(payout)}). ${firstMeaningfulRemark(milestone.remark, milestone.rejectionReason) || milestoneDescription(milestone.status)}`,
+        ? `${formatCargo(payout)} funded through an accepted agreement change. ${firstMeaningfulRemark(milestone.remark, milestone.rejectionReason) || milestoneDescription(milestone.status)}`
+        : `${milestone.payoutPercentage}% payout (${formatCargo(payout)}). ${firstMeaningfulRemark(milestone.remark, milestone.rejectionReason) || milestoneDescription(milestone.status)}`,
       milestoneId: milestone.milestoneId,
     });
   }

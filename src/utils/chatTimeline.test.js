@@ -34,7 +34,7 @@ describe('mergeChatTimeline', () => {
       args: { amount: 1500000000000000000n },
     }, Date.parse('2026-08-01T10:02:00.000Z'));
 
-    expect(notice.text).toBe('Escrow funded with 1.5 ETH.');
+    expect(notice.text).toBe('Escrow funded with 1.5 CARGO.');
     expect(notice.tone).toBe('payment');
   });
 
@@ -103,9 +103,9 @@ describe('mergeChatTimeline', () => {
 
     expect(amendment.actionable).toBe(true);
     expect(amendment.focusTarget).toBe('amendment');
-    expect(amendment.text).toContain('0.25 ETH');
+    expect(amendment.text).toContain('0.25 CARGO');
     expect(proposal.text).toContain('Please add a customs checkpoint.');
-    expect(tip.text).toContain('0.05 ETH completion tip');
+    expect(tip.text).toContain('0.05 CARGO completion tip');
     expect(completion.text).toContain('Delivery completed');
     expect(expiry.text).toContain('Shipment deadline passed');
     expect(rating.text).toBe('Carrier rating published.');

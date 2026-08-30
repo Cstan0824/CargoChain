@@ -103,6 +103,28 @@ export async function resolveWalletSigner(signer, connect) {
   return connection.signer;
 }
 
+/**
+ * Ensure a read-only ERC-20 contract has enough allowance for a following
+ * wallet transaction. Approval is intentionally separate so MetaMask shows
+ * the exact spender and amount before the business action is submitted.
+ */
+export async function ensureTokenAllowance({ token, spender, amount, signer, provider }) {
+  const required = BigInt(amount || 0);
+  if (!token || !spender || required <= 0n || !signer || !provider) return null;
+  const owner = await signer.getAddress();
+  const current = BigInt(await token.allowance(owner, spender));
+  if (current >= required) return null;
+
+  const approval = await sendWalletContractTransaction({
+    contract: token,
+    method: 'approve',
+    args: [spender, required],
+    signer,
+    provider,
+  });
+  return approval.wait();
+}
+
 export function formatWalletTransactionError(error, fallback = 'The blockchain transaction failed.') {
   if (
     error?.code === 4001

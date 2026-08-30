@@ -294,6 +294,73 @@
   text-wrap: pretty;
 }
 
+.cargoWallet {
+  display: grid;
+  gap: var(--s-3);
+  margin-top: var(--s-5);
+  padding: var(--s-4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  background: var(--bg-subtle);
+  box-shadow: var(--shadow-border);
+}
+
+.cargoWalletHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-4);
+}
+
+.cargoWalletHeader h2 {
+  margin: var(--s-1) 0 0;
+  color: var(--text-primary);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+}
+
+.cargoBalanceValue {
+  color: var(--primary);
+  font-size: var(--fs-xl);
+  font-variant-numeric: var(--numeric-style);
+  white-space: nowrap;
+}
+
+.cargoWalletHint,
+.cargoRate {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  line-height: 1.45;
+}
+
+.cargoWalletControls {
+  display: grid;
+  gap: var(--s-2);
+}
+
+.cargoWalletControls label {
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+}
+
+.cargoWalletControls input {
+  width: min(100%, 280px);
+  min-height: 42px;
+  padding: 0 var(--s-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-primary);
+  background: var(--bg-surface);
+}
+
+.cargoWalletButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
 .financialGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

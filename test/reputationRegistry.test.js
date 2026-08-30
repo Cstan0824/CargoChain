@@ -2,6 +2,7 @@ const UserRegistry = artifacts.require('UserRegistry');
 const DeliveryEscrow = artifacts.require('DeliveryEscrow');
 const LifecycleManager = artifacts.require('LifecycleManager');
 const ReputationRegistry = artifacts.require('ReputationRegistry');
+const CargoToken = artifacts.require('CargoToken');
 
 contract('ReputationRegistry', (accounts) => {
   const [deployer, shipper, carrier, stranger] = accounts;
@@ -10,6 +11,7 @@ contract('ReputationRegistry', (accounts) => {
   let escrow;
   let manager;
   let reputation;
+  let cargoToken;
 
   beforeEach(async () => {
     registry = await UserRegistry.new({ from: deployer });
@@ -17,8 +19,16 @@ contract('ReputationRegistry', (accounts) => {
     await registry.registerUser('Carrier', { from: carrier });
     await registry.registerUser('Stranger', { from: stranger });
 
-    manager = await LifecycleManager.new({ from: deployer });
-    escrow = await DeliveryEscrow.new(registry.address, manager.address, { from: deployer });
+    cargoToken = await CargoToken.new({ from: deployer });
+    for (const actor of [shipper, carrier, stranger]) {
+      await cargoToken.deposit({ from: actor, value: web3.utils.toWei('1', 'ether') });
+    }
+    manager = await LifecycleManager.new(cargoToken.address, { from: deployer });
+    escrow = await DeliveryEscrow.new(registry.address, manager.address, cargoToken.address, { from: deployer });
+    for (const actor of [shipper, carrier, stranger]) {
+      await cargoToken.approve(escrow.address, web3.utils.toWei('1000', 'ether'), { from: actor });
+      await cargoToken.approve(manager.address, web3.utils.toWei('1000', 'ether'), { from: actor });
+    }
     await manager.initializeDeliveryEscrow(escrow.address, { from: deployer });
     reputation = await ReputationRegistry.new(escrow.address, { from: deployer });
   });
@@ -39,7 +49,7 @@ contract('ReputationRegistry', (accounts) => {
       { from: shipper },
     );
     await escrow.proposeMilestones(1, [['Delivered', 100]], { from: carrier });
-    await escrow.approveAndFund(1, 0, { from: shipper, value: oneEth });
+    await escrow.approveAndFund(1, 0, { from: shipper });
   }
 
   async function completeRequest() {

@@ -376,7 +376,7 @@ export function CreateRequestModal({ isOpen, onClose, onSuccess }) {
                 />
               </div>
               <div className={styles.splitHalf}>
-                <label className={styles.label} htmlFor="request-payment">Payment (ETH)</label>
+                <label className={styles.label} htmlFor="request-payment">Payment (CARGO)</label>
                 <div className={`${styles.rewardBox} ${shouldShowError('reward') && validation.errors.reward ? styles.inputError : ''}`}>
                   <input
                     ref={paymentRef}
@@ -392,7 +392,7 @@ export function CreateRequestModal({ isOpen, onClose, onSuccess }) {
                     aria-describedby={shouldShowError('reward') && validation.errors.reward ? 'request-payment-error' : undefined}
                     placeholder="0.00"
                   />
-                  <span className={styles.rewardUnit}>ETH</span>
+                  <span className={styles.rewardUnit}>CARGO</span>
                 </div>
                 {shouldShowError('reward') && validation.errors.reward && (
                   <span id="request-payment-error" className={styles.fieldError} role="alert">{validation.errors.reward}</span>
@@ -498,7 +498,7 @@ function validateRequestFields(details, reward, items, rewardWei) {
   if (!Number.isFinite(deadlineUnix) || deadlineUnix <= nowUnix) {
     errors.deadline = 'Choose a delivery deadline in the future.';
   }
-  if (rewardWei <= 0n) errors.reward = 'Enter a payment amount greater than 0 ETH.';
+  if (rewardWei <= 0n) errors.reward = 'Enter a payment amount greater than 0 CARGO.';
 
   const hasPopulatedItem = items.some((item) => (
     item.itemName.trim() || item.itemDescription.trim() || String(item.quantity).trim()
@@ -541,7 +541,7 @@ function formatCreateRequestError(error) {
     return 'Delivery deadline must be later than the current time.';
   }
   if (message.includes('payment amount required')) {
-    return 'Payment must be greater than 0 ETH.';
+    return 'Payment must be greater than 0 CARGO.';
   }
   if (message.includes('insufficient funds')) {
     return 'The connected wallet does not have enough ETH to pay the transaction gas fee.';

@@ -2,6 +2,8 @@
 pragma solidity ^0.8.0;
 
 import "./PaymentEvents.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /// @dev Minimal registry surface required by the escrow contract.
 interface IUserRegistry {
@@ -12,6 +14,7 @@ interface IUserRegistry {
 /// @notice Single-contract MVP for request creation, carrier milestone proposal,
 /// escrow funding, proof submission, verification, payout, and unpaid refunds.
 contract DeliveryEscrow is PaymentEvents {
+    using SafeERC20 for IERC20;
     enum RequestStatus {
         Open,
         PendingApproval,
@@ -73,6 +76,9 @@ contract DeliveryEscrow is PaymentEvents {
         uint256 createdAt;
         uint256 proposedAmount;
         uint256 refundedAmount;
+        uint256 operationalAllowance;
+        uint256 operationalSpent;
+        uint256 gasPriceCap;
     }
 
     struct Milestone {
@@ -87,6 +93,10 @@ contract DeliveryEscrow is PaymentEvents {
         uint256 verifiedAt;
         uint256 additionalPayoutAmount;
         bool addedByAmendment;
+        uint256 proofSubmissionNumber;
+        uint8 proofWithdrawalsThisRound;
+        bool submittedAfterRejection;
+        bool proofSubmissionReimbursed;
         // Immutable identity. The execution order is stored separately so an
         // inserted checkpoint never changes the ID used by existing proofs,
         // payments, events, or off-chain history.
@@ -126,6 +136,9 @@ contract DeliveryEscrow is PaymentEvents {
         bool fullyFunded;
         bool fullyPaid;
         bool refundable;
+        uint256 operationalAllowance;
+        uint256 operationalSpent;
+        uint256 operationalRemaining;
     }
 
     struct LockedEscrow {
@@ -134,8 +147,20 @@ contract DeliveryEscrow is PaymentEvents {
     }
 
     IUserRegistry public immutable userRegistry;
+    IERC20 public immutable cargoToken;
     address private immutable lifecycleManager;
     uint256 private constant MAX_PROPOSAL_REJECTION_NOTE_BYTES = 500;
+    uint256 public constant MAX_INITIAL_MILESTONES = 10;
+    uint256 public constant MAX_TOTAL_MILESTONES = 20;
+    uint256 public constant MAX_PROOF_URI_BYTES = 512;
+    uint256 public constant MAX_PROOF_REMARK_BYTES = 500;
+    uint8 public constant MAX_PROOF_WITHDRAWALS_PER_ROUND = 5;
+    uint256 public constant PROOF_GAS_UNIT_CAP = 250_000;
+    uint256 public constant REIMBURSEMENT_OVERHEAD = 50_000;
+    uint256 public constant MIN_GAS_PRICE = 2 gwei;
+    uint256 public constant PRIORITY_FEE_BUFFER = 1 gwei;
+    uint256 public constant CARGO_PER_ETH = 10_000;
+    uint256 public constant MAX_PROOF_REIMBURSEMENT = 10 ether;
     /// @notice Sentinel used by amendment requests to append a checkpoint.
     /// Real milestone IDs begin at zero, so zero cannot represent append.
     uint256 public constant APPEND_MILESTONE_ID = type(uint256).max;
@@ -150,9 +175,11 @@ contract DeliveryEscrow is PaymentEvents {
     mapping(uint256 => CarrierProposal[]) private requestProposals;
     mapping(uint256 => mapping(uint256 => ProposedMilestone[])) private proposalMilestones;
     mapping(uint256 => mapping(address => uint256)) private activeProposalIndexPlusOne;
+    mapping(uint256 => uint256) private acceptedProposalIdPlusOne;
     mapping(address => LockedEscrow) private lockedEscrowByShipper;
     mapping(uint256 => uint256) private milestoneStateVersions;
     mapping(uint256 => uint256) public tipAmounts;
+    uint256 public totalEscrowed;
     uint256[] private allRequestIds;
     uint256[] private openRequestIds;
 
@@ -161,7 +188,17 @@ contract DeliveryEscrow is PaymentEvents {
     event MilestonePlanRevoked(uint256 indexed requestId, address indexed carrier, uint256 proposalId);
     event MilestonePlanRejected(uint256 indexed requestId, address indexed carrier, uint256 proposalId);
     event MilestonePlanAccepted(uint256 indexed requestId, address indexed carrier, uint256 proposalId);
-    event ProofSubmitted(uint256 indexed requestId, uint256 indexed milestoneId);
+    event ProofSubmitted(
+        uint256 indexed requestId,
+        uint256 indexed milestoneId,
+        uint256 submissionNumber
+    );
+    event ProofWithdrawn(
+        uint256 indexed requestId,
+        uint256 indexed milestoneId,
+        uint256 submissionNumber,
+        uint8 withdrawalsThisRound
+    );
     event MilestoneVerified(uint256 indexed requestId, uint256 indexed milestoneId, bool approved);
     event MilestonePaid(
         uint256 indexed requestId,
@@ -189,12 +226,26 @@ contract DeliveryEscrow is PaymentEvents {
         uint256 additionalFunding,
         uint256 newMilestoneCount
     );
+    event OperationalAllowanceFunded(uint256 indexed requestId, uint256 amount);
+    event OperationalAllowanceReimbursed(
+        uint256 indexed requestId,
+        uint256 indexed milestoneId,
+        address indexed carrier,
+        uint256 amount
+    );
+    event OperationalAllowanceRefunded(uint256 indexed requestId, address indexed to, uint256 amount);
 
-    constructor(address registryAddress, address lifecycleManagerAddress) {
+    constructor(
+        address registryAddress,
+        address lifecycleManagerAddress,
+        address cargoTokenAddress
+    ) {
         require(registryAddress != address(0), "registry address required");
         require(lifecycleManagerAddress != address(0), "lifecycle manager required");
+        require(cargoTokenAddress != address(0), "cargo token required");
         userRegistry = IUserRegistry(registryAddress);
         lifecycleManager = lifecycleManagerAddress;
+        cargoToken = IERC20(cargoTokenAddress);
     }
 
     modifier onlyRegistered() {
@@ -269,6 +320,7 @@ contract DeliveryEscrow is PaymentEvents {
         require(msg.sender != delivery.shipper, "shipper cannot be carrier");
         require(activeProposalIndexPlusOne[requestId][msg.sender] == 0, "carrier already has active proposal");
         require(milestones.length > 0, "at least one milestone required");
+        require(milestones.length <= MAX_INITIAL_MILESTONES, "too many milestones");
 
         uint256 totalPercentage = 0;
         for (uint256 i = 0; i < milestones.length; i++) {
@@ -352,43 +404,57 @@ contract DeliveryEscrow is PaymentEvents {
 
     function approveAndFund(uint256 requestId, uint256 proposalId)
         external
-        payable
         onlyRegistered
         requestExists(requestId)
         onlyShipper(requestId)
     {
+        _approveAndFund(requestId, proposalId, minimumOperationalAllowance(requestId, proposalId));
+    }
+
+    function approveAndFundWithAllowance(uint256 requestId, uint256 proposalId, uint256 operationalAllowance)
+        external
+        onlyRegistered
+        requestExists(requestId)
+        onlyShipper(requestId)
+    {
+        _approveAndFund(requestId, proposalId, operationalAllowance);
+    }
+
+    function _approveAndFund(
+        uint256 requestId,
+        uint256 proposalId,
+        uint256 operationalAllowance
+    ) private {
         DeliveryRequest storage delivery = requests[requestId];
         require(delivery.status == RequestStatus.Open, "request is not open");
         require(block.timestamp <= delivery.deadline, "request deadline has passed");
-        require(msg.value == delivery.proposedAmount, "funding must match proposed amount");
         require(proposalId < requestProposals[requestId].length, "proposal does not exist");
+        require(
+            operationalAllowance >= minimumOperationalAllowance(requestId, proposalId),
+            "operational allowance below minimum"
+        );
 
         CarrierProposal storage proposal = requestProposals[requestId][proposalId];
         require(proposal.status == ProposalStatus.Active, "proposal is not active");
         ProposedMilestone[] storage selectedMilestones = proposalMilestones[requestId][proposalId];
         require(selectedMilestones.length > 0, "no milestones proposed");
 
+        require(
+            cargoToken.allowance(msg.sender, address(this)) >= delivery.proposedAmount + operationalAllowance,
+            "CARGO allowance too low"
+        );
+        cargoToken.safeTransferFrom(
+            msg.sender,
+            address(this),
+            delivery.proposedAmount + operationalAllowance
+        );
+        totalEscrowed += delivery.proposedAmount;
+        totalEscrowed += operationalAllowance;
         delivery.carrier = proposal.carrier;
+        acceptedProposalIdPlusOne[requestId] = proposalId + 1;
         proposal.status = ProposalStatus.Accepted;
         proposal.updatedAt = block.timestamp;
         activeProposalIndexPlusOne[requestId][proposal.carrier] = 0;
-
-        // The request has one active carrier only. Explicitly close every
-        // other active proposal so each carrier receives an auditable outcome.
-        for (uint256 i = 0; i < requestProposals[requestId].length; i++) {
-            if (i == proposalId) {
-                continue;
-            }
-
-            CarrierProposal storage otherProposal = requestProposals[requestId][i];
-            if (otherProposal.status == ProposalStatus.Active) {
-                otherProposal.status = ProposalStatus.Rejected;
-                otherProposal.updatedAt = block.timestamp;
-                otherProposal.rejectionNote = "Another carrier proposal was accepted.";
-                activeProposalIndexPlusOne[requestId][otherProposal.carrier] = 0;
-                emit MilestonePlanRejected(requestId, otherProposal.carrier, i);
-            }
-        }
 
         _removeOpenRequestId(requestId);
 
@@ -405,20 +471,22 @@ contract DeliveryEscrow is PaymentEvents {
 
         uint256[] storage executionOrder = milestoneExecutionOrder[requestId];
 
-        delivery.totalAmount = msg.value;
+        delivery.totalAmount = delivery.proposedAmount;
         delivery.status = RequestStatus.Funded;
         LockedEscrow storage lockedEscrow = lockedEscrowByShipper[delivery.shipper];
-        lockedEscrow.totalLocked += msg.value;
+        lockedEscrow.totalLocked += delivery.proposedAmount + operationalAllowance;
         lockedEscrow.activeRequestCount += 1;
+        delivery.operationalAllowance = operationalAllowance;
+        delivery.gasPriceCap = referenceGasPrice();
 
         uint256 allocated = 0;
         for (uint256 i = 0; i < executionOrder.length; i++) {
             Milestone storage milestone = requestMilestones[requestId][executionOrder[i]];
             milestone.status = MilestoneStatus.PendingProof;
             if (i == executionOrder.length - 1) {
-                milestone.payoutAmount = msg.value - allocated;
+                milestone.payoutAmount = delivery.proposedAmount - allocated;
             } else {
-                uint256 amount = (msg.value * milestone.payoutPercentage) / 100;
+                uint256 amount = (delivery.proposedAmount * milestone.payoutPercentage) / 100;
                 milestone.payoutAmount = amount;
                 allocated += amount;
             }
@@ -426,7 +494,8 @@ contract DeliveryEscrow is PaymentEvents {
         milestoneStateVersions[requestId] = 1;
 
         emit MilestonePlanAccepted(requestId, proposal.carrier, proposalId);
-        emit EscrowFunded(requestId, msg.value);
+        emit EscrowFunded(requestId, delivery.proposedAmount);
+        emit OperationalAllowanceFunded(requestId, operationalAllowance);
     }
 
     function submitProof(
@@ -435,13 +504,14 @@ contract DeliveryEscrow is PaymentEvents {
         string[] calldata proofUris,
         string calldata remark
     ) external onlyRegistered requestExists(requestId) onlyCarrier(requestId) {
+        uint256 gasAtStart = gasleft();
         DeliveryRequest storage delivery = requests[requestId];
         require(
             delivery.status == RequestStatus.Funded || delivery.status == RequestStatus.InProgress,
             "request is not active"
         );
         require(block.timestamp <= delivery.deadline, "request deadline has passed");
-        require(proofUris.length > 0, "at least one proof uri required");
+        require(proofUris.length == 1, "exactly one proof uri required");
         Milestone storage milestone = _milestoneFor(requestId, milestoneId);
         _requirePreviousMilestonePaid(requestId, milestoneId);
         require(
@@ -449,20 +519,67 @@ contract DeliveryEscrow is PaymentEvents {
             "milestone is not waiting for proof"
         );
 
+        bool wasRejected = milestone.status == MilestoneStatus.Rejected;
+        require(bytes(proofUris[0]).length > 0, "proof uri required");
+        require(bytes(proofUris[0]).length <= MAX_PROOF_URI_BYTES, "proof uri too long");
+        require(bytes(remark).length <= MAX_PROOF_REMARK_BYTES, "proof remark too long");
+
         delete milestone.proofUris;
-        for (uint256 i = 0; i < proofUris.length; i++) {
-            require(bytes(proofUris[i]).length > 0, "proof uri required");
-            milestone.proofUris.push(proofUris[i]);
-        }
+        milestone.proofUris.push(proofUris[0]);
 
         milestone.remark = remark;
-        milestone.rejectionReason = "";
+        if (!wasRejected) {
+            milestone.rejectionReason = "";
+        }
+        milestone.submittedAfterRejection = wasRejected;
+        milestone.proofSubmissionNumber += 1;
         milestone.status = MilestoneStatus.Submitted;
         milestone.submittedAt = block.timestamp;
         delivery.status = RequestStatus.InProgress;
         _markMilestoneStateChanged(requestId);
 
-        emit ProofSubmitted(requestId, milestoneId);
+        _reimburseProofSubmission(requestId, milestoneId, gasAtStart);
+
+        emit ProofSubmitted(requestId, milestoneId, milestone.proofSubmissionNumber);
+    }
+
+    /// @notice Withdraw the current proof before shipper review.
+    /// A corrected proof returns to Rejected so the latest rejection reason is
+    /// preserved. The withdrawal count resets only after shipper rejection.
+    function withdrawProof(uint256 requestId, uint256 milestoneId)
+        external
+        onlyRegistered
+        requestExists(requestId)
+        onlyCarrier(requestId)
+    {
+        DeliveryRequest storage delivery = requests[requestId];
+        require(
+            delivery.status == RequestStatus.Funded || delivery.status == RequestStatus.InProgress,
+            "request is not active"
+        );
+        require(block.timestamp <= delivery.deadline, "request deadline has passed");
+        Milestone storage milestone = _milestoneFor(requestId, milestoneId);
+        require(milestone.status == MilestoneStatus.Submitted, "milestone is not submitted");
+        require(
+            milestone.proofWithdrawalsThisRound < MAX_PROOF_WITHDRAWALS_PER_ROUND,
+            "proof withdrawal limit reached"
+        );
+
+        delete milestone.proofUris;
+        milestone.remark = "";
+        milestone.status = milestone.submittedAfterRejection
+            ? MilestoneStatus.Rejected
+            : MilestoneStatus.PendingProof;
+        milestone.submittedAfterRejection = false;
+        milestone.proofWithdrawalsThisRound += 1;
+        _markMilestoneStateChanged(requestId);
+
+        emit ProofWithdrawn(
+            requestId,
+            milestoneId,
+            milestone.proofSubmissionNumber,
+            milestone.proofWithdrawalsThisRound
+        );
     }
 
     function verifyMilestone(
@@ -479,6 +596,8 @@ contract DeliveryEscrow is PaymentEvents {
             require(bytes(rejectionReason).length > 0, "rejection reason required");
             milestone.status = MilestoneStatus.Rejected;
             milestone.rejectionReason = rejectionReason;
+            milestone.proofWithdrawalsThisRound = 0;
+            milestone.submittedAfterRejection = false;
             _markMilestoneStateChanged(requestId);
             emit MilestoneVerified(requestId, milestoneId, false);
             emit MilestoneRejected(requestId, milestoneId, rejectionReason);
@@ -536,13 +655,13 @@ contract DeliveryEscrow is PaymentEvents {
 
     /// @notice Applies an amendment already approved under LifecycleManager.
     /// Original milestone payouts and completed progress are never rewritten;
-    /// all allocations here are funded by the ETH attached to this call.
+    /// all allocations here are funded by CARGO transferred by LifecycleManager.
     function finalizeAmendment(
         uint256 requestId,
         uint256 newDeadline,
         ExistingMilestoneFunding[] calldata existingFunding,
         NewMilestoneFunding[] calldata newMilestones
-    ) external payable requestExists(requestId) {
+    ) external requestExists(requestId) {
         require(msg.sender == lifecycleManager, "caller is not lifecycle manager");
         DeliveryRequest storage delivery = requests[requestId];
         require(
@@ -602,7 +721,11 @@ contract DeliveryEscrow is PaymentEvents {
             hasPreviousInsertion = true;
             allocated += addition.amount;
         }
-        require(allocated == msg.value, "funding must match allocations");
+        uint256 additionalFunding = allocated;
+        require(
+            cargoToken.balanceOf(address(this)) >= totalEscrowed + additionalFunding,
+            "amendment funding not received"
+        );
 
         for (uint256 i = 0; i < existingFunding.length; i++) {
             ExistingMilestoneFunding calldata allocation = existingFunding[i];
@@ -622,17 +745,18 @@ contract DeliveryEscrow is PaymentEvents {
 
         uint256 previousDeadline = delivery.deadline;
         delivery.deadline = newDeadline;
-        if (msg.value > 0) {
-            delivery.totalAmount += msg.value;
-            lockedEscrowByShipper[delivery.shipper].totalLocked += msg.value;
-            emit EscrowFunded(requestId, msg.value);
+        if (additionalFunding > 0) {
+            delivery.totalAmount += additionalFunding;
+            totalEscrowed += additionalFunding;
+            lockedEscrowByShipper[delivery.shipper].totalLocked += additionalFunding;
+            emit EscrowFunded(requestId, additionalFunding);
         }
         _markMilestoneStateChanged(requestId);
         emit RequestAmended(
             requestId,
             previousDeadline,
             newDeadline,
-            msg.value,
+            additionalFunding,
             newMilestones.length
         );
     }
@@ -671,23 +795,21 @@ contract DeliveryEscrow is PaymentEvents {
 
     /// @notice Sends one optional post-completion tip directly to the carrier.
     /// @dev The tip is not escrow and never changes milestone or refund totals.
-    function tipCarrier(uint256 requestId)
+    function tipCarrier(uint256 requestId, uint256 amount)
         external
-        payable
         onlyRegistered
         requestExists(requestId)
         onlyShipper(requestId)
     {
         DeliveryRequest storage delivery = requests[requestId];
         require(delivery.status == RequestStatus.Completed, "request is not completed");
-        require(msg.value > 0, "tip amount required");
+        require(amount > 0, "tip amount required");
         require(tipAmounts[requestId] == 0, "tip already sent");
 
-        tipAmounts[requestId] = msg.value;
-        (bool sent, ) = payable(delivery.carrier).call{value: msg.value}("");
-        require(sent, "tip transfer failed");
+        cargoToken.safeTransferFrom(msg.sender, delivery.carrier, amount);
+        tipAmounts[requestId] = amount;
 
-        emit CarrierTipped(requestId, delivery.shipper, delivery.carrier, msg.value);
+        emit CarrierTipped(requestId, delivery.shipper, delivery.carrier, amount);
     }
 
     function getRequestCount() external view returns (uint256) {
@@ -742,7 +864,21 @@ contract DeliveryEscrow is PaymentEvents {
         requestExists(requestId)
         returns (CarrierProposal[] memory)
     {
-        return requestProposals[requestId];
+        CarrierProposal[] storage stored = requestProposals[requestId];
+        CarrierProposal[] memory proposals = new CarrierProposal[](stored.length);
+        uint256 acceptedIdPlusOne = acceptedProposalIdPlusOne[requestId];
+        for (uint256 i = 0; i < stored.length; i++) {
+            proposals[i] = stored[i];
+            if (
+                proposals[i].status == ProposalStatus.Active &&
+                acceptedIdPlusOne > 0 &&
+                i + 1 != acceptedIdPlusOne
+            ) {
+                proposals[i].status = ProposalStatus.Rejected;
+                proposals[i].rejectionNote = "Another carrier proposal was accepted.";
+            }
+        }
+        return proposals;
     }
 
     function getProposalMilestones(uint256 requestId, uint256 proposalId)
@@ -906,8 +1042,121 @@ contract DeliveryEscrow is PaymentEvents {
             remainingEscrow: remaining,
             fullyFunded: funded,
             fullyPaid: paid,
-            refundable: _isRefundable(delivery, remaining)
+            refundable: _isRefundable(delivery, remaining),
+            operationalAllowance: delivery.operationalAllowance,
+            operationalSpent: delivery.operationalSpent,
+            operationalRemaining: delivery.operationalAllowance > delivery.operationalSpent
+                ? delivery.operationalAllowance - delivery.operationalSpent
+                : 0
         });
+    }
+
+    /// @notice Gas-price reference used for mandatory operational reserves.
+    function referenceGasPrice() public view returns (uint256) {
+        uint256 basePlusPriority = block.basefee + PRIORITY_FEE_BUFFER;
+        return basePlusPriority > MIN_GAS_PRICE ? basePlusPriority : MIN_GAS_PRICE;
+    }
+
+    /// @notice Minimum reserve for every eligible first proof submission in a proposal.
+    function minimumOperationalAllowance(uint256 requestId, uint256 proposalId)
+        public
+        view
+        requestExists(requestId)
+        returns (uint256)
+    {
+        require(proposalId < requestProposals[requestId].length, "proposal does not exist");
+        uint256 actionCount = proposalMilestones[requestId][proposalId].length;
+        uint256 perAction = (PROOF_GAS_UNIT_CAP + REIMBURSEMENT_OVERHEAD)
+            * referenceGasPrice()
+            * CARGO_PER_ETH;
+        return actionCount * perAction;
+    }
+
+    /// @notice Add refundable CARGO reserve for future carrier proof submissions.
+    function topUpOperationalAllowance(uint256 requestId, uint256 amount)
+        external
+        onlyRegistered
+        requestExists(requestId)
+        onlyShipper(requestId)
+    {
+        DeliveryRequest storage delivery = requests[requestId];
+        require(
+            delivery.status == RequestStatus.Funded || delivery.status == RequestStatus.InProgress,
+            "request is not active"
+        );
+        require(amount > 0, "top-up amount required");
+        require(cargoToken.allowance(msg.sender, address(this)) >= amount, "CARGO allowance too low");
+        cargoToken.safeTransferFrom(msg.sender, address(this), amount);
+        delivery.operationalAllowance += amount;
+        totalEscrowed += amount;
+        lockedEscrowByShipper[msg.sender].totalLocked += amount;
+        emit OperationalAllowanceFunded(requestId, amount);
+    }
+
+    function _reimburseProofSubmission(
+        uint256 requestId,
+        uint256 milestoneId,
+        uint256 gasAtStart
+    ) private {
+        DeliveryRequest storage delivery = requests[requestId];
+        Milestone storage milestone = requestMilestones[requestId][milestoneId];
+        if (milestone.proofSubmissionReimbursed) return;
+        milestone.proofSubmissionReimbursed = true;
+
+        uint256 measuredGas = gasAtStart - gasleft() + REIMBURSEMENT_OVERHEAD;
+        if (measuredGas > PROOF_GAS_UNIT_CAP) measuredGas = PROOF_GAS_UNIT_CAP;
+        uint256 coveredGasPrice = tx.gasprice < delivery.gasPriceCap
+            ? tx.gasprice
+            : delivery.gasPriceCap;
+        uint256 calculated = measuredGas * coveredGasPrice * CARGO_PER_ETH;
+        if (calculated > MAX_PROOF_REIMBURSEMENT) calculated = MAX_PROOF_REIMBURSEMENT;
+
+        uint256 remainingAllowance = delivery.operationalAllowance > delivery.operationalSpent
+            ? delivery.operationalAllowance - delivery.operationalSpent
+            : 0;
+        uint256 futureReserve = _minimumFutureOperationalReserve(requestId, milestoneId);
+        uint256 spendable = remainingAllowance > futureReserve
+            ? remainingAllowance - futureReserve
+            : 0;
+        if (calculated > spendable) calculated = spendable;
+        if (calculated == 0) return;
+
+        delivery.operationalSpent += calculated;
+        totalEscrowed -= calculated;
+        _decreaseLockedEscrow(delivery.shipper, calculated, false);
+        cargoToken.safeTransfer(delivery.carrier, calculated);
+        emit OperationalAllowanceReimbursed(requestId, milestoneId, delivery.carrier, calculated);
+    }
+
+    function _minimumFutureOperationalReserve(uint256 requestId, uint256 currentMilestoneId)
+        private
+        view
+        returns (uint256 reserve)
+    {
+        uint256 currentIndex = _executionIndex(requestId, currentMilestoneId);
+        uint256[] storage executionOrder = milestoneExecutionOrder[requestId];
+        uint256 perAction = (PROOF_GAS_UNIT_CAP + REIMBURSEMENT_OVERHEAD)
+            * referenceGasPrice()
+            * CARGO_PER_ETH;
+        for (uint256 i = currentIndex + 1; i < executionOrder.length; i++) {
+            if (requestMilestones[requestId][executionOrder[i]].status != MilestoneStatus.Paid) {
+                reserve += perAction;
+            }
+        }
+    }
+
+    function _refundOperationalAllowance(uint256 requestId) private {
+        DeliveryRequest storage delivery = requests[requestId];
+        uint256 remaining = delivery.operationalAllowance > delivery.operationalSpent
+            ? delivery.operationalAllowance - delivery.operationalSpent
+            : 0;
+        if (remaining == 0) return;
+
+        delivery.operationalSpent = delivery.operationalAllowance;
+        totalEscrowed -= remaining;
+        _decreaseLockedEscrow(delivery.shipper, remaining, false);
+        cargoToken.safeTransfer(delivery.shipper, remaining);
+        emit OperationalAllowanceRefunded(requestId, delivery.shipper, remaining);
     }
 
     function _markMilestoneStateChanged(uint256 requestId) private {
@@ -991,6 +1240,10 @@ contract DeliveryEscrow is PaymentEvents {
         milestone.verifiedAt = source.verifiedAt;
         milestone.additionalPayoutAmount = source.additionalPayoutAmount;
         milestone.addedByAmendment = source.addedByAmendment;
+        milestone.proofSubmissionNumber = source.proofSubmissionNumber;
+        milestone.proofWithdrawalsThisRound = source.proofWithdrawalsThisRound;
+        milestone.submittedAfterRejection = source.submittedAfterRejection;
+        milestone.proofSubmissionReimbursed = source.proofSubmissionReimbursed;
     }
 
     function _releaseMilestonePayment(uint256 requestId, uint256 milestoneId) private {
@@ -1004,6 +1257,7 @@ contract DeliveryEscrow is PaymentEvents {
         uint256 remainingBeforePayment = escrowBalance(requestId);
         milestone.status = MilestoneStatus.Paid;
         delivery.releasedAmount += amount;
+        totalEscrowed -= amount;
         _decreaseLockedEscrow(
             delivery.shipper,
             amount,
@@ -1015,12 +1269,12 @@ contract DeliveryEscrow is PaymentEvents {
             delivery.status = RequestStatus.Completed;
         }
 
-        (bool ok, ) = payable(delivery.carrier).call{value: amount}("");
-        require(ok, "carrier payment failed");
+        cargoToken.safeTransfer(delivery.carrier, amount);
         emit MilestonePaid(requestId, milestoneId, delivery.carrier, amount);
         emit PaymentReleased(requestId, milestoneId, amount, delivery.carrier);
         if (completed) {
             emit RequestCompleted(requestId, delivery.carrier, block.timestamp);
+            _refundOperationalAllowance(requestId);
         }
     }
 
@@ -1051,6 +1305,7 @@ contract DeliveryEscrow is PaymentEvents {
         uint256 remainingBeforeRefund = escrowBalance(requestId);
         require(amount > 0 && amount <= remainingBeforeRefund, "invalid refund amount");
         delivery.refundedAmount += amount;
+        totalEscrowed -= amount;
         delivery.status = RequestStatus.Refunded;
         _decreaseLockedEscrow(
             delivery.shipper,
@@ -1058,9 +1313,9 @@ contract DeliveryEscrow is PaymentEvents {
             remainingBeforeRefund == amount
         );
 
-        (bool ok, ) = payable(delivery.shipper).call{value: amount}("");
-        require(ok, "refund failed");
+        cargoToken.safeTransfer(delivery.shipper, amount);
         emit RefundIssued(requestId, delivery.shipper, amount);
+        _refundOperationalAllowance(requestId);
     }
 
     function _decreaseLockedEscrow(
@@ -1136,5 +1391,13 @@ contract DeliveryEscrow is PaymentEvents {
             result[i - offset] = ids[i];
         }
         return result;
+    }
+
+    receive() external payable {
+        revert("CARGO payments only");
+    }
+
+    fallback() external payable {
+        revert("CARGO payments only");
     }
 }

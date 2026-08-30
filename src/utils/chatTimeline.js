@@ -1,6 +1,6 @@
 // src/utils/chatTimeline.js — merges off-chain chat messages with verified on-chain delivery activity.
 
-import { formatEther } from 'ethers';
+import { formatCargo } from './format.js';
 
 export const ESCROW_CHAT_EVENT_NAMES = [
   'RequestCreated',
@@ -218,7 +218,7 @@ export function eventLogToNotice(log, timestampMs, eventNameOverride = '', conte
     }
     case 'EscrowFunded': {
       const amount = formatAmount(args.amount);
-      return { ...base, tone: 'payment', subject: 'Escrow', action: 'funded', detail: ` with ${amount} ETH.`, text: `Escrow funded with ${amount} ETH.` };
+      return { ...base, tone: 'payment', subject: 'Escrow', action: 'funded', detail: ` with ${amount} CARGO.`, text: `Escrow funded with ${amount} CARGO.` };
     }
     case 'ProofSubmitted': {
       const subject = `Checkpoint ID ${Number(args.milestoneId)}`;
@@ -241,7 +241,7 @@ export function eventLogToNotice(log, timestampMs, eventNameOverride = '', conte
     case 'MilestonePaid': {
       const subject = `Checkpoint ID ${Number(args.milestoneId)}`;
       const amount = formatAmount(args.amount);
-      return { ...base, tone: 'payment', subject, action: 'paid', detail: ` (${amount} ETH released).`, text: `${amount} ETH released for ${subject}.` };
+      return { ...base, tone: 'payment', subject, action: 'paid', detail: ` (${amount} CARGO released).`, text: `${amount} CARGO released for ${subject}.` };
     }
     case 'RequestCancelled':
       return { ...base, tone: 'warning', subject: 'Delivery request', action: 'cancelled', text: 'Delivery request cancelled.' };
@@ -251,11 +251,11 @@ export function eventLogToNotice(log, timestampMs, eventNameOverride = '', conte
       return { ...base, tone: 'warning', subject: 'Shipment deadline', action: 'passed', detail: '; remaining escrow can be refunded to the shipper.', text: 'Shipment deadline passed; remaining escrow can be refunded to the shipper.' };
     case 'RefundIssued': {
       const amount = formatAmount(args.amount);
-      return { ...base, tone: 'payment', subject: 'Refund', action: 'issued', detail: ` (${amount} ETH returned to the shipper).`, text: `${amount} ETH refunded to the shipper.` };
+      return { ...base, tone: 'payment', subject: 'Refund', action: 'issued', detail: ` (${amount} CARGO returned to the shipper).`, text: `${amount} CARGO refunded to the shipper.` };
     }
     case 'CarrierTipped': {
       const amount = formatAmount(args.amount);
-      return { ...base, tone: 'payment', subject: 'Completion tip', action: 'sent', detail: ` (${amount} ETH to the carrier).`, text: `The shipper sent a ${amount} ETH completion tip.` };
+      return { ...base, tone: 'payment', subject: 'Completion tip', action: 'sent', detail: ` (${amount} CARGO to the carrier).`, text: `The shipper sent a ${amount} CARGO completion tip.` };
     }
     case 'CarrierRated':
       return { ...base, tone: 'success', subject: 'Carrier rating', action: 'published', text: 'Carrier rating published.' };
@@ -329,7 +329,7 @@ async function getBlockTimestamp(provider, blockNumber) {
 function formatAmount(value) {
   try {
     // Keep blockchain amounts deterministic across browser and test locales.
-    return Number(formatEther(value)).toLocaleString('en-US', { maximumFractionDigits: 4 });
+    return formatCargo(value).replace(/ CARGO$/, '');
   } catch {
     return '0';
   }
@@ -392,7 +392,7 @@ function amendmentRequestText(additionalFunding) {
   try {
     const amount = BigInt(additionalFunding ?? 0n);
     return amount > 0n
-      ? `An agreement change needs a response and proposes ${formatAmount(amount)} ETH in additional escrow.`
+      ? `An agreement change needs a response and proposes ${formatAmount(amount)} CARGO in additional escrow.`
       : 'An agreement change needs a response.';
   } catch {
     return 'An agreement change needs a response.';

@@ -20,7 +20,7 @@ The current build also supports wallet display names, request-scoped private cha
 | Proof image storage | Browser AES-256-GCM ciphertext pinned to Pinata public IPFS through Express-issued signed URLs; server-only wrapped per-proof keys in Supabase `proof_keys`; legacy HTTPS/Supabase URLs remain readable. |
 | Tests | Truffle Mocha/Chai and Vitest |
 
-Sepolia, QR recipient confirmation, auto-release dispute windows, and carrier republishing are not part of v1.
+Sepolia, QR recipient confirmation, auto-release dispute windows, and carrier republishing are not part of v1. CARGO is the approved business-payment currency; ETH remains the native gas currency.
 
 ## 3. Contracts
 

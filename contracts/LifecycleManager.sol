@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
 /// @dev Narrow DeliveryEscrow surface needed by agreement-change workflows.
 interface IDeliveryEscrowLifecycle {
     enum RequestStatus {
@@ -73,6 +76,7 @@ interface IDeliveryEscrowLifecycle {
 /// @notice Owns amendment and mutual-cancellation negotiation state while
 /// DeliveryEscrow remains the source of truth for requests, milestones, and ETH.
 contract LifecycleManager {
+    using SafeERC20 for IERC20;
     /// @notice Sentinel used by amendment proposals to place a new checkpoint last.
     uint256 public constant APPEND_MILESTONE_ID = type(uint256).max;
 
@@ -145,12 +149,14 @@ contract LifecycleManager {
     }
 
     address public immutable initializer;
+    IERC20 public immutable cargoToken;
     IDeliveryEscrowLifecycle public deliveryEscrow;
     uint256 public constant MIN_ADDITIONAL_FUNDING = 0.01 ether;
     uint256 public constant MIN_CANCELLATION_LEAD_TIME = 1 hours;
     uint256 public constant MIN_AMENDMENT_LEAD_TIME = 1 hours;
     uint256 public constant MIN_DEADLINE_CHANGE = 15 minutes;
     uint256 public constant MAX_NOTE_BYTES = 500;
+    uint256 public constant MAX_TOTAL_MILESTONES = 20;
 
     mapping(uint256 => ActiveNegotiation) private activeNegotiations;
     mapping(uint256 => CancellationRequest[]) private cancellationRequests;
@@ -217,8 +223,10 @@ contract LifecycleManager {
     );
     event AmendmentExpired(uint256 indexed requestId, uint256 indexed amendmentId);
 
-    constructor() {
+    constructor(address cargoTokenAddress) {
+        require(cargoTokenAddress != address(0), "cargo token required");
         initializer = msg.sender;
+        cargoToken = IERC20(cargoTokenAddress);
     }
 
     function initializeDeliveryEscrow(address deliveryEscrowAddress) external {
@@ -328,7 +336,7 @@ contract LifecycleManager {
         string calldata requesterNote,
         ExistingMilestoneFunding[] calldata existingFunding,
         NewMilestoneFunding[] calldata newMilestones
-    ) external payable requestExists(requestId) returns (uint256 amendmentId) {
+    ) external requestExists(requestId) returns (uint256 amendmentId) {
         _requireNegotiableShipment(requestId);
         _requireNegotiationParticipant(requestId, msg.sender);
         _requireValidResponseDeadline(requestId, responseDeadline);
@@ -388,9 +396,16 @@ contract LifecycleManager {
             "shipper can extend deadline directly"
         );
         if (msg.sender == shipper) {
-            require(msg.value == additionalFunding, "funding must match allocations");
+            if (additionalFunding > 0) {
+                require(
+                    cargoToken.allowance(msg.sender, address(this)) >= additionalFunding,
+                    "CARGO allowance too low"
+                );
+                cargoToken.safeTransferFrom(msg.sender, address(this), additionalFunding);
+            }
         } else {
-            require(msg.value == 0, "carrier cannot stage funding");
+            // Carrier-requested funding is supplied by the shipper when the
+            // counterparty accepts the amendment.
         }
 
         address responder = msg.sender == shipper ? carrier : shipper;
@@ -432,7 +447,6 @@ contract LifecycleManager {
 
     function acceptAmendment(uint256 requestId, uint256 amendmentId)
         external
-        payable
         requestExists(requestId)
     {
         AmendmentRequest storage amendment = _pendingAmendment(requestId, amendmentId);
@@ -442,10 +456,12 @@ contract LifecycleManager {
         _requireCurrentMilestoneState(requestId, NegotiationKind.Amendment, amendmentId);
 
         (address shipper, , , , ) = deliveryEscrow.getLifecycleSnapshot(requestId);
-        if (amendment.requester == shipper) {
-            require(msg.value == 0, "funding was already staged");
-        } else {
-            require(msg.value == amendment.additionalFunding, "funding must match amendment");
+        if (amendment.requester != shipper && amendment.additionalFunding > 0) {
+            require(
+                cargoToken.allowance(msg.sender, address(this)) >= amendment.additionalFunding,
+                "CARGO allowance too low"
+            );
+            cargoToken.safeTransferFrom(msg.sender, address(this), amendment.additionalFunding);
         }
 
         IDeliveryEscrowLifecycle.ExistingMilestoneFunding[] memory existingFunding =
@@ -458,7 +474,10 @@ contract LifecycleManager {
         amendment.status = AmendmentStatus.Accepted;
         amendment.resolvedAt = block.timestamp;
         _closeNegotiation(requestId, NegotiationKind.Amendment, amendmentId);
-        deliveryEscrow.finalizeAmendment{value: amendmentFunding}(
+        if (amendmentFunding > 0) {
+            cargoToken.safeTransfer(address(deliveryEscrow), amendmentFunding);
+        }
+        deliveryEscrow.finalizeAmendment(
             requestId,
             proposedDeadline,
             existingFunding,
@@ -817,6 +836,10 @@ contract LifecycleManager {
         uint256 previousInsertionPosition;
         bool hasPreviousInsertion;
         uint256 milestoneCount = deliveryEscrow.getMilestoneCount(requestId);
+        require(
+            milestoneCount + newMilestones.length <= MAX_TOTAL_MILESTONES,
+            "too many milestones"
+        );
         for (uint256 i = 0; i < newMilestones.length; i++) {
             NewMilestoneFunding calldata addition = newMilestones[i];
             require(bytes(addition.name).length > 0, "milestone name required");
@@ -884,8 +907,7 @@ contract LifecycleManager {
         if (amendment.requester != shipper || amendment.additionalFunding == 0) {
             return;
         }
-        (bool refunded, ) = payable(shipper).call{value: amendment.additionalFunding}("");
-        require(refunded, "staged funding refund failed");
+        cargoToken.safeTransfer(shipper, amendment.additionalFunding);
     }
 
     function _pendingAmendment(uint256 requestId, uint256 amendmentId)

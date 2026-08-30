@@ -20,7 +20,7 @@ If a request implies changing any of the above, refuse and refer to `AGENTS.md` 
 ## Cstan's explicit out-of-scope items
 
 - **NO QR-code recipient verification.** The PRD v3 lists R13 (QR confirmation) — **treat as REMOVED** in any planning or implementation work.
-- **Supabase Storage for photo-proof** is the current implementation. Do not reintroduce the retired local storage backend.
+- **Pinata/IPFS encrypted proof storage** is the current implementation. Supabase Postgres stores chat and wrapped proof keys.
 
 ## Common tasks — recipe
 
