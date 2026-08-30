@@ -449,6 +449,56 @@ export function Track() {
     }
   };
 
+  const topUpOperationalAllowance = async (amountText) => {
+    if (busy || !shipment || !signer || !contracts?.deliveryEscrow || !isShipper) return false;
+    let amount;
+    try {
+      amount = parseEther(String(amountText).trim());
+    } catch {
+      show('Enter a valid CARGO reserve amount.', 'error');
+      return false;
+    }
+    if (amount <= 0n) {
+      show('Reserve amount must be greater than zero.', 'error');
+      return false;
+    }
+    setActionStage('topping-up-allowance');
+    let transactionToast;
+    try {
+      transactionToast = startTransactionToast({
+        wallet: 'Confirm the CARGO reserve allowance in MetaMask…',
+        submitted: 'Adding CARGO operational reserve…',
+        success: 'Operational reserve updated.',
+      });
+      await ensureTokenAllowance({
+        token: contracts.cargoToken,
+        spender: contracts.deliveryEscrow.target,
+        amount,
+        signer,
+        provider,
+      });
+      const tx = await sendWalletContractTransaction({
+        contract: contracts.deliveryEscrow,
+        method: 'topUpOperationalAllowance',
+        args: [BigInt(shipment.id), amount],
+        signer,
+        provider,
+      });
+      transactionToast.submitted();
+      await tx.wait();
+      transactionToast.success();
+      setRefreshKey((value) => value + 1);
+      return true;
+    } catch (actionError) {
+      const message = formatActionError(actionError);
+      if (transactionToast) transactionToast.error(message);
+      else show(message, 'error');
+      return false;
+    } finally {
+      setActionStage('idle');
+    }
+  };
+
   const cancelRequest = async () => {
     if (busy || !shipment || !signer || !contracts?.deliveryEscrow) {
       show('Connect the shipper wallet first.', 'error');
@@ -1245,6 +1295,7 @@ export function Track() {
             busy={busy}
             actionStage={actionStage}
             onTip={sendCarrierTip}
+            onTopUp={topUpOperationalAllowance}
           />
         </Card>
       )}
@@ -4017,8 +4068,10 @@ function EscrowActivityPanel({
   busy,
   actionStage,
   onTip,
+  onTopUp,
 }) {
   const [tipAmountEth, setTipAmountEth] = useState('');
+  const [topUpAmount, setTopUpAmount] = useState('');
   const tipInputRef = useRef(null);
   const canTip = isShipper && shipment.status === 'Completed' && shipment.tipAmount === 0n;
   const amendmentFunding = shipment.escrow > shipment.proposedAmount
@@ -4055,6 +4108,35 @@ function EscrowActivityPanel({
       <PaymentRow label="Released so far" value={formatCargo(shipment.released)} />
       <PaymentRow label="Refunded" value={formatCargo(shipment.refunded)} />
       <PaymentRow label="Remaining escrow" value={formatCargo(shipment.remaining)} />
+      {shipment.operationalAllowance > 0n && (
+        <>
+          <PaymentRow label="Operational reserve" value={formatCargo(shipment.operationalAllowance)} />
+          <PaymentRow label="Reserve remaining" value={formatCargo(shipment.operationalRemaining)} />
+        </>
+      )}
+      {isShipper && ['Funded', 'InProgress'].includes(shipment.status) && (
+        <form className={styles.tipForm} onSubmit={async (event) => {
+          event.preventDefault();
+          const added = await onTopUp(topUpAmount);
+          if (added) setTopUpAmount('');
+        }}>
+          <label htmlFor="operational-reserve-amount">Add CARGO operational reserve</label>
+          <div className={styles.tipInputRow}>
+            <input
+              id="operational-reserve-amount"
+              type="text"
+              inputMode="decimal"
+              value={topUpAmount}
+              onChange={(event) => setTopUpAmount(event.target.value)}
+              placeholder="0.00"
+              disabled={busy}
+            />
+            <Button size="sm" type="submit" disabled={busy || !topUpAmount.trim()}>
+              {actionStage === 'topping-up-allowance' ? 'Adding…' : 'Add reserve'}
+            </Button>
+          </div>
+        </form>
+      )}
       {shipment.tipAmount > 0n && (
         <PaymentRow label="Completion tip" value={formatCargo(shipment.tipAmount)} />
       )}
@@ -4510,6 +4592,9 @@ function formatActionError(error) {
   }
   const message = error?.shortMessage || error?.reason || error?.message || '';
   if (message.includes('insufficient funds')) return 'The shipper wallet does not have enough ETH.';
+  if (message.includes('CARGO allowance too low')) return 'Approve enough CARGO for this payment and reserve before retrying.';
+  if (message.includes('operational allowance below minimum')) return 'The operational reserve is below the contract minimum for this shipment.';
+  if (message.includes('response allowance below minimum')) return 'The response reserve is below the contract minimum.';
   if (message.includes('caller is not shipper')) return 'Only the request shipper can perform this action.';
   if (message.includes('proposal is not active')) return 'This proposal is no longer active. Refresh the request and choose another plan.';
   if (message.includes('request is not open')) return 'This request is no longer open for proposal review.';
