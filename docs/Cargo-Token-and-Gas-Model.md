@@ -7,11 +7,13 @@
 
 The current proof-storage baseline uses browser-side AES-256-GCM encryption and Pinata Public IPFS for new images. Supabase Postgres remains responsible for private chat and wrapped proof-key records, not new proof-image uploads. Existing HTTPS/Supabase proof references remain readable for compatibility. See [IPFS-Pinata-Execution-Plan.md](IPFS-Pinata-Execution-Plan.md) for the selected storage design.
 
-Implementation checkpoint `4ef69d0` contains the backed CARGO token, CARGO
-settlement in escrow and lifecycle contracts, bounded proposal/proof state,
-operational proof reimbursement, amendment response reimbursement, and the
-first Cargo Wallet UI. Remaining work covers final benchmark hardening, full
-amendment UI policy controls, integration cleanup, and end-to-end verification.
+Implementation checkpoints `4ef69d0`, `3831814`, and `951ec19` contain the
+backed CARGO token, CARGO settlement in escrow and lifecycle contracts, bounded
+proposal/proof state, operational proof reimbursement, amendment response
+reimbursement, the amendment policy controls, and the first Cargo Wallet UI.
+Remaining work covers final benchmark hardening, operational reserve funding for
+new amendment checkpoints, deeper integration checks, and the full manual
+end-to-end scenario.
 
 ## 1. Purpose
 
@@ -895,7 +897,11 @@ Implementation must explicitly cover:
 
 ## 16. CARGO implementation phases
 
-**Plan revised:** 2026-08-31. All nine phases below remain planned. This sequence supersedes the earlier phase order in this document and is separate from the desktop UI phase documents.
+**Plan revised:** 2026-08-31. Phases 1 through 6 are implemented in the
+current branch. Phases 7 through 9 remain in progress and cover the remaining
+wallet/payment polish, cross-module checks, final benchmarks, and manual QA.
+This sequence supersedes the earlier phase order in this document and is
+separate from the desktop UI phase documents.
 
 The user chose to skip the pre-implementation live IPFS smoke test and use the merged teammate implementation as the baseline. That test is not a prerequisite for Phase 1 and must not be described as passed. This does not remove automated regression tests for CARGO changes that touch the proof workflow.
 
