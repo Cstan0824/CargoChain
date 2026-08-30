@@ -231,7 +231,7 @@ export function Carrier() {
 
           <Card className={styles.earnings}>
             <h2 className={styles.cardTitle}>Earnings (this month)</h2>
-            <div className={styles.earningsValue}>2.85 ETH</div>
+            <div className={styles.earningsValue}>2,850.00 CARGO</div>
             <div className={styles.chartWrap}>
               <LineChart points={9} color="var(--chart-5)" />
             </div>
