@@ -14,6 +14,8 @@
     "migrate": "truffle migrate --reset --network development",
     "test": "truffle test",
     "test:frontend": "vitest run",
+    "test:server": "node --test server/config/environment.test.js server/services/proofUri.test.js server/services/proofKeyService.test.js server/services/ipfsProvider.test.js server/services/chainReader.test.js server/routes/proofs.test.js",
+    "smoke:ipfs": "node scripts/ipfs-smoke-check.mjs",
     "test:scenarios": "truffle exec scripts/run-scenarios.js",
     "server": "node server/index.js",
     "start": "npm run dev:all"

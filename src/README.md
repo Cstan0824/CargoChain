@@ -16,7 +16,7 @@ ToastProvider
 - `Web3Context` maintains the direct RPC provider, MetaMask browser provider, signer, account, and chain state.
 - `ContractsContext` loads `DeliveryEscrow`, `LifecycleManager`, `ReputationRegistry`, and `UserRegistry` from Truffle artifacts and validates their current deployment linkage.
 - `UserProfileContext` reads/refreshes the connected wallet's on-chain registration and owns the registration modal flow.
-- `ChatAuthContext` manages SIWE chat authentication and clears sessions when wallet account/network changes.
+- `ChatAuthContext` manages the shared SIWE wallet session used by protected chat and proof operations, and clears it when the wallet account/network changes.
 
 ## Routes
 
@@ -37,12 +37,12 @@ Legacy `/shipper` and `/carrier` paths redirect to `/my-shipments`.
 | Folder | Responsibility |
 |---|---|
 | `components/` | Reusable application controls, dialogs, dashboard UI, registration, and chat components. |
-| `context/` | Wallet, read-only contract map, display-name profile, SIWE chat session, and toast state. |
+| `context/` | Wallet, read-only contract map, display-name profile, shared SIWE session, and toast state. |
 | `contracts/` | Artifact-based ethers contract factory and deployment-link validation. |
 | `hooks/` | Context helpers plus confirmation, chat presentation, and wallet-identity helpers. |
 | `lib/` | Supabase browser client and Express API client. |
 | `services/` | Read-oriented chat data service. |
-| `utils/` | Formatting, file hashing/upload, wallet transaction execution, payment history, text limits, and event-to-chat-timeline conversion. |
+| `utils/` | Formatting, browser proof hashing/encryption, canonical URI helpers, wallet transaction execution, payment history, text limits, and event-to-chat-timeline conversion. |
 
 ## Contract and wallet conventions
 
@@ -53,6 +53,6 @@ Legacy `/shipper` and `/carrier` paths redirect to `/my-shipments`.
 
 ## Proof upload and chat
 
-- `utils/upload.js` accepts JPEG, PNG, and WebP proof files up to 10 MB, computes a SHA-256 hash, writes to Supabase Storage, and returns the public URL used for on-chain proof submission.
+- `utils/upload.js` accepts JPEG, PNG, and WebP proof files up to 2 MiB, computes a plaintext SHA-256 hash, encrypts with AES-256-GCM, and delegates ciphertext upload/finalization to the authenticated Pinata proof API. The contract receives a canonical `ipfs://` reference.
 - Chat message text is off-chain in Supabase. `utils/chatTimeline.js` separately reads filtered `DeliveryEscrow` / `LifecycleManager` events so the conversation also shows verified delivery activity.
 - Supabase values must be present in `.env`; see the root [`README.md`](../README.md) for setup.

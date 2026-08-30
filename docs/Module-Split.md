@@ -38,7 +38,7 @@
 - The project does not deploy a separate `MilestoneVerifier.sol`; proof state is implemented in `DeliveryEscrow`.
 - Carrier submits proof URLs and remarks for the next checkpoint in execution order.
 - Shipper verifies or rejects proof. Rejection allows resubmission; verification pays the checkpoint.
-- The browser creates a SHA-256 hash before uploading proof images to Supabase Storage. The storage URL and proof metadata are on-chain delivery evidence; the image itself is not stored on-chain.
+- The browser creates a plaintext SHA-256 hash, encrypts proof images up to 2 MiB with AES-256-GCM, and uploads ciphertext through the authenticated Pinata path. The canonical URI and proof metadata are on-chain delivery evidence; plaintext is not stored on-chain.
 
 ## e. Frontend and UI/UX — Cstan
 
@@ -65,7 +65,7 @@ UserRegistry ── registration check ──► DeliveryEscrow
 DeliveryEscrow ── canonical shipment/progress reads ──► LifecycleManager
 LifecycleManager ── restricted settlement/final amendment ──► DeliveryEscrow
 DeliveryEscrow + LifecycleManager events ──► chat activity timeline
-Supabase Storage ── public proof URL ──► DeliveryEscrow.submitProof
+Browser AES-GCM ── signed Pinata/IPFS ciphertext ──► DeliveryEscrow.submitProof
 ```
 
 ## Change protocol

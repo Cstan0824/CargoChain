@@ -1,4 +1,4 @@
-// server/index.js — CargoChain Chat & API Backend Server
+// server/index.js — CargoChain wallet-session, proof, chat, and API server
 // Primary modular backend server. Port 3000 by default.
 
 const express = require('express');
@@ -31,17 +31,25 @@ app.get('/api/health', (req, res) => {
 
 const authRouter = require('./routes/auth');
 const chatRouter = require('./routes/chat');
+const proofsRouter = require('./routes/proofs');
 
-// Mount Auth & Chat routes
+// Mount authentication, chat, and encrypted proof routes.
 app.use('/api/auth', authRouter);
 app.use('/api/chat', chatRouter);
+app.use('/api/proofs', proofsRouter);
 
 // Central error handler
 app.use(errorHandler);
 
 const PORT = config.port;
 function startServer() {
-  validateConfig({ requireAuth: true, requireDb: true, requireChain: true });
+  validateConfig({
+    requireAuth: true,
+    requireDb: true,
+    requireChain: true,
+    requireIpfs: true,
+    requireProofKey: true,
+  });
   startAcceptedConversationProvisioner();
   return app.listen(PORT, '127.0.0.1', () => {
     console.log(`[cargochain-api] listening on http://127.0.0.1:${PORT}`);

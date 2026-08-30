@@ -40,6 +40,7 @@ import { useUserProfile } from '../hooks/useUserProfile.js';
 import { useWalletIdentities, walletIdentityLabel } from '../hooks/useWalletIdentities.js';
 import { useConfirmDialog } from '../hooks/useConfirmDialog.js';
 import { useDialogFocus } from '../hooks/useDialogFocus.js';
+import { useChatAuth } from '../context/ChatAuthContext.jsx';
 import {
   formatDate,
   formatEth,
@@ -49,7 +50,9 @@ import {
   requestStatus,
 } from '../utils/format.js';
 import styles from './Track.module.css';
-import {hashFile, uploadPhoto} from '../utils/upload.js';
+import { pinEncryptedProof, validateProofFile } from '../utils/upload.js';
+import { loadEncryptedProof } from '../lib/proofApiClient.js';
+import { getConfiguredGatewayBases, parseProofUri } from '../utils/proofUri.js';
 import {
   formatWalletTransactionError,
   sendWalletContractTransaction,
@@ -79,9 +82,10 @@ export function Track() {
   const navigate = useNavigate();
   const location = useLocation();
   const { contracts, deployError } = useContracts();
-  const { account, signer, provider, connect } = useWallet();
+  const { account, signer, provider, connect, walletChainId } = useWallet();
   const { show } = useToast();
   const { requireRegistration } = useUserProfile();
+  const { authenticateChat, getChatAccessToken } = useChatAuth();
   const [shipment, setShipment] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -129,12 +133,21 @@ export function Track() {
   }, [location.search, shipment]);
 
   useEffect(() => {
-    if (!idParam || !contracts?.deliveryEscrow || !contracts?.lifecycleManager) {
+    if (!idParam) {
       setShipment(null);
+      setLoading(false);
+      return;
+    }
+
+    if (!contracts?.deliveryEscrow || !contracts?.lifecycleManager) {
+      setLoading(false);
       return;
     }
 
     let cancelled = false;
+    const hasCurrentShipment = Boolean(
+      shipment && String(shipment.id) === String(idParam),
+    );
     setLoading(true);
     setError(null);
 
@@ -150,8 +163,14 @@ export function Track() {
       })
       .catch((loadError) => {
         if (!cancelled) {
-          setShipment(null);
-          setError(loadError.shortMessage || loadError.reason || loadError.message);
+          const message = loadError.shortMessage || loadError.reason || loadError.message;
+          if (hasCurrentShipment) {
+            setError(null);
+            show(`Could not refresh the latest shipment status. ${message}`, 'error');
+          } else {
+            setShipment(null);
+            setError(message);
+          }
         }
       })
       .finally(() => {
@@ -212,6 +231,52 @@ export function Track() {
     isCarrier && ['Funded', 'InProgress'].includes(shipment?.status),
   );
   const busy = actionStage !== 'idle';
+
+  const getProofAuthToken = async () => {
+    const existingToken = getChatAccessToken();
+    if (existingToken) return existingToken;
+    const authenticated = await authenticateChat();
+    const token = authenticated?.token || getChatAccessToken();
+    if (!token) throw new Error('Wallet sign-in did not return a CargoChain session.');
+    return token;
+  };
+
+  const openProofViewer = async (milestone) => {
+    const hasEncryptedProof = (milestone?.proofUris || []).some(
+      (proofUri) => typeof proofUri === 'string' && proofUri.startsWith('ipfs://'),
+    );
+    if (!hasEncryptedProof) {
+      setProofViewerMilestone({
+        ...milestone,
+        requestId: shipment?.id,
+        viewerAccount: account?.toLowerCase() || null,
+        accessToken: null,
+      });
+      return;
+    }
+    if (!account || (!isShipper && !isCarrier)) {
+      show('Only the request shipper or assigned carrier can view encrypted proof.', 'error');
+      return;
+    }
+    try {
+      const accessToken = await getProofAuthToken();
+      setProofViewerMilestone({
+        ...milestone,
+        requestId: shipment?.id,
+        viewerAccount: account.toLowerCase(),
+        accessToken,
+      });
+    } catch (authError) {
+      show(authError?.message || 'Wallet sign-in is required to view encrypted proof.', 'error');
+    }
+  };
+
+  useEffect(() => {
+    if (!proofViewerMilestone?.viewerAccount) return;
+    if (!account || proofViewerMilestone.viewerAccount !== account.toLowerCase()) {
+      setProofViewerMilestone(null);
+    }
+  }, [account, walletChainId]);
 
   const acceptProposal = async (proposalId) => {
     if (busy || !shipment || !signer || !contracts?.deliveryEscrow) return;
@@ -812,9 +877,13 @@ export function Track() {
         activeSignerAddress,
       )) return false;
 
-      const hash = await hashFile(file);
-      const uploadResult = await uploadPhoto(file, hash, shipment.id, milestoneId);
-      const proofReference = `${uploadResult.url}?sha256=${encodeURIComponent(hash)}`;
+      const accessToken = await getProofAuthToken();
+      const uploadResult = await pinEncryptedProof(file, {
+        requestId: shipment.id,
+        milestoneId,
+        token: accessToken,
+      });
+      const proofReference = uploadResult.proofUri;
       transactionToast = startTransactionToast({
         wallet: 'Confirm proof submission in MetaMask…',
         submitted: 'Submitting photo proof…',
@@ -924,7 +993,9 @@ export function Track() {
     }
   };
 
-  if (loading) {
+  const loadView = shipmentLoadView({ loading, shipment, error, deployError });
+
+  if (loadView === 'loading') {
     return (
       <div className={styles.page}>
         <Topbar title={`Shipment #${String(idParam || '').padStart(4, '0')}`} />
@@ -933,7 +1004,7 @@ export function Track() {
     );
   }
 
-  if (deployError || error || !shipment) {
+  if (loadView !== 'ready') {
     return (
       <div className={styles.page}>
         <Topbar title={`Shipment #${String(idParam || '').padStart(4, '0')}`} />
@@ -1069,7 +1140,7 @@ export function Track() {
                 selectedIndex={selectedIndex}
                 onSelect={setSelectedIndex}
                 walletIdentities={walletIdentities}
-                onViewProof={setProofViewerMilestone}
+                onViewProof={openProofViewer}
                 canVerify={isShipper}
                 canSubmitProof={proofSubmissionOpen}
                 busy={busy}
@@ -1216,6 +1287,9 @@ export function Track() {
         <ProofViewerModal
           milestone={proofViewerMilestone}
           onClose={() => setProofViewerMilestone(null)}
+          requestId={proofViewerMilestone.requestId}
+          accessToken={proofViewerMilestone.accessToken}
+          gatewayBases={getConfiguredGatewayBases()}
         />
       )}
       {reputationCarrier && (
@@ -3397,7 +3471,7 @@ function TimelinePanel({
   );
 }
 
-function ProofSubmitBox({ milestoneId, rejected, busy, onSubmit }) {
+export function ProofSubmitBox({ milestoneId, rejected, busy, onSubmit }) {
   const [selectedFile, setSelectedFile] = useState(null);
   const [fileError, setFileError] = useState('');
   const [remark, setRemark] = useState('');
@@ -3438,7 +3512,7 @@ function ProofSubmitBox({ milestoneId, rejected, busy, onSubmit }) {
       <span className={styles.sidebarLabel}>
         {rejected ? 'Resubmit proof for this milestone' : 'Carrier checkpoint update'}
       </span>
-      <p className={styles.proofUploadHint}>Add a clear JPEG, PNG, or WebP photo. Maximum 2 MB.</p>
+      <p className={styles.proofUploadHint}>Add a clear JPEG, PNG, WebP, GIF, AVIF, or BMP image. Maximum 2 MB.</p>
       <label htmlFor={fileInputId} className={styles.proofDropzone}>
         <HiOutlinePhoto className={styles.proofDropzoneIcon} aria-hidden="true" />
         <span>{selectedFile ? 'Replace photo' : 'Choose photo proof'}</span>
@@ -3448,15 +3522,15 @@ function ProofSubmitBox({ milestoneId, rejected, busy, onSubmit }) {
           id={fileInputId}
           className={styles.proofFileInput}
           type="file"
-          accept="image/jpeg,image/png,image/webp"
+          accept="image/jpeg,image/png,image/webp,image/gif,image/avif,image/bmp"
           disabled={busy}
           onChange={(event) => chooseFile(event.target.files?.[0])}
           aria-describedby={`${fileInputId}-hint`}
         />
       </label>
-      <span id={`${fileInputId}-hint`} className={styles.proofUploadHint}>JPEG, PNG, or WebP · max 2 MB</span>
+      <span id={`${fileInputId}-hint`} className={styles.proofUploadHint}>JPEG, PNG, WebP, GIF, AVIF, or BMP · max 2 MB</span>
       {fileError && <span className={styles.proofUploadError} role="alert">{fileError}</span>}
-      {previewUrl && (
+      {previewUrl && selectedFile && (
         <div className={styles.proofPreview}>
           <img src={previewUrl} alt={`Preview of ${selectedFile.name}`} />
           <span>{Math.ceil(selectedFile.size / 1024)} KB ready to submit</span>
@@ -3524,19 +3598,17 @@ function ProofImageCard({
 }) {
   const [imageFailed, setImageFailed] = useState(false);
   const [copied, setCopied] = useState(false);
-
-  const imageUrl = new URL(
-    proofUri,
-    window.location.origin,
-  ).href;
-
-  const parsedUrl = new URL(
-    proofUri,
-    window.location.origin,
-  );
-
-  const proofHash =
-    parsedUrl.searchParams.get('sha256') || '';
+  const parsedProof = parseProofUri(proofUri);
+  const imageUrl = parsedProof.kind === 'legacy' ? parsedProof.url : '';
+  const proofHash = parsedProof.kind === 'ipfs'
+    ? parsedProof.plaintextSha256
+    : (() => {
+      try {
+        return new URL(imageUrl).searchParams.get('sha256') || '';
+      } catch {
+        return '';
+      }
+    })();
 
   const copyHash = async () => {
     if (!proofHash) return;
@@ -3556,7 +3628,7 @@ function ProofImageCard({
   return (
     <article className={styles.proofCard}>
       <div className={styles.proofImageWrap}>
-        {!imageFailed ? (
+        {imageUrl && !imageFailed ? (
           <img
             src={imageUrl}
             alt={`Proof ${proofIndex + 1} for ${milestone.name}`}
@@ -3566,7 +3638,9 @@ function ProofImageCard({
         ) : (
           <div className={styles.proofImageError}>
             <HiOutlineExclamationCircle aria-hidden="true" />
-            <span>Photo could not be loaded</span>
+            <span>{parsedProof.kind === 'ipfs'
+              ? 'Encrypted proof — open Review photo proof'
+              : 'Photo could not be loaded'}</span>
           </div>
         )}
 
@@ -3615,14 +3689,16 @@ function ProofImageCard({
         )}
 
         <div className={styles.proofActions}>
-          <a
-            href={imageUrl}
-            target="_blank"
-            rel="noreferrer"
-            className={styles.proofActionLink}
-          >
-            View full image
-          </a>
+          {imageUrl && (
+            <a
+              href={imageUrl}
+              target="_blank"
+              rel="noreferrer"
+              className={styles.proofActionLink}
+            >
+              View full image
+            </a>
+          )}
 
           {proofHash && (
             <button
@@ -3639,19 +3715,87 @@ function ProofImageCard({
   );
 }
 
-export function ProofViewerModal({ milestone, onClose }) {
+export function ProofViewerModal({
+  milestone,
+  onClose,
+  requestId,
+  accessToken,
+  gatewayBases,
+}) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [imageFailed, setImageFailed] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
+  const [imageUrl, setImageUrl] = useState('');
+  const [imageError, setImageError] = useState('');
   const closeRef = useRef(null);
   const proofUris = milestone.proofUris || [];
   const hasMultipleProofs = proofUris.length > 1;
   const proofUri = proofUris[activeIndex];
-  const imageUrl = safeProofUrl(proofUri);
+  const parsedProof = parseProofUri(proofUri);
+  const legacyImageUrl = parsedProof.kind === 'legacy' ? parsedProof.url : '';
+  const gatewayKey = (gatewayBases || []).join('|');
   const focusedDialogRef = useDialogFocus({
     onClose,
     initialFocusRef: closeRef,
   });
+
+  useEffect(() => {
+    let active = true;
+    let cleanup = null;
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    setImageFailed(false);
+    setImageError('');
+    setImageUrl('');
+
+    if (!proofUri) {
+      setImageLoading(false);
+      return () => controller?.abort();
+    }
+    if (parsedProof.kind === 'legacy') {
+      setImageLoading(true);
+      return () => controller?.abort();
+    }
+    if (parsedProof.kind !== 'ipfs') {
+      setImageLoading(false);
+      setImageFailed(true);
+      setImageError(parsedProof.error || 'This proof reference is invalid.');
+      return () => controller?.abort();
+    }
+    if (!requestId || !accessToken) {
+      setImageLoading(false);
+      setImageFailed(true);
+      setImageError('Wallet sign-in is required to view this encrypted proof.');
+      return () => controller?.abort();
+    }
+
+    setImageLoading(true);
+    loadEncryptedProof(proofUri, {
+      requestId,
+      milestoneId: milestone.milestoneId,
+      token: accessToken,
+      gatewayBases,
+      signal: controller?.signal,
+    }).then((result) => {
+      if (!active) {
+        result.cleanup();
+        return;
+      }
+      cleanup = result.cleanup;
+      setImageUrl(result.objectUrl);
+      setImageLoading(false);
+    }).catch((error) => {
+      if (!active || error?.name === 'AbortError') return;
+      setImageLoading(false);
+      setImageFailed(true);
+      setImageError(error?.message || 'Encrypted proof could not be loaded.');
+    });
+
+    return () => {
+      active = false;
+      controller?.abort();
+      cleanup?.();
+    };
+  }, [proofUri, requestId, accessToken, milestone.milestoneId, gatewayKey]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -3701,12 +3845,12 @@ export function ProofViewerModal({ milestone, onClose }) {
         </header>
 
         <div className={styles.proofViewerBody}>
-          {imageLoading && imageUrl && !imageFailed && (
+          {imageLoading && !imageFailed && (
             <div className={styles.proofViewerLoading} role="status">Loading photo proof…</div>
           )}
-          {imageUrl && !imageFailed ? (
+          {(legacyImageUrl || imageUrl) && !imageFailed ? (
             <img
-              src={imageUrl}
+              src={legacyImageUrl || imageUrl}
               alt={`Photo proof attempt ${activeIndex + 1} for ${milestone.name}`}
               className={styles.proofViewerImage}
               onLoad={() => setImageLoading(false)}
@@ -3715,12 +3859,12 @@ export function ProofViewerModal({ milestone, onClose }) {
                 setImageFailed(true);
               }}
             />
-          ) : (
+          ) : !imageLoading ? (
             <div className={styles.proofViewerError}>
               <HiOutlineExclamationCircle aria-hidden="true" />
-              <span>{proofUris.length ? 'Photo could not be loaded' : 'No photo proof is available'}</span>
+              <span>{proofUris.length ? (imageError || 'Photo could not be loaded') : 'No photo proof is available'}</span>
             </div>
-          )}
+          ) : null}
           {hasMultipleProofs && (
             <>
               <button type="button" className={`${styles.proofViewerNav} ${styles.proofViewerPrev}`} onClick={() => move(-1)} aria-label="Previous proof">
@@ -3735,7 +3879,7 @@ export function ProofViewerModal({ milestone, onClose }) {
 
         <footer className={styles.proofViewerFooter}>
           <span>Attempt {proofUris.length ? activeIndex + 1 : 0} of {proofUris.length}</span>
-          {imageUrl && <a href={imageUrl} target="_blank" rel="noreferrer">Open full image</a>}
+          {(legacyImageUrl || imageUrl) && <a href={legacyImageUrl || imageUrl} target="_blank" rel="noreferrer">Open full image</a>}
         </footer>
       </section>
     </div>
@@ -3873,24 +4017,15 @@ export function visibleOpenProposalsFor(proposals = [], account = '', shipper = 
   ));
 }
 
-export function proofFileError(file) {
-  if (!file) return 'Choose a photo proof file.';
-  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-    return 'Invalid file type. Please choose a JPEG, PNG, or WebP image.';
-  }
-  if (file.size > 2 * 1024 * 1024) {
-    return 'File size exceeds 2 MB. Choose a smaller image.';
-  }
-  return '';
+export function shipmentLoadView({ loading, shipment, error, deployError } = {}) {
+  if (loading && !shipment) return 'loading';
+  if (shipment) return 'ready';
+  if (deployError || error) return 'error';
+  return 'empty';
 }
 
-function safeProofUrl(proofUri) {
-  if (!proofUri || typeof proofUri !== 'string') return '';
-  try {
-    return new URL(proofUri, window.location.origin).href;
-  } catch {
-    return '';
-  }
+export function proofFileError(file) {
+  return validateProofFile(file);
 }
 
 async function loadShipment(deliveryEscrow, lifecycleManager, idParam) {

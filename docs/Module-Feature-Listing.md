@@ -9,7 +9,7 @@
 | a. User profile and wallet | wx | MetaMask connection, network validation, wallet registration, display names, profile presentation. |
 | b. Goods requests and lifecycle | GAN | Request creation, carrier proposals, proposal review, stable checkpoint ordering, amendments, mutual cancellation. |
 | c. Payment and escrow | Jeremy | Exact ETH escrow funding, milestone releases, remaining-escrow refunds, payment history, completion tips. |
-| d. Milestone tracking and proof | Melissa | Carrier proof submission, shipper verification/rejection, SHA-256-derived Storage paths, checkpoint progress. |
+| d. Milestone tracking and proof | Melissa | Carrier encrypted IPFS proof submission, shipper verification/rejection, canonical URI/hash handling, checkpoint progress. |
 | e. Frontend and UI/UX | Cstan | React routes, contract integration, transaction UX, photo upload, tracking, profiles, chat UI. |
 
 ## Delivered capabilities
@@ -20,7 +20,7 @@
 | Requests | Shipper creates an open request with items, route, payment, and deadline. | `DeliveryEscrow.createRequest` |
 | Proposals | Multiple carriers may propose; one active proposal per carrier; carriers can revoke/resubmit; shipper can manually reject with an optional note. | `DeliveryEscrow`, `ProposeMilestones`, `Track` |
 | Funding | Shipper approves one plan and supplies the exact advertised ETH; other active plans receive an automatic rejection reason. | `approveAndFund` |
-| Proof | Carrier uploads JPEG/PNG/WebP proof to Supabase Storage after browser SHA-256 hashing, then submits its URL/remark on-chain. | `upload.js`, `submitProof` |
+| Proof | Carrier encrypts a JPEG/PNG/WebP proof (≤2 MiB) in the browser, uploads ciphertext through the authenticated Pinata path, then submits the canonical URI/remark on-chain. | `proofCrypto.js`, `proofApiClient.js`, `submitProof` |
 | Verification | Shipper verifies or rejects submitted proof; verified checkpoint funds release directly to the carrier. | `verifyMilestone` |
 | Refund | After deadline expiry, or accepted mutual cancellation, only remaining unpaid escrow is refundable. | `refundRemaining`, `finalizeMutualCancellation` |
 | Amendments | Deadline changes, top-ups for unpaid checkpoints, and newly funded checkpoints can be negotiated with a shared response deadline and lock. | `LifecycleManager` |

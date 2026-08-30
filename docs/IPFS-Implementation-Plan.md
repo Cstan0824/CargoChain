@@ -97,7 +97,7 @@ The upload control is available only when all of these are true:
 
 Submission sequence:
 
-1. Carrier selects a JPEG, PNG, or WebP within the final agreed size limit.
+1. Carrier selects a supported browser-safe raster image (JPEG, PNG, WebP, GIF, AVIF, or BMP) within the final agreed size limit.
 2. Browser calculates SHA-256 over the original plaintext bytes.
 3. Browser requests a one-use upload authorization from Express. Express
    validates the SIWE session and repeats the on-chain carrier/state checks.

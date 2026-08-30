@@ -250,8 +250,8 @@ export function Carrier() {
   );
 }
 
-// Legacy dashboard proof modal. The active tracking flow performs the real
-// Supabase Storage upload and submitProof transaction in Track.jsx.
+// Legacy dashboard proof modal. The active tracking flow performs encryption,
+// Pinata upload, and the submitProof transaction in Track.jsx.
 function ProofUploadModal({ job, onClose, onSubmitted }) {
   const { show } = useToast();
   const inputRef = useRef(null);
@@ -333,7 +333,7 @@ function ProofUploadModal({ job, onClose, onSubmitted }) {
               <>
                 <HiOutlinePhoto className={styles.dropIcon} aria-hidden="true" />
                 <div className={styles.dropTitle}>Click or drag a photo</div>
-                <div className={styles.dropHint}>JPEG, PNG, or WebP. Proof images are stored in Supabase; the SHA-256 reference goes on-chain.</div>
+              <div className={styles.dropHint}>JPEG, PNG, WebP, GIF, AVIF, or BMP up to 2 MiB. Open the shipment in Track to encrypt and submit proof through Pinata.</div>
               </>
             )}
             <input
@@ -349,7 +349,7 @@ function ProofUploadModal({ job, onClose, onSubmitted }) {
         <div className={styles.modalFoot}>
           <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
           <Button onClick={submit} disabled={busy || !file}>
-            {busy ? 'Hashing & uploading…' : 'Submit proof'}
+            {busy ? 'Preparing proof…' : 'Submit proof'}
           </Button>
         </div>
       </div>

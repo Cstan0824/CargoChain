@@ -14,7 +14,8 @@
 | Carrier | Browse requests, propose/revoke/resubmit a plan, submit proof, request/answer agreements, receive released payment and tip. |
 | DeliveryEscrow | Holds accepted-plan escrow, records proof/checkpoint state, releases payment, refunds remaining escrow, and records tip. |
 | LifecycleManager | Records amendments/cancellations, enforces one pending negotiation, and finalises restricted escrow actions. |
-| Supabase | Stores proof images and private chat text. It does not decide delivery state or payments. |
+| Pinata/IPFS | Stores encrypted proof ciphertext and serves it through a public gateway; it does not decide delivery state or payments. |
+| Supabase | Stores private chat text and server-only wrapped proof-key records. It does not decide delivery state or payments. |
 
 Every state-changing shipment action requires a registered wallet. One wallet may participate as a shipper in one request and carrier in another.
 
@@ -43,17 +44,19 @@ Accepted carrier starts delivery; other active plans are rejected
 ```text
 Carrier chooses next checkpoint
         ↓
-Browser SHA-256 hashes photo → Supabase Storage upload
+Browser SHA-256 hashes photo → AES-256-GCM encrypts in memory
         ↓
-Carrier submits proof URL + remark on-chain
+Express authorizes → Pinata signed URL → public ciphertext upload
+        ↓
+Carrier submits canonical `ipfs://` proof URI + remark on-chain
         ↓
 Shipper verifies or rejects
         ├─ verify → checkpoint paid → ETH to carrier
         └─ reject → carrier may resubmit proof
 ```
 
-- Proof images must be JPEG, PNG, or WebP and at most 10 MB.
-- The stored image URL is public in the assignment build. The browser uses a SHA-256-derived object path and does not overwrite existing proof objects; the contract records the proof URL/remark rather than independently checking file content.
+- Proof images must be JPEG, PNG, WebP, GIF, AVIF, or BMP and at most **2 MiB** before encryption. SVG is intentionally excluded because it can contain active or externally loaded content.
+- New proof plaintext is encrypted in the browser; public IPFS exposes only ciphertext. Express verifies the ciphertext hash and stores a wrapped key for authorized viewing. Existing HTTPS/Supabase proof URLs remain readable during migration.
 - Checkpoints must complete in the request's current execution order.
 - A paid checkpoint cannot be paid again; paid funds are never clawed back.
 - Once all checkpoints are paid, the request becomes `Completed`.

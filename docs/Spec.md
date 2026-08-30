@@ -1,6 +1,6 @@
 # CargoChain — Technical Specification
 
-> Assignment specification. [`API_v1.md`](../API_v1.md) remains the authoritative function-level reference for the currently implemented contracts. The IPFS proof-storage design is planned, not currently implemented; see [IPFS-Implementation-Plan.md](IPFS-Implementation-Plan.md).
+> Assignment specification. [`API_v1.md`](../API_v1.md) remains the authoritative function-level reference for the currently implemented contracts. New proof uploads use the implemented encrypted Pinata/IPFS path; existing HTTPS/Supabase proof references remain readable during migration. See [IPFS-Pinata-Execution-Plan.md](IPFS-Pinata-Execution-Plan.md) for rollout constraints.
 
 ## 1. Scope
 
@@ -17,7 +17,7 @@ The current build also supports wallet display names, request-scoped private cha
 | Browser app | React 18, Vite, JavaScript, ethers v6 |
 | Wallet | MetaMask browser extension |
 | Private chat | Express SIWE API + Supabase Postgres / Realtime |
-| Proof image storage | Current: existing proof-reference flow. Planned: encrypted ciphertext pinned to Kubo/IPFS with wrapped per-proof keys in server-only `proof_keys` records. |
+| Proof image storage | Browser AES-256-GCM ciphertext pinned to Pinata public IPFS through Express-issued signed URLs; server-only wrapped per-proof keys in Supabase `proof_keys`; legacy HTTPS/Supabase URLs remain readable. |
 | Tests | Truffle Mocha/Chai and Vitest |
 
 Sepolia, QR recipient confirmation, auto-release dispute windows, and carrier republishing are not part of v1.
@@ -105,19 +105,22 @@ The shipper can reject a submitted proof, returning it to `Rejected` for carrier
 
 ## 6. Off-chain services
 
-### Proof images — planned IPFS design
+### Proof images — encrypted Pinata/IPFS design
 
-The browser validates a JPEG/PNG/WebP file up to 2 MB, computes the raw
+The browser validates a JPEG/PNG/WebP file up to 2 MiB, computes the raw
 SHA-256, encrypts the bytes with a fresh AES-256-GCM key, and sends only
 ciphertext to the authenticated Express proof API. The API verifies the
-assigned carrier and milestone state against `DeliveryEscrow`, pins ciphertext
-to Kubo/IPFS using the frozen CIDv1/UnixFS profile, verifies gateway retrieval,
-and stores the data key wrapped by `IPFS_MASTER_KEY` in `proof_keys`.
+assigned carrier and milestone state against `DeliveryEscrow`, creates a
+short-lived Pinata v3 signed URL, and stores the data key wrapped by
+`IPFS_MASTER_KEY` in `proof_keys` after verifying gateway retrieval and the
+ciphertext hash. The browser multipart upload explicitly sends
+`network=public`, `file`, and `name`; the signed URL request does not rely on
+an undocumented `cid_version` field.
 
 The contract receives a canonical URI such as:
 
 ```text
-ipfs://<cid>?enc=aes-256-gcm&iv=<base64url>&sha256=<plaintext-sha256>&ctsha256=<ciphertext-sha256>
+ipfs://<cid>?enc=aes-256-gcm&iv=<base64url>&sha256=<plaintext-sha256>&ctsha256=<ciphertext-sha256>&type=<media-type>
 ```
 
 When a shipper or assigned carrier views the proof, Express repeats the live
@@ -152,15 +155,17 @@ The conversation identity includes chain ID, contract address, request ID, and c
 
 ```bash
 cp .env.example .env
-# configure the currently required Supabase values and SUPABASE_JWT_SECRET
+# configure Supabase chat/database values, Pinata server secrets, and IPFS_MASTER_KEY
 npm install
 npm run dev:all
 ```
 
-The current application uses its existing proof-reference flow. The planned IPFS
-implementation, including Kubo/pinning setup, key custody, and any local
-playground, is defined in [IPFS-Implementation-Plan.md](IPFS-Implementation-Plan.md)
-and must not be inferred as currently available. For manual Ganache GUI use,
+The current application uses the encrypted Pinata proof flow above. Apply
+`scripts/apply-proof-key-schema.sql`, configure `PINATA_JWT`,
+`PINATA_GATEWAY_HOST`, and `IPFS_MASTER_KEY` on the server, and set public
+gateway fallbacks with `VITE_IPFS_GATEWAY_URLS`. The synthetic gate is
+`npm run smoke:ipfs` and skips cleanly without Pinata credentials. For manual
+Ganache GUI use,
 run `npm run compile`, `npm run migrate`, `npm run server`, and
 `npm run dev` separately.
 

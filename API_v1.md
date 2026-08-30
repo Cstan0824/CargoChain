@@ -612,6 +612,72 @@ event CarrierRated(
 
 ---
 
+## Off-chain encrypted proof API
+
+These Express routes support the unchanged `DeliveryEscrow.submitProof` contract
+method. They use the existing SIWE wallet session (`Authorization: Bearer
+<token>`) and re-read the current request/milestone state before issuing an
+upload capability or releasing a key. `PINATA_JWT` and `IPFS_MASTER_KEY` are
+server-only; neither is sent to the browser.
+
+### `POST /api/proofs/upload-session`
+
+Creates a one-use, approximately 30-second Pinata v3 signed upload session for
+the authenticated assigned carrier. The JSON body must include:
+
+```json
+{
+  "requestId": "1",
+  "milestoneId": "0",
+  "mediaType": "image/png",
+  "plaintextSha256": "0x…64 hex characters…",
+  "ciphertextSha256": "0x…64 hex characters…",
+  "iv": "12-byte base64url IV",
+  "ciphertextSize": 1234,
+  "plaintextSize": 1218,
+  "encryptionAlgorithm": "aes-256-gcm"
+}
+```
+
+Plaintext must be JPEG, PNG, or WebP and no larger than **2 MiB**; AES-GCM's
+16-byte tag makes the ciphertext ceiling 2 MiB + 16 bytes. The response returns
+only `sessionId`, `uploadUrl`, a server-derived filename, content type, size
+limit, and expiry. The browser then posts multipart `network=public`, `file`,
+and `name` fields to that URL; it does not send a Pinata credential.
+
+### `POST /api/proofs/finalize`
+
+Consumes the authenticated caller's upload session after the browser receives a
+CID from Pinata. The body repeats the upload metadata and adds `sessionId`,
+`cid`, and the ephemeral 32-byte `dataKey` as base64url. Express re-checks
+on-chain authorization, retrieves the CID through the configured gateway,
+requires the exact authorized byte count and ciphertext SHA-256, wraps the
+data key with the server-only `IPFS_MASTER_KEY`, and stores the wrapped record
+in Supabase `proof_keys`.
+
+The response returns the canonical provider-independent URI:
+
+```text
+ipfs://<cid>?enc=aes-256-gcm&iv=<base64url>&sha256=<plaintext-hash>&ctsha256=<ciphertext-hash>&type=<media-type>
+```
+
+The signed-URL request intentionally does not rely on an undocumented
+`cid_version` field. Gateway URLs remain retrieval details and are never
+stored on-chain.
+
+### `GET /api/proofs/:requestId/:milestoneId/:cid/key`
+
+Returns a per-proof `dataKey` only to the current request shipper or assigned
+carrier, after checking that the CID is still present in the milestone's
+on-chain proof URI and that stored key metadata matches it. The browser must
+retrieve ciphertext through an allowlisted HTTPS gateway, verify both hashes,
+decrypt in memory, and revoke its temporary Blob URL when the viewer closes or
+the wallet/network changes. An unrelated wallet receives `403`; a missing
+wrapped key receives `404`.
+
+Existing HTTPS/Supabase proof references remain readable in the viewer during
+migration, but they do not use this key route.
+
 ## Changelog
 
 | Date | Change |
