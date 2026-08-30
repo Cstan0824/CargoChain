@@ -449,7 +449,7 @@ The demo runs end-to-end on Ganache + a fresh `npm run migrate`:
 1. **Connect a Ganache wallet** in MetaMask and register its optional public display name through the profile flow.
 2. **Switch MetaMask wallets** when demonstrating the other party. Each connected wallet may act as a shipper or carrier according to the shipment action.
 3. **Create and propose:** the shipper creates a request at `http://127.0.0.1:5174/`; two carriers submit milestone plans; the shipper compares, selects, and funds one.
-4. **Proof and payment:** with a synthetic JPEG/PNG/WebP no larger than 2 MiB, the accepted carrier signs in on demand, uploads encrypted ciphertext through Pinata, submits the returned `ipfs://` reference, and the shipper verifies it; show the released ETH and on-chain payment entry.
+4. **Proof and payment:** with a synthetic JPEG/PNG/WebP no larger than 2 MiB, the accepted carrier signs in on demand, uploads encrypted ciphertext through Pinata, submits the returned `ipfs://` reference, and the shipper verifies it; show the released CARGO and on-chain payment entry. ETH remains available in both wallets for gas.
 5. **Private chat:** the accepted pair authenticates with SIWE and exchanges request-scoped messages. Show that the activity timeline only contains events for that carrier/request pair.
 6. **Agreement change:** request a funded amendment or mutual cancellation, then show its review panel, on-chain decision, and history. Do not try to finalise cancellation while a proof is awaiting verification.
 7. **Completion:** finish remaining checkpoints, show the optional one-time tip in Payments, and confirm it reaches the carrier without changing escrow accounting.

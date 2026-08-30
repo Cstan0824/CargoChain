@@ -450,6 +450,39 @@ contract('LifecycleManager', (accounts) => {
     assert.equal(milestone.additionalPayoutAmount.toString(), extra);
   });
 
+  it('supports requester-funded amendment response reimbursement', async () => {
+    await createFundedRequest();
+    const request = await escrow.getRequest(1);
+    const responseAllowance = await manager.minimumResponseAllowance();
+
+    await manager.requestAmendmentWithGasPolicy(
+      1,
+      Number(request.deadline),
+      await responseDeadline(),
+      'Please confirm this amendment with a reimbursed response.',
+      [[1, web3.utils.toWei('0.1', 'ether')]],
+      [],
+      1,
+      responseAllowance,
+      { from: shipper },
+    );
+
+    const pending = (await manager.getAmendmentRequests(1))[0];
+    assert.equal(Number(pending.gasPolicy), 1);
+    assert.equal(pending.responseAllowance.toString(), responseAllowance.toString());
+    assert.equal(
+      (await cargoToken.balanceOf(manager.address)).toString(),
+      (BigInt(responseAllowance) + BigInt(web3.utils.toWei('0.1', 'ether'))).toString(),
+    );
+
+    const receipt = await manager.acceptAmendment(1, 0, { from: carrier });
+    assert.equal(Boolean(receipt.logs.find((log) => log.event === 'AmendmentResponseReimbursed')), true);
+    const resolved = (await manager.getAmendmentRequests(1))[0];
+    assert.equal(resolved.responseReimbursed, true);
+    assert(BigInt(resolved.responseAllowanceSpent) > 0n);
+    assert.equal((await cargoToken.balanceOf(manager.address)).toString(), '0');
+  });
+
   it('restricts agreement decisions to the designated requester and responder', async () => {
     await createFundedRequest();
     const request = await escrow.getRequest(1);

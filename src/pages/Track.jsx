@@ -482,15 +482,6 @@ export function Track() {
         submitted: 'Cancelling shipment request…',
         success: 'Request cancelled.',
       });
-      if (value > 0n && (method === 'requestAmendment' || method === 'acceptAmendment')) {
-        await ensureTokenAllowance({
-          token: contracts.cargoToken,
-          spender: contracts.lifecycleManager.target,
-          amount: value,
-          signer,
-          provider,
-        });
-      }
       const tx = await sendWalletContractTransaction({
         contract: contracts.deliveryEscrow,
         method: 'cancelRequest',
@@ -665,6 +656,7 @@ export function Track() {
     method,
     args,
     value = 0n,
+    approvalAmount = value,
     progressMessage,
     successMessage,
   }) => {
@@ -694,6 +686,22 @@ export function Track() {
         submitted: progressMessage.replace(/\.\.\.$/, '…'),
         success: successMessage,
       });
+      if (
+        approvalAmount > 0n
+        && (
+          method === 'requestAmendment'
+          || method === 'requestAmendmentWithGasPolicy'
+          || method === 'acceptAmendment'
+        )
+      ) {
+        await ensureTokenAllowance({
+          token: contracts.cargoToken,
+          spender: contracts.lifecycleManager.target,
+          amount: approvalAmount,
+          signer,
+          provider,
+        });
+      }
       const tx = await sendWalletContractTransaction({
         contract: contracts.lifecycleManager,
         method,
@@ -727,6 +735,8 @@ export function Track() {
     existingFunding,
     newMilestones,
     additionalFunding,
+    gasPolicy = 0,
+    responseAllowance = 0n,
     directExtension,
   }) => {
     if (directExtension) {
@@ -741,7 +751,7 @@ export function Track() {
 
     return sendAmendmentTransaction({
       stage: 'requesting-amendment',
-      method: 'requestAmendment',
+      method: gasPolicy === 1 ? 'requestAmendmentWithGasPolicy' : 'requestAmendment',
       args: [
         BigInt(shipment.id),
         BigInt(proposedDeadline),
@@ -749,8 +759,10 @@ export function Track() {
         note,
         existingFunding,
         newMilestones,
+        ...(gasPolicy === 1 ? [gasPolicy, responseAllowance] : []),
       ],
       value: isShipper ? additionalFunding : 0n,
+      approvalAmount: isShipper ? additionalFunding + responseAllowance : responseAllowance,
       progressMessage: isShipper && additionalFunding > 0n
         ? `Staging ${formatCargo(additionalFunding)} with the amendment request...`
         : 'Recording the amendment request on-chain...',
@@ -1385,6 +1397,8 @@ function AmendmentPanel({
   const [responseDeadline, setResponseDeadline] = useState(() => (
     suggestedAmendmentResponseDeadline(shipment.deadline)
   ));
+  const [gasPolicy, setGasPolicy] = useState(0);
+  const [responseAllowance, setResponseAllowance] = useState('');
   const [existingAmounts, setExistingAmounts] = useState({});
   const [newMilestones, setNewMilestones] = useState([]);
   const [draggedNewMilestone, setDraggedNewMilestone] = useState(null);
@@ -1415,6 +1429,8 @@ function AmendmentPanel({
     setChangeDeadline(false);
     setProposedDeadline(suggestedExtendedDeadline(shipment.deadline));
     setResponseDeadline(suggestedAmendmentResponseDeadline(shipment.deadline));
+    setGasPolicy(0);
+    setResponseAllowance('');
     setExistingAmounts({});
     setNewMilestones([]);
     setDraggedNewMilestone(null);
@@ -1576,6 +1592,12 @@ function AmendmentPanel({
       }).sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
       const additionalFunding = [...existingFunding, ...additions]
         .reduce((total, allocation) => total + allocation[allocation.length - 1], 0n);
+      const responseAllowanceValue = gasPolicy === 1
+        ? parsePositiveEth(responseAllowance)
+        : 0n;
+      if (gasPolicy === 1 && responseAllowanceValue === 0n) {
+        throw new Error('Enter a CARGO response allowance or choose Each Pays Own.');
+      }
 
       if (additionalFunding > 0n && additionalFunding < MIN_ADDITIONAL_FUNDING_WEI) {
         throw new Error('New amendment funding must total at least 0.01 CARGO.');
@@ -1610,6 +1632,8 @@ function AmendmentPanel({
         existingFunding,
         newMilestones: additions,
         additionalFunding,
+        gasPolicy,
+        responseAllowance: responseAllowanceValue,
         directExtension,
       });
     } catch (error) {
@@ -1831,6 +1855,32 @@ function AmendmentPanel({
               />
               <small>Must be no later than the current shipment deadline.</small>
             </label>
+          </div>
+
+          <div className={styles.amendmentFormGrid}>
+            <label>
+              <span>Amendment gas policy</span>
+              <select value={gasPolicy} onChange={(event) => setGasPolicy(Number(event.target.value))}>
+                <option value={0}>Each pays own</option>
+                <option value={1}>Requester covers response</option>
+              </select>
+              <small>Response reimbursement is paid in CARGO. The requester still pays the submission gas in ETH.</small>
+            </label>
+            {gasPolicy === 1 && (
+              <label>
+                <span>Response allowance (CARGO)</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  value={responseAllowance}
+                  onChange={(event) => setResponseAllowance(event.target.value)}
+                  placeholder="Minimum calculated on-chain"
+                />
+                <small>The contract rejects an allowance below its calculated minimum.</small>
+              </label>
+            )}
           </div>
 
           <label className={styles.amendmentNoteField}>
@@ -2273,6 +2323,12 @@ function AmendmentConfirmationModal({
           <span>Additional escrow required</span>
           <strong>{formatCargo(draft.additionalFunding)}</strong>
         </div>
+        {draft.gasPolicy === 1 && (
+          <div className={styles.amendmentConfirmFunding}>
+            <span>Response allowance</span>
+            <strong>{formatCargo(draft.responseAllowance)}</strong>
+          </div>
+        )}
         <p className={styles.amendmentConfirmWarning}>
           {draft.directExtension
             ? 'This deadline-only extension is applied immediately by the shipper.'
@@ -4237,9 +4293,22 @@ async function loadShipment(deliveryEscrow, lifecycleManager, idParam) {
             ? amendment.resolvedAt ?? amendment[10] ?? 0n
             : amendment[9] ?? 0n,
         ),
-        directExtension: expandedHistoryRecord
-          ? Boolean(amendment.directExtension ?? amendment[11] ?? false)
-          : false,
+         directExtension: expandedHistoryRecord
+           ? Boolean(amendment.directExtension ?? amendment[11] ?? false)
+           : false,
+         gasPolicy: expandedHistoryRecord ? Number(amendment.gasPolicy ?? amendment[12] ?? 0) : 0,
+         responseAllowance: expandedHistoryRecord
+           ? BigInt(amendment.responseAllowance ?? amendment[13] ?? 0n)
+           : 0n,
+         responseAllowanceSpent: expandedHistoryRecord
+           ? BigInt(amendment.responseAllowanceSpent ?? amendment[14] ?? 0n)
+           : 0n,
+         responseAllowanceFunder: expandedHistoryRecord
+           ? amendment.responseAllowanceFunder ?? amendment[15] ?? null
+           : null,
+         responseReimbursed: expandedHistoryRecord
+           ? Boolean(amendment.responseReimbursed ?? amendment[16] ?? false)
+           : false,
         existingFunding: Array.from(existingResult || []).map((allocation) => ({
           milestoneId: Number(allocation.milestoneId ?? allocation[0] ?? 0n),
           amount: BigInt(allocation.amount ?? allocation[1] ?? 0n),

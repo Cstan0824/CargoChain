@@ -18,6 +18,9 @@ export const ESCROW_CHAT_EVENT_NAMES = [
   'RequestExpired',
   'RefundIssued',
   'CarrierTipped',
+  'OperationalAllowanceFunded',
+  'OperationalAllowanceReimbursed',
+  'OperationalAllowanceRefunded',
 ];
 
 export const REPUTATION_CHAT_EVENT_NAMES = ['CarrierRated'];
@@ -29,6 +32,9 @@ export const LIFECYCLE_CHAT_EVENT_NAMES = [
   'AmendmentRejected',
   'AmendmentWithdrawn',
   'AmendmentExpired',
+  'AmendmentResponseAllowanceFunded',
+  'AmendmentResponseReimbursed',
+  'AmendmentResponseAllowanceRefunded',
   'CancellationRequested',
   'CancellationAccepted',
   'CancellationRejected',
@@ -256,6 +262,30 @@ export function eventLogToNotice(log, timestampMs, eventNameOverride = '', conte
     case 'CarrierTipped': {
       const amount = formatAmount(args.amount);
       return { ...base, tone: 'payment', subject: 'Completion tip', action: 'sent', detail: ` (${amount} CARGO to the carrier).`, text: `The shipper sent a ${amount} CARGO completion tip.` };
+    }
+    case 'OperationalAllowanceFunded': {
+      const amount = formatAmount(args.amount);
+      return { ...base, tone: 'payment', subject: 'Gas reserve', action: 'funded', text: `${amount} CARGO gas reserve funded.` };
+    }
+    case 'OperationalAllowanceReimbursed': {
+      const amount = formatAmount(args.amount);
+      return { ...base, tone: 'payment', subject: 'Gas reserve', action: 'reimbursed', text: `${amount} CARGO gas reimbursement paid.` };
+    }
+    case 'OperationalAllowanceRefunded': {
+      const amount = formatAmount(args.amount);
+      return { ...base, tone: 'payment', subject: 'Gas reserve', action: 'refunded', text: `${amount} CARGO unused gas reserve refunded.` };
+    }
+    case 'AmendmentResponseAllowanceFunded': {
+      const amount = formatAmount(args.amount);
+      return { ...base, tone: 'payment', subject: 'Amendment response reserve', action: 'funded', text: `${amount} CARGO response reserve funded.` };
+    }
+    case 'AmendmentResponseReimbursed': {
+      const amount = formatAmount(args.amount);
+      return { ...base, tone: 'payment', subject: 'Amendment response reserve', action: 'reimbursed', text: `${amount} CARGO response reimbursement paid.` };
+    }
+    case 'AmendmentResponseAllowanceRefunded': {
+      const amount = formatAmount(args.amount);
+      return { ...base, tone: 'payment', subject: 'Amendment response reserve', action: 'refunded', text: `${amount} CARGO response reserve refunded.` };
     }
     case 'CarrierRated':
       return { ...base, tone: 'success', subject: 'Carrier rating', action: 'published', text: 'Carrier rating published.' };

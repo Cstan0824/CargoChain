@@ -1,11 +1,17 @@
 # CargoChain CARGO Token and Gas Allocation Proposal
 
-**Status:** Planned — not yet implemented  
+**Status:** In progress
 **Decision date:** 2026-08-22  
 **Scope:** Replace ETH as CargoChain's business payment currency with a fixed-rate, ETH-backed ERC-20 token; retain ETH as the native gas currency  
 **Coordination note:** The Pinata/IPFS proof implementation was merged in commit `51ada6f`. CARGO and gas allocation remain planned. Their implementation should preserve the merged encrypted-proof flow and re-inspect the affected contract and API interfaces before changes.
 
 The current proof-storage baseline uses browser-side AES-256-GCM encryption and Pinata Public IPFS for new images. Supabase Postgres remains responsible for private chat and wrapped proof-key records, not new proof-image uploads. Existing HTTPS/Supabase proof references remain readable for compatibility. See [IPFS-Pinata-Execution-Plan.md](IPFS-Pinata-Execution-Plan.md) for the selected storage design.
+
+Implementation checkpoint `4ef69d0` contains the backed CARGO token, CARGO
+settlement in escrow and lifecycle contracts, bounded proposal/proof state,
+operational proof reimbursement, amendment response reimbursement, and the
+first Cargo Wallet UI. Remaining work covers final benchmark hardening, full
+amendment UI policy controls, integration cleanup, and end-to-end verification.
 
 ## 1. Purpose
 

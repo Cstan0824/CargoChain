@@ -4,7 +4,7 @@
 
 ## 1. Scope
 
-CargoChain is a local-Ganache logistics DApp for milestone-based ETH escrow. A shipper creates a delivery request, carriers compete with milestone proposals, the shipper funds one proposal, the assigned carrier submits photo proof, and the shipper releases payment checkpoint by checkpoint.
+CargoChain is a local-Ganache logistics DApp for milestone-based CARGO escrow. A shipper creates a delivery request, carriers compete with milestone proposals, the shipper funds one proposal, the assigned carrier submits photo proof, and the shipper releases payment checkpoint by checkpoint. ETH remains the native gas and collateral-conversion currency.
 
 The current build also supports wallet display names, request-scoped private chat, mutual cancellation, negotiated amendments, immutable checkpoint IDs, a one-time completion tip, and structured carrier reputation.
 
