@@ -1,26 +1,27 @@
 // src/components/Topbar.jsx — contained page header.
 // Page-specific workflow actions can be placed beside the title through the
-// actions slot. Persistent notification and Account utilities stay shared.
+// actions slot. The Account profile shortcut stays shared.
 
 import { Link } from 'react-router-dom';
-import { HiOutlineBellAlert, HiOutlineUserCircle } from 'react-icons/hi2';
+import { useContext } from 'react';
 import { useWallet } from '../hooks/useWallet.js';
-import { useToast } from '../hooks/useToast.js';
+import { UserProfileContext } from '../context/UserProfileContext.jsx';
 import { Avatar } from './Avatar.jsx';
 import { pickAvatar } from '../utils/avatar.js';
 import styles from './Topbar.module.css';
 
 export function Topbar({ title, subtitle, actions = null }) {
   const { account } = useWallet();
-  const { show } = useToast();
-
-  const onBell = () => {
-    if (!account) {
-      show('Connect your wallet to see notifications.', 'info');
-      return;
-    }
-    show('No new notifications.', 'info');
-  };
+  const profile = useContext(UserProfileContext);
+  const { isRegistered = false, displayName = '', isProfileLoading = false } = profile || {};
+  const hasDisplayName = Boolean(isRegistered && displayName);
+  const profileLabel = account
+    ? isProfileLoading
+      ? 'Loading profile…'
+      : hasDisplayName
+        ? displayName
+        : 'Set up profile'
+    : 'Connect wallet';
 
   return (
     <header className={styles.topbar}>
@@ -31,19 +32,18 @@ export function Topbar({ title, subtitle, actions = null }) {
 
       <div className={styles.right}>
         {actions && <div className={styles.actions}>{actions}</div>}
-        <button type="button" className={styles.utilityButton} onClick={onBell} aria-label="Notifications">
-          <HiOutlineBellAlert aria-hidden="true" />
-        </button>
         <Link
           to="/account"
-          className={styles.utilityButton}
-          aria-label={account ? 'Open account profile' : 'Open wallet profile'}
+          className={styles.profileButton}
+          aria-label={`Open account profile: ${profileLabel}`}
         >
-          {account ? (
-            <Avatar src={pickAvatar(null, account)} name={account} size={30} className={styles.avatar} />
-          ) : (
-            <HiOutlineUserCircle aria-hidden="true" />
-          )}
+          <Avatar
+            src={account ? pickAvatar(null, account) : null}
+            name={hasDisplayName ? displayName : ''}
+            size={32}
+            className={styles.avatar}
+          />
+          <span className={styles.profileName}>{profileLabel}</span>
         </Link>
       </div>
     </header>

@@ -1,5 +1,7 @@
 # CargoChain IPFS implementation plan
 
+> **Status, 2026-09-01:** Historical migration plan. Its selected architecture is now implemented: new proof images are browser-encrypted and uploaded as Pinata/IPFS ciphertext through the authenticated Express API. Supabase remains for chat and wrapped proof keys, not new image uploads. Use [README.md](../README.md), [Architecture.md](Architecture.md), and [Spec.md](Spec.md) for current behaviour.
+
 **Status:** proposed; no IPFS runtime implementation is included in the current codebase  
 **Companion specification:** [Spec.md](Spec.md)
 

@@ -20,7 +20,7 @@ import { useWalletIdentities, walletIdentityLabel } from '../hooks/useWalletIden
 import {
   formatDate,
   formatDaysLeft,
-  formatEth,
+  formatCargo,
   formatRelative,
   formatRemarks,
   requestStatus,
@@ -211,7 +211,7 @@ export function RequestDetail() {
             <span className={styles.label}>
               {request.escrow > 0n ? 'Total locked in escrow' : 'Planned payment'}
             </span>
-            <strong className={styles.escrowValue}>{formatEth(displayedPayment)}</strong>
+            <strong className={styles.escrowValue}>{formatCargo(displayedPayment)}</strong>
             <span className={styles.muted}>
               {request.escrow > 0n ? 'Escrow funded' : 'Funded after the shipper accepts a proposal'}
             </span>

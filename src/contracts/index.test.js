@@ -14,6 +14,15 @@ function compatibleContracts(overrides = {}) {
       deliveryEscrow: vi.fn().mockResolvedValue(
         '0x254dffcd3277c0b1660f6d42efbb754edababc2b',
       ),
+      cargoToken: vi.fn().mockResolvedValue(
+        '0x9a9f1e9d5b7a5a9d8f7f2f1c4a6e8b0c2d4f6a8b',
+      ),
+    },
+    cargoToken: {
+      target: '0x9a9f1e9d5b7a5a9d8f7f2f1c4a6e8b0c2d4f6a8b',
+      name: vi.fn().mockResolvedValue('CARGO'),
+      symbol: vi.fn().mockResolvedValue('CARGO'),
+      decimals: vi.fn().mockResolvedValue(18n),
     },
     reputationRegistry: {
       target: '0x9561c133dd8580860b6b7e504bc5aa500f0f06a7',

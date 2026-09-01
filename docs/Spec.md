@@ -4,7 +4,7 @@
 
 ## 1. Scope
 
-CargoChain is a local-Ganache logistics DApp for milestone-based ETH escrow. A shipper creates a delivery request, carriers compete with milestone proposals, the shipper funds one proposal, the assigned carrier submits photo proof, and the shipper releases payment checkpoint by checkpoint.
+CargoChain is a local-Ganache logistics DApp for milestone-based CARGO escrow. A shipper creates a delivery request, carriers compete with milestone proposals, the shipper funds one proposal, the assigned carrier submits photo proof, and the shipper releases payment checkpoint by checkpoint. ETH remains the native gas and collateral-conversion currency.
 
 The current build also supports wallet display names, request-scoped private chat, mutual cancellation, negotiated amendments, immutable checkpoint IDs, a one-time completion tip, and structured carrier reputation.
 
@@ -20,13 +20,14 @@ The current build also supports wallet display names, request-scoped private cha
 | Proof image storage | Browser AES-256-GCM ciphertext pinned to Pinata public IPFS through Express-issued signed URLs; server-only wrapped per-proof keys in Supabase `proof_keys`; legacy HTTPS/Supabase URLs remain readable. |
 | Tests | Truffle Mocha/Chai and Vitest |
 
-Sepolia, QR recipient confirmation, auto-release dispute windows, and carrier republishing are not part of v1.
+Sepolia, QR recipient confirmation, auto-release dispute windows, and carrier republishing are not part of v1. CARGO is the approved business-payment currency; ETH remains the native gas currency.
 
 ## 3. Contracts
 
 | Contract | Responsibility |
 |---|---|
 | `UserRegistry.sol` | Wallet registration and display-name lookup/update. |
+| `CargoToken.sol` | Fixed-rate ETH-backed CARGO conversion, transfers, and redemption. |
 | `DeliveryEscrow.sol` | Requests, proposals, accepted shipment state, proof state, milestone payment, refund accounting, stable checkpoint records, and tips. |
 | `LifecycleManager.sol` | Amendment/cancellation records, response deadlines, shared negotiation lock, and restricted calls to escrow finalisation hooks. |
 | `PaymentEvents.sol` | Payment-related events inherited by `DeliveryEscrow`. |
@@ -35,7 +36,7 @@ Sepolia, QR recipient confirmation, auto-release dispute windows, and carrier re
 Deployment order:
 
 ```text
-UserRegistry → LifecycleManager → DeliveryEscrow(registry, manager)
+CargoToken → UserRegistry → LifecycleManager(token) → DeliveryEscrow(registry, manager, token)
                                       ↓
               LifecycleManager.initializeDeliveryEscrow(escrow)
                                       ↓
@@ -55,7 +56,7 @@ Open → Funded → InProgress → Completed
 ```
 
 - `Open`: no accepted proposal; shipper may cancel without escrow.
-- `Funded`: shipper selected a proposal and locked exact ETH.
+- `Funded`: shipper selected a proposal and locked CARGO compensation plus the required operational reserve.
 - `InProgress`: a carrier has submitted milestone proof or work is ongoing.
 - `Completed`: every checkpoint was paid.
 - `Refunded`: remaining escrow was returned after deadline expiry or mutual cancellation.
@@ -83,11 +84,12 @@ The shipper can reject a submitted proof, returning it to `Rejected` for carrier
 - One request may have only one pending amendment or cancellation.
 - A shipper can directly extend the deadline when no negotiation exists.
 - Either participant may request a mutually approved amendment before the final shipment hour.
-- A carrier cannot shorten a deadline. A shipper shortening a deadline requires at least `0.01 ETH` new funding and carrier acceptance.
-- New ETH may top up unpaid existing checkpoints or fully fund newly inserted checkpoints.
+- A carrier cannot shorten a deadline. A shipper shortening a deadline requires at least `0.01 CARGO` new funding and carrier acceptance.
+- New CARGO may top up unpaid existing checkpoints or fully fund newly inserted checkpoints.
 - Shipper-requested funding is staged in `LifecycleManager`; rejection, withdrawal, and expiry refund it.
 - Carrier-requested funding is supplied by the shipper at acceptance.
 - Amendment acceptance checks the milestone-state version captured at request time; it fails if proof progress changed in the meantime.
+- `RequesterCoversResponse` stages a separate refundable CARGO allowance for one successful amendment acceptance or rejection. It is not used for photo-proof submission reimbursement.
 
 ### Mutual cancellation
 
@@ -102,12 +104,13 @@ The shipper can reject a submitted proof, returning it to `Rejected` for carrier
 - Shipment must be completed.
 - It must be non-zero and can occur once only.
 - It transfers directly to the carrier without entering or altering escrow.
+- The shipper approves and transfers CARGO, not native ETH, for this one-time payment.
 
 ## 6. Off-chain services
 
 ### Proof images — encrypted Pinata/IPFS design
 
-The browser validates a JPEG/PNG/WebP file up to 2 MiB, computes the raw
+The browser validates a JPEG, PNG, WebP, GIF, AVIF, or BMP file up to 2 MiB, computes the raw
 SHA-256, encrypts the bytes with a fresh AES-256-GCM key, and sends only
 ciphertext to the authenticated Express proof API. The API verifies the
 assigned carrier and milestone state against `DeliveryEscrow`, creates a
@@ -149,7 +152,7 @@ The conversation identity includes chain ID, contract address, request ID, and c
 | `/shipments/:id/propose` | Carrier proposal editor, active proposal, and history. |
 | `/track/:id` | Tracking, proof, payments, amendments, cancellation, and history. |
 | `/messages` | Request-scoped private conversations and activity timeline. |
-| `/profile` | Connected wallet profile, payment/transaction presentation, and its own verified carrier feedback aggregates. |
+| `/account` | Connected wallet identity, CARGO conversion/redemption, payment history, and verified carrier feedback aggregates. |
 
 ## 8. Local run and verification
 
@@ -172,6 +175,7 @@ run `npm run compile`, `npm run migrate`, `npm run server`, and
 ```bash
 npm test
 npm run test:frontend
+npm run test:server
 npm run build
 ```
 
@@ -181,3 +185,9 @@ npm run build
 - One carrier is accepted per request, but several can propose while it is open.
 - The assignment supports MetaMask extension flow only.
 - Chat is between request participants only; it is not a public marketplace messenger.
+
+## 10. Implementation status and future scope
+
+The CARGO token, contract-calculated operational allowances, measured/capped CARGO reimbursement, and encrypted Pinata/IPFS evidence path are implemented in this branch. The exact current rules are documented in [`Cargo-Token-and-Gas-Model.md`](Cargo-Token-and-Gas-Model.md), [`Architecture.md`](Architecture.md), and [`API_v1.md`](../API_v1.md).
+
+Future scope remains limited to public-network deployment, recipient QR confirmation, automatic dispute-window release, carrier republishing/recovery, public marketplace chat, staking, and a scalable event indexer.

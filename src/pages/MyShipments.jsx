@@ -19,7 +19,7 @@ import { useWallet } from '../hooks/useWallet.js';
 import { useContracts } from '../hooks/useContracts.js';
 import { useDialogFocus } from '../hooks/useDialogFocus.js';
 import {
-  formatEth,
+  formatCargo,
   formatDate,
   formatDaysLeft,
   milestoneStatus,
@@ -289,7 +289,7 @@ export function MyShipments() {
                     </td>
                     <td>
                       <span className={styles.numCell}>
-                        {formatEth(r.rewardWei > 0n ? r.rewardWei : r.proposedAmountWei)}
+                        {formatCargo(r.rewardWei > 0n ? r.rewardWei : r.proposedAmountWei)}
                       </span>
                     </td>
                     <td>
@@ -532,7 +532,7 @@ async function loadWalletShipments(deliveryEscrow, account) {
         hasActiveProposal,
         ownHistoricalProposals,
         milestoneStatuses,
-        pendingProofLabel: pendingProofAmountWei > 0n ? formatEth(pendingProofAmountWei) : '',
+        pendingProofLabel: pendingProofAmountWei > 0n ? formatCargo(pendingProofAmountWei) : '',
       });
 
       return {

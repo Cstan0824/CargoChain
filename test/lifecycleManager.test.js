@@ -1,6 +1,8 @@
+const decodeEscrowError = require('./helpers/escrowError');
 const UserRegistry = artifacts.require('UserRegistry');
 const DeliveryEscrow = artifacts.require('DeliveryEscrow');
 const LifecycleManager = artifacts.require('LifecycleManager');
+const CargoToken = artifacts.require('CargoToken');
 
 contract('LifecycleManager', (accounts) => {
   const [deployer, shipper, carrier, stranger] = accounts;
@@ -9,15 +11,24 @@ contract('LifecycleManager', (accounts) => {
   let registry;
   let escrow;
   let manager;
+  let cargoToken;
 
   beforeEach(async () => {
     registry = await UserRegistry.new({ from: deployer });
+    cargoToken = await CargoToken.new({ from: deployer });
     await registry.registerUser('Shipper', { from: shipper });
     await registry.registerUser('Carrier', { from: carrier });
     await registry.registerUser('Stranger', { from: stranger });
 
-    manager = await LifecycleManager.new({ from: deployer });
-    escrow = await DeliveryEscrow.new(registry.address, manager.address, { from: deployer });
+    for (const actor of [shipper, carrier, stranger]) {
+      await cargoToken.deposit({ from: actor, value: web3.utils.toWei('1', 'ether') });
+    }
+    manager = await LifecycleManager.new(cargoToken.address, { from: deployer });
+    escrow = await DeliveryEscrow.new(registry.address, manager.address, cargoToken.address, { from: deployer });
+    for (const actor of [shipper, carrier, stranger]) {
+      await cargoToken.approve(escrow.address, web3.utils.toWei('1000', 'ether'), { from: actor });
+      await cargoToken.approve(manager.address, web3.utils.toWei('1000', 'ether'), { from: actor });
+    }
     await manager.initializeDeliveryEscrow(escrow.address, { from: deployer });
   });
 
@@ -44,7 +55,7 @@ contract('LifecycleManager', (accounts) => {
       ],
       { from: carrier },
     );
-    await escrow.approveAndFund(1, 0, { from: shipper, value: oneEth });
+    await escrow.approveAndFund(1, 0, { from: shipper });
   }
 
   async function responseDeadline(hours = 24) {
@@ -67,7 +78,7 @@ contract('LifecycleManager', (accounts) => {
       assert.fail('Expected revert not received');
     } catch (error) {
       assert(
-        error.message.includes(reason),
+        decodeEscrowError(error).includes(reason),
         `Expected "${reason}" but got "${error.message}"`,
       );
     }
@@ -97,7 +108,7 @@ contract('LifecycleManager', (accounts) => {
   });
 
   it('allows only the deployer to initialize a non-zero escrow link', async () => {
-    const uninitialized = await LifecycleManager.new({ from: deployer });
+    const uninitialized = await LifecycleManager.new(cargoToken.address, { from: deployer });
 
     await expectRevert(
       uninitialized.initializeDeliveryEscrow(escrow.address, { from: stranger }),
@@ -148,13 +159,13 @@ contract('LifecycleManager', (accounts) => {
     assert.equal(Number(cancellations[0].status), 1); // Accepted
     assert(Number(cancellations[0].resolvedAt) > 0);
     assert.equal(await manager.hasPendingNegotiation(1), false);
-    assert.equal((await web3.eth.getBalance(escrow.address)).toString(), '0');
+    assert.equal((await cargoToken.balanceOf(escrow.address)).toString(), '0');
   });
 
   it('keeps completed milestone pay with the carrier and refunds only the remainder', async () => {
     await createFundedRequest();
     await escrow.submitProof(1, 0, ['proof://pickup'], 'Picked up', { from: carrier });
-    await escrow.verifyMilestone(1, 0, true, '', { from: shipper });
+    await escrow.verifyMilestone(1, 0, true, '', 1, { from: shipper });
 
     await manager.requestCancellation(
       1,
@@ -312,7 +323,7 @@ contract('LifecycleManager', (accounts) => {
       'milestone proof is awaiting verification',
     );
 
-    await escrow.verifyMilestone(1, 0, true, '', { from: shipper });
+    await escrow.verifyMilestone(1, 0, true, '', 1, { from: shipper });
     await manager.acceptCancellation(1, 0, { from: carrier });
     const summary = await escrow.getPaymentSummary(1);
     assert.equal(summary.totalReleased.toString(), web3.utils.toWei('0.4', 'ether'));
@@ -364,7 +375,7 @@ contract('LifecycleManager', (accounts) => {
       'Finish sooner with extra pay and an inspection checkpoint.',
       [[1, extraExisting]],
       [['Inspection', 1, newMilestoneAmount]],
-      { from: shipper, value: additionalFunding },
+      { from: shipper },
     );
     await manager.acceptAmendment(1, 0, { from: carrier });
 
@@ -405,7 +416,7 @@ contract('LifecycleManager', (accounts) => {
         'Completed',
         { from: carrier },
       );
-      await escrow.verifyMilestone(1, milestoneId, true, '', { from: shipper });
+      await escrow.verifyMilestone(1, milestoneId, true, '', 1, { from: shipper });
     }
     const completed = await escrow.getPaymentSummary(1);
     const completedRequest = await escrow.getRequest(1);
@@ -428,14 +439,49 @@ contract('LifecycleManager', (accounts) => {
       [],
       { from: carrier },
     );
+    await cargoToken.approve(manager.address, 0, { from: shipper });
     await expectRevert(
       manager.acceptAmendment(1, 0, { from: shipper }),
-      'funding must match amendment',
+      'CARGO allowance too low',
     );
-    await manager.acceptAmendment(1, 0, { from: shipper, value: extra });
+    await cargoToken.approve(manager.address, web3.utils.toWei('1000', 'ether'), { from: shipper });
+    await manager.acceptAmendment(1, 0, { from: shipper });
 
     const milestone = await escrow.getMilestone(1, 1);
     assert.equal(milestone.additionalPayoutAmount.toString(), extra);
+  });
+
+  it('supports requester-funded amendment response reimbursement', async () => {
+    await createFundedRequest();
+    const request = await escrow.getRequest(1);
+    const responseAllowance = await manager.minimumResponseAllowance();
+
+    await manager.requestAmendmentWithGasPolicy(
+      1,
+      Number(request.deadline),
+      await responseDeadline(),
+      'Please confirm this amendment with a reimbursed response.',
+      [[1, web3.utils.toWei('0.1', 'ether')]],
+      [],
+      1,
+      responseAllowance,
+      { from: shipper },
+    );
+
+    const pending = (await manager.getAmendmentRequests(1))[0];
+    assert.equal(Number(pending.gasPolicy), 1);
+    assert.equal(pending.responseAllowance.toString(), responseAllowance.toString());
+    assert.equal(
+      (await cargoToken.balanceOf(manager.address)).toString(),
+      (BigInt(responseAllowance) + BigInt(web3.utils.toWei('0.1', 'ether'))).toString(),
+    );
+
+    const receipt = await manager.acceptAmendment(1, 0, { from: carrier });
+    assert.equal(Boolean(receipt.logs.find((log) => log.event === 'AmendmentResponseReimbursed')), true);
+    const resolved = (await manager.getAmendmentRequests(1))[0];
+    assert.equal(resolved.responseReimbursed, true);
+    assert(BigInt(resolved.responseAllowanceSpent) > 0n);
+    assert.equal((await cargoToken.balanceOf(manager.address)).toString(), '0');
   });
 
   it('restricts agreement decisions to the designated requester and responder', async () => {
@@ -453,7 +499,7 @@ contract('LifecycleManager', (accounts) => {
       { from: carrier },
     );
     await expectRevert(
-      manager.acceptAmendment(1, 0, { from: stranger, value: extra }),
+      manager.acceptAmendment(1, 0, { from: stranger }),
       'caller is not amendment responder',
     );
     await expectRevert(
@@ -464,7 +510,7 @@ contract('LifecycleManager', (accounts) => {
       manager.withdrawAmendment(1, 0, { from: shipper }),
       'caller is not amendment requester',
     );
-    await manager.acceptAmendment(1, 0, { from: shipper, value: extra });
+    await manager.acceptAmendment(1, 0, { from: shipper });
 
     await manager.requestCancellation(
       1,
@@ -498,7 +544,6 @@ contract('LifecycleManager', (accounts) => {
     );
     await manager.acceptAmendment(1, 0, {
       from: shipper,
-      value: finalMilestoneFunding,
     });
 
     const milestones = await escrow.getMilestones(1);
@@ -525,14 +570,14 @@ contract('LifecycleManager', (accounts) => {
       'Add compensation to the final milestone.',
       [[1, extra]],
       [],
-      { from: shipper, value: extra },
+      { from: shipper },
     );
-    assert.equal((await web3.eth.getBalance(manager.address)).toString(), extra);
+    assert.equal((await cargoToken.balanceOf(manager.address)).toString(), extra);
     await manager.rejectAmendment(1, 0, 'The original agreement is sufficient.', {
       from: carrier,
     });
 
-    assert.equal((await web3.eth.getBalance(manager.address)).toString(), '0');
+    assert.equal((await cargoToken.balanceOf(manager.address)).toString(), '0');
     const amendment = (await manager.getAmendmentRequests(1))[0];
     assert.equal(Number(amendment.status), 2);
     assert.equal(amendment.rejectionNote, 'The original agreement is sufficient.');
@@ -550,16 +595,16 @@ contract('LifecycleManager', (accounts) => {
       'Add delivery compensation, pending confirmation.',
       [[1, extra]],
       [],
-      { from: shipper, value: extra },
+      { from: shipper },
     );
-    assert.equal((await web3.eth.getBalance(manager.address)).toString(), extra);
+    assert.equal((await cargoToken.balanceOf(manager.address)).toString(), extra);
 
     await expectRevert(
       manager.withdrawAmendment(1, 0, { from: carrier }),
       'caller is not amendment requester',
     );
     await manager.withdrawAmendment(1, 0, { from: shipper });
-    assert.equal((await web3.eth.getBalance(manager.address)).toString(), '0');
+    assert.equal((await cargoToken.balanceOf(manager.address)).toString(), '0');
     assert.equal(Number((await manager.getAmendmentRequests(1))[0].status), 3); // Withdrawn
 
     await manager.requestAmendment(
@@ -569,14 +614,14 @@ contract('LifecycleManager', (accounts) => {
       'Renewed compensation request.',
       [[1, extra]],
       [],
-      { from: shipper, value: extra },
+      { from: shipper },
     );
-    assert.equal((await web3.eth.getBalance(manager.address)).toString(), extra);
+    assert.equal((await cargoToken.balanceOf(manager.address)).toString(), extra);
     await rpc('evm_increaseTime', [60 * 60 + 1]);
     await rpc('evm_mine');
     await manager.expireAmendment(1, 1, { from: stranger });
 
-    assert.equal((await web3.eth.getBalance(manager.address)).toString(), '0');
+    assert.equal((await cargoToken.balanceOf(manager.address)).toString(), '0');
     assert.equal(Number((await manager.getAmendmentRequests(1))[1].status), 4); // Expired
     assert.equal(await manager.hasPendingNegotiation(1), false);
   });
@@ -626,7 +671,7 @@ contract('LifecycleManager', (accounts) => {
         'Shorten without enough compensation.',
         [[1, tooLittle]],
         [],
-        { from: shipper, value: tooLittle },
+        { from: shipper },
       ),
       'additional funding below minimum',
     );
@@ -644,7 +689,7 @@ contract('LifecycleManager', (accounts) => {
     );
 
     await escrow.submitProof(1, 0, ['proof://pickup'], 'Picked up', { from: carrier });
-    await escrow.verifyMilestone(1, 0, true, '', { from: shipper });
+    await escrow.verifyMilestone(1, 0, true, '', 1, { from: shipper });
     const extra = web3.utils.toWei('0.02', 'ether');
     await expectRevert(
       manager.requestAmendment(
@@ -654,7 +699,7 @@ contract('LifecycleManager', (accounts) => {
         'Cannot insert before completed work.',
         [],
         [['Late insertion', 0, extra]],
-        { from: shipper, value: extra },
+        { from: shipper },
       ),
       'new milestone must precede eligible milestone',
     );

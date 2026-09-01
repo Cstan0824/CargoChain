@@ -24,7 +24,7 @@ import { KpiCard } from '../components/KpiCard.jsx';
 import { Table } from '../components/Table.jsx';
 import { DonutChart } from '../components/DonutChart.jsx';
 import { useToast } from '../hooks/useToast.js';
-import { formatEth, formatRelative, requestStatus, REQUEST_TONE, MILESTONE_TONE } from '../utils/format.js';
+import { formatCargo, formatRelative, requestStatus, REQUEST_TONE, MILESTONE_TONE } from '../utils/format.js';
 import { CreateRequestModal } from '../components/CreateRequestModal.jsx';
 import { proofVerification } from '../assets';
 import styles from './Shipper.module.css';
@@ -77,7 +77,7 @@ export function Shipper() {
 
       <div className={styles.kpiRow}>
         <KpiCard label="Active requests" value="8"   delta="2 from last week" tone="positive" icon={HiOutlineLockClosed} />
-        <KpiCard label="Escrow locked"  value="12.45 ETH" sub="≈ S$24,890.00" delta="2 from last week" tone="positive" icon={HiOutlineBanknotes} />
+        <KpiCard label="Escrow locked"  value="12,450.00 C." sub="≈ RM12,450.00" delta="2 from last week" tone="positive" icon={HiOutlineBanknotes} />
         <KpiCard
           label="Pending verifications"
           value={String(PENDING_VERIFICATIONS.length)}
@@ -144,7 +144,7 @@ export function Shipper() {
                   {requestStatus(r.status)}
                 </Badge>
               )},
-              { key: 'reward', header: 'Reward', width: '12%', render: (r) => <span className={styles.numCell}>{formatEth(r.rewardWei)}</span> },
+              { key: 'reward', header: 'Reward', width: '12%', render: (r) => <span className={styles.numCell}>{formatCargo(r.rewardWei)}</span> },
               { key: 'age',    header: 'Age',    width: '10%', render: (r) => <span className={styles.muted}>{r.age}</span> },
             ]}
             rows={SHIPMENTS}
@@ -164,10 +164,10 @@ export function Shipper() {
             ]}
           />
           <ul className={styles.legend}>
-            <li><span className={styles.dot} style={{ background: 'var(--chart-1)' }} /> <span>In progress</span> <span className={styles.legendVal}>6.20 ETH (49%)</span></li>
-            <li><span className={styles.dot} style={{ background: 'var(--chart-2)' }} /> <span>Awaiting verify</span> <span className={styles.legendVal}>3.15 ETH (29%)</span></li>
-            <li><span className={styles.dot} style={{ background: 'var(--chart-3)' }} /> <span>Pending</span> <span className={styles.legendVal}>2.10 ETH (17%)</span></li>
-            <li><span className={styles.dot} style={{ background: 'var(--chart-4)' }} /> <span>Completed</span> <span className={styles.legendVal}>1.20 ETH (9%)</span></li>
+            <li><span className={styles.dot} style={{ background: 'var(--chart-1)' }} /> <span>In progress</span> <span className={styles.legendVal}>6,200.00 C. (49%)</span></li>
+            <li><span className={styles.dot} style={{ background: 'var(--chart-2)' }} /> <span>Awaiting verify</span> <span className={styles.legendVal}>3,150.00 C. (29%)</span></li>
+            <li><span className={styles.dot} style={{ background: 'var(--chart-3)' }} /> <span>Pending</span> <span className={styles.legendVal}>2,100.00 C. (17%)</span></li>
+            <li><span className={styles.dot} style={{ background: 'var(--chart-4)' }} /> <span>Completed</span> <span className={styles.legendVal}>1,200.00 C. (9%)</span></li>
           </ul>
         </Card>
       </div>

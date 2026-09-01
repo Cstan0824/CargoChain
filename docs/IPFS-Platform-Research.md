@@ -1,5 +1,7 @@
 # Hosted IPFS platform research for CargoChain
 
+> **Status, 2026-09-01:** Historical decision research. Pinata was selected and its encrypted upload design is implemented. Pricing and hosted-platform comparisons are a 2026-08-30 snapshot, not live operational guarantees.
+
 **Research snapshot:** 2026-08-30 (official/first-party documentation only)  
 **Scope:** Hosted IPFS options for milestone photo proofs; no runtime or dependency
 changes are included in this note.

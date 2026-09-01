@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
 /// @dev Narrow DeliveryEscrow surface needed by agreement-change workflows.
 interface IDeliveryEscrowLifecycle {
     enum RequestStatus {
@@ -53,8 +56,12 @@ interface IDeliveryEscrowLifecycle {
         uint256 requestId,
         uint256 newDeadline,
         ExistingMilestoneFunding[] calldata existingFunding,
-        NewMilestoneFunding[] calldata newMilestones
+        NewMilestoneFunding[] calldata newMilestones,
+        uint256 additionalOperationalAllowance
     ) external payable;
+
+    function minimumProofAllowance() external view returns (uint256);
+    function minimumAdditionalOperationalAllowance(uint256 requestId, uint256 count) external view returns (uint256);
 
     function getMilestoneCount(uint256 requestId) external view returns (uint256);
 
@@ -73,6 +80,7 @@ interface IDeliveryEscrowLifecycle {
 /// @notice Owns amendment and mutual-cancellation negotiation state while
 /// DeliveryEscrow remains the source of truth for requests, milestones, and ETH.
 contract LifecycleManager {
+    using SafeERC20 for IERC20;
     /// @notice Sentinel used by amendment proposals to place a new checkpoint last.
     uint256 public constant APPEND_MILESTONE_ID = type(uint256).max;
 
@@ -96,6 +104,11 @@ contract LifecycleManager {
         Rejected,
         Withdrawn,
         Expired
+    }
+
+    enum AmendmentGasPolicy {
+        EachPaysOwn,
+        RequesterCoversResponse
     }
 
     struct ExistingMilestoneFunding {
@@ -137,20 +150,35 @@ contract LifecycleManager {
         uint256 previousDeadline;
         uint256 proposedDeadline;
         uint256 additionalFunding;
+        uint256 operationalAllowance;
         uint256 responseDeadline;
         AmendmentStatus status;
         uint256 createdAt;
         uint256 resolvedAt;
         bool directExtension;
+        AmendmentGasPolicy gasPolicy;
+        uint256 responseAllowance;
+        uint256 responseAllowanceSpent;
+        address responseAllowanceFunder;
+        bool responseReimbursed;
+        uint256 responseGasPriceCap;
     }
 
     address public immutable initializer;
+    IERC20 public immutable cargoToken;
     IDeliveryEscrowLifecycle public deliveryEscrow;
     uint256 public constant MIN_ADDITIONAL_FUNDING = 0.01 ether;
     uint256 public constant MIN_CANCELLATION_LEAD_TIME = 1 hours;
     uint256 public constant MIN_AMENDMENT_LEAD_TIME = 1 hours;
     uint256 public constant MIN_DEADLINE_CHANGE = 15 minutes;
     uint256 public constant MAX_NOTE_BYTES = 500;
+    uint256 public constant MAX_TOTAL_MILESTONES = 20;
+    // Covers accepting a bounded plan of up to twenty total checkpoints.
+    uint256 public constant AMENDMENT_RESPONSE_GAS_UNIT_CAP = 6_000_000;
+    uint256 public constant AMENDMENT_RESPONSE_OVERHEAD = 40_000;
+    uint256 public constant AMENDMENT_MIN_GAS_PRICE = 2 gwei;
+    uint256 public constant AMENDMENT_PRIORITY_FEE_BUFFER = 1 gwei;
+    uint256 public constant AMENDMENT_MAX_RESPONSE_REIMBURSEMENT = 150 ether;
 
     mapping(uint256 => ActiveNegotiation) private activeNegotiations;
     mapping(uint256 => CancellationRequest[]) private cancellationRequests;
@@ -216,9 +244,15 @@ contract LifecycleManager {
         address indexed requester
     );
     event AmendmentExpired(uint256 indexed requestId, uint256 indexed amendmentId);
+    event AmendmentResponseAllowanceFunded(uint256 indexed requestId, uint256 indexed amendmentId, address indexed funder, uint256 amount);
+    event AmendmentResponseReimbursed(uint256 indexed requestId, uint256 indexed amendmentId, address indexed responder, uint256 amount);
+    event AmendmentResponseAllowanceRefunded(uint256 indexed requestId, uint256 indexed amendmentId, address indexed funder, uint256 amount);
+    event AmendmentOperationalAllowanceFunded(uint256 indexed requestId, uint256 indexed amendmentId, uint256 amount);
 
-    constructor() {
+    constructor(address cargoTokenAddress) {
+        require(cargoTokenAddress != address(0), "cargo token required");
         initializer = msg.sender;
+        cargoToken = IERC20(cargoTokenAddress);
     }
 
     function initializeDeliveryEscrow(address deliveryEscrowAddress) external {
@@ -294,7 +328,8 @@ contract LifecycleManager {
             requestId,
             newDeadline,
             existingFunding,
-            newMilestones
+            newMilestones,
+            0
         );
         amendmentRequests[requestId].push(
             AmendmentRequest({
@@ -305,11 +340,18 @@ contract LifecycleManager {
                 previousDeadline: currentDeadline,
                 proposedDeadline: newDeadline,
                 additionalFunding: 0,
+                operationalAllowance: 0,
                 responseDeadline: block.timestamp,
                 status: AmendmentStatus.Accepted,
                 createdAt: block.timestamp,
                 resolvedAt: block.timestamp,
-                directExtension: true
+                directExtension: true,
+                gasPolicy: AmendmentGasPolicy.EachPaysOwn,
+                responseAllowance: 0,
+                responseAllowanceSpent: 0,
+                responseAllowanceFunder: address(0),
+                responseReimbursed: false,
+                responseGasPriceCap: 0
             })
         );
         emit ShipmentDeadlineExtended(
@@ -328,7 +370,53 @@ contract LifecycleManager {
         string calldata requesterNote,
         ExistingMilestoneFunding[] calldata existingFunding,
         NewMilestoneFunding[] calldata newMilestones
-    ) external payable requestExists(requestId) returns (uint256 amendmentId) {
+    ) external requestExists(requestId) returns (uint256 amendmentId) {
+        return _requestAmendment(
+            requestId,
+            proposedDeadline,
+            responseDeadline,
+            requesterNote,
+            existingFunding,
+            newMilestones,
+            AmendmentGasPolicy.EachPaysOwn,
+            0
+        );
+    }
+
+    /// @notice Submit an amendment with an explicit response reimbursement policy.
+    function requestAmendmentWithGasPolicy(
+        uint256 requestId,
+        uint256 proposedDeadline,
+        uint256 responseDeadline,
+        string calldata requesterNote,
+        ExistingMilestoneFunding[] calldata existingFunding,
+        NewMilestoneFunding[] calldata newMilestones,
+        AmendmentGasPolicy gasPolicy,
+        uint256 responseAllowance
+    ) external requestExists(requestId) returns (uint256 amendmentId) {
+        require(gasPolicy <= AmendmentGasPolicy.RequesterCoversResponse, "invalid gas policy");
+        return _requestAmendment(
+            requestId,
+            proposedDeadline,
+            responseDeadline,
+            requesterNote,
+            existingFunding,
+            newMilestones,
+            gasPolicy,
+            responseAllowance
+        );
+    }
+
+    function _requestAmendment(
+        uint256 requestId,
+        uint256 proposedDeadline,
+        uint256 responseDeadline,
+        string calldata requesterNote,
+        ExistingMilestoneFunding[] calldata existingFunding,
+        NewMilestoneFunding[] calldata newMilestones,
+        AmendmentGasPolicy gasPolicy,
+        uint256 responseAllowance
+    ) internal returns (uint256 amendmentId) {
         _requireNegotiableShipment(requestId);
         _requireNegotiationParticipant(requestId, msg.sender);
         _requireValidResponseDeadline(requestId, responseDeadline);
@@ -361,6 +449,7 @@ contract LifecycleManager {
             existingFunding,
             newMilestones
         );
+        uint256 operationalAllowance = deliveryEscrow.minimumAdditionalOperationalAllowance(requestId, newMilestones.length);
         require(
             proposedDeadline != currentDeadline || additionalFunding > 0,
             "amendment must change agreement"
@@ -384,13 +473,32 @@ contract LifecycleManager {
         require(
             !(msg.sender == shipper &&
                 proposedDeadline > currentDeadline &&
-                additionalFunding == 0),
+                additionalFunding == 0 &&
+                operationalAllowance == 0),
             "shipper can extend deadline directly"
         );
         if (msg.sender == shipper) {
-            require(msg.value == additionalFunding, "funding must match allocations");
+            if (additionalFunding + operationalAllowance > 0) {
+                require(
+                    cargoToken.allowance(msg.sender, address(this)) >= additionalFunding + operationalAllowance,
+                    "CARGO allowance too low"
+                );
+                cargoToken.safeTransferFrom(msg.sender, address(this), additionalFunding + operationalAllowance);
+            }
         } else {
-            require(msg.value == 0, "carrier cannot stage funding");
+            // Carrier-requested funding is supplied by the shipper when the
+            // counterparty accepts the amendment.
+        }
+
+        if (gasPolicy == AmendmentGasPolicy.RequesterCoversResponse) {
+            require(
+                responseAllowance >= minimumResponseAllowance(),
+                "response allowance below minimum"
+            );
+            require(cargoToken.allowance(msg.sender, address(this)) >= responseAllowance, "CARGO allowance too low");
+            cargoToken.safeTransferFrom(msg.sender, address(this), responseAllowance);
+        } else {
+            require(responseAllowance == 0, "response allowance requires reimbursement policy");
         }
 
         address responder = msg.sender == shipper ? carrier : shipper;
@@ -404,11 +512,20 @@ contract LifecycleManager {
                 previousDeadline: currentDeadline,
                 proposedDeadline: proposedDeadline,
                 additionalFunding: additionalFunding,
+                operationalAllowance: operationalAllowance,
                 responseDeadline: responseDeadline,
                 status: AmendmentStatus.Pending,
                 createdAt: block.timestamp,
                 resolvedAt: 0,
-                directExtension: false
+                directExtension: false,
+                gasPolicy: gasPolicy,
+                responseAllowance: responseAllowance,
+                responseAllowanceSpent: 0,
+                responseAllowanceFunder: gasPolicy == AmendmentGasPolicy.RequesterCoversResponse
+                    ? msg.sender
+                    : address(0),
+                responseReimbursed: false,
+                responseGasPriceCap: responseAllowance / ((AMENDMENT_RESPONSE_GAS_UNIT_CAP + AMENDMENT_RESPONSE_OVERHEAD) * 10_000)
             })
         );
         for (uint256 i = 0; i < existingFunding.length; i++) {
@@ -428,13 +545,19 @@ contract LifecycleManager {
             additionalFunding,
             responseDeadline
         );
+        if (responseAllowance > 0) {
+            emit AmendmentResponseAllowanceFunded(requestId, amendmentId, msg.sender, responseAllowance);
+        }
+        if (operationalAllowance > 0) {
+            emit AmendmentOperationalAllowanceFunded(requestId, amendmentId, operationalAllowance);
+        }
     }
 
     function acceptAmendment(uint256 requestId, uint256 amendmentId)
         external
-        payable
         requestExists(requestId)
     {
+        uint256 gasAtStart = gasleft();
         AmendmentRequest storage amendment = _pendingAmendment(requestId, amendmentId);
         require(msg.sender == amendment.responder, "caller is not amendment responder");
         require(block.timestamp <= amendment.responseDeadline, "response deadline has passed");
@@ -442,10 +565,12 @@ contract LifecycleManager {
         _requireCurrentMilestoneState(requestId, NegotiationKind.Amendment, amendmentId);
 
         (address shipper, , , , ) = deliveryEscrow.getLifecycleSnapshot(requestId);
-        if (amendment.requester == shipper) {
-            require(msg.value == 0, "funding was already staged");
-        } else {
-            require(msg.value == amendment.additionalFunding, "funding must match amendment");
+        if (amendment.requester != shipper && amendment.additionalFunding + amendment.operationalAllowance > 0) {
+            require(
+                cargoToken.allowance(msg.sender, address(this)) >= amendment.additionalFunding + amendment.operationalAllowance,
+                "CARGO allowance too low"
+            );
+            cargoToken.safeTransferFrom(msg.sender, address(this), amendment.additionalFunding + amendment.operationalAllowance);
         }
 
         IDeliveryEscrowLifecycle.ExistingMilestoneFunding[] memory existingFunding =
@@ -453,17 +578,24 @@ contract LifecycleManager {
         IDeliveryEscrowLifecycle.NewMilestoneFunding[] memory newMilestones =
             _copyNewMilestones(requestId, amendmentId);
         uint256 amendmentFunding = amendment.additionalFunding;
+        uint256 amendmentOperationalAllowance = amendment.operationalAllowance;
         uint256 proposedDeadline = amendment.proposedDeadline;
 
         amendment.status = AmendmentStatus.Accepted;
         amendment.resolvedAt = block.timestamp;
         _closeNegotiation(requestId, NegotiationKind.Amendment, amendmentId);
-        deliveryEscrow.finalizeAmendment{value: amendmentFunding}(
+        if (amendmentFunding + amendmentOperationalAllowance > 0) {
+            cargoToken.safeTransfer(address(deliveryEscrow), amendmentFunding + amendmentOperationalAllowance);
+        }
+        deliveryEscrow.finalizeAmendment(
             requestId,
             proposedDeadline,
             existingFunding,
-            newMilestones
+            newMilestones,
+            amendmentOperationalAllowance
         );
+        _reimburseAmendmentResponse(requestId, amendmentId, gasAtStart);
+        _refundStagedAmendment(requestId, amendmentId);
         emit AmendmentAccepted(requestId, amendmentId, msg.sender);
     }
 
@@ -472,6 +604,7 @@ contract LifecycleManager {
         uint256 amendmentId,
         string calldata rejectionNote
     ) external requestExists(requestId) {
+        uint256 gasAtStart = gasleft();
         AmendmentRequest storage amendment = _pendingAmendment(requestId, amendmentId);
         require(msg.sender == amendment.responder, "caller is not amendment responder");
         require(block.timestamp <= amendment.responseDeadline, "response deadline has passed");
@@ -481,6 +614,7 @@ contract LifecycleManager {
         amendment.rejectionNote = rejectionNote;
         amendment.resolvedAt = block.timestamp;
         _closeNegotiation(requestId, NegotiationKind.Amendment, amendmentId);
+        _reimburseAmendmentResponse(requestId, amendmentId, gasAtStart);
         _refundStagedAmendment(requestId, amendmentId);
         emit AmendmentRejected(requestId, amendmentId, msg.sender);
     }
@@ -682,6 +816,49 @@ contract LifecycleManager {
         return cancellationRequests[requestId];
     }
 
+    function referenceGasPrice() public view returns (uint256) {
+        uint256 candidate = block.basefee + AMENDMENT_PRIORITY_FEE_BUFFER;
+        return candidate > AMENDMENT_MIN_GAS_PRICE ? candidate : AMENDMENT_MIN_GAS_PRICE;
+    }
+
+    function minimumResponseAllowance() public view returns (uint256) {
+        return (AMENDMENT_RESPONSE_GAS_UNIT_CAP + AMENDMENT_RESPONSE_OVERHEAD)
+            * referenceGasPrice()
+            * 10_000;
+    }
+
+    function _reimburseAmendmentResponse(
+        uint256 requestId,
+        uint256 amendmentId,
+        uint256 gasAtStart
+    ) private {
+        AmendmentRequest storage amendment = amendmentRequests[requestId][amendmentId];
+        if (
+            amendment.gasPolicy != AmendmentGasPolicy.RequesterCoversResponse
+            || amendment.responseReimbursed
+            || amendment.responseAllowance == 0
+        ) return;
+
+        amendment.responseReimbursed = true;
+        uint256 measuredGas = gasAtStart - gasleft() + AMENDMENT_RESPONSE_OVERHEAD;
+        if (measuredGas > AMENDMENT_RESPONSE_GAS_UNIT_CAP) {
+            measuredGas = AMENDMENT_RESPONSE_GAS_UNIT_CAP;
+        }
+        uint256 calculated = measuredGas * (
+            tx.gasprice < amendment.responseGasPriceCap ? tx.gasprice : amendment.responseGasPriceCap
+        ) * 10_000;
+        if (calculated > AMENDMENT_MAX_RESPONSE_REIMBURSEMENT) {
+            calculated = AMENDMENT_MAX_RESPONSE_REIMBURSEMENT;
+        }
+        uint256 remaining = amendment.responseAllowance - amendment.responseAllowanceSpent;
+        if (calculated > remaining) calculated = remaining;
+        if (calculated == 0) return;
+
+        amendment.responseAllowanceSpent += calculated;
+        cargoToken.safeTransfer(amendment.responder, calculated);
+        emit AmendmentResponseReimbursed(requestId, amendmentId, amendment.responder, calculated);
+    }
+
     function _requireNegotiableShipment(uint256 requestId) internal view {
         (, , IDeliveryEscrowLifecycle.RequestStatus status, uint256 deadline, ) = deliveryEscrow
             .getLifecycleSnapshot(requestId);
@@ -817,9 +994,14 @@ contract LifecycleManager {
         uint256 previousInsertionPosition;
         bool hasPreviousInsertion;
         uint256 milestoneCount = deliveryEscrow.getMilestoneCount(requestId);
+        require(
+            milestoneCount + newMilestones.length <= MAX_TOTAL_MILESTONES,
+            "too many milestones"
+        );
         for (uint256 i = 0; i < newMilestones.length; i++) {
             NewMilestoneFunding calldata addition = newMilestones[i];
             require(bytes(addition.name).length > 0, "milestone name required");
+            require(bytes(addition.name).length <= 128, "milestone name too long");
             require(addition.amount > 0, "allocation must be positive");
             uint256 insertionPosition = milestoneCount;
             if (addition.insertBeforeMilestoneId != APPEND_MILESTONE_ID) {
@@ -881,11 +1063,24 @@ contract LifecycleManager {
     function _refundStagedAmendment(uint256 requestId, uint256 amendmentId) private {
         AmendmentRequest storage amendment = amendmentRequests[requestId][amendmentId];
         (address shipper, , , , ) = deliveryEscrow.getLifecycleSnapshot(requestId);
-        if (amendment.requester != shipper || amendment.additionalFunding == 0) {
-            return;
+        if (
+            amendment.status != AmendmentStatus.Accepted
+            && amendment.requester == shipper
+            && amendment.additionalFunding + amendment.operationalAllowance > 0
+        ) {
+            cargoToken.safeTransfer(shipper, amendment.additionalFunding + amendment.operationalAllowance);
         }
-        (bool refunded, ) = payable(shipper).call{value: amendment.additionalFunding}("");
-        require(refunded, "staged funding refund failed");
+        if (amendment.responseAllowance > amendment.responseAllowanceSpent) {
+            uint256 remaining = amendment.responseAllowance - amendment.responseAllowanceSpent;
+            amendment.responseAllowanceSpent = amendment.responseAllowance;
+            cargoToken.safeTransfer(amendment.responseAllowanceFunder, remaining);
+            emit AmendmentResponseAllowanceRefunded(
+                requestId,
+                amendmentId,
+                amendment.responseAllowanceFunder,
+                remaining
+            );
+        }
     }
 
     function _pendingAmendment(uint256 requestId, uint256 amendmentId)

@@ -1,4 +1,5 @@
 import { CARGO_NETWORK_CONFIG } from './network.js';
+import { decodeEscrowError } from './decodeEscrowError.js';
 
 const GAS_BUFFER_NUMERATOR = 120n;
 const GAS_BUFFER_DENOMINATOR = 100n;
@@ -44,17 +45,9 @@ export async function sendWalletContractTransaction({
       .getFunction(method)
       .populateTransaction(...args, overrides);
 
-    const estimationRequest = { ...transactionRequest, from: sender };
-    const [estimatedGas, nonce, feeData] = await Promise.all([
-      provider.estimateGas(estimationRequest),
-      provider.getTransactionCount(sender, 'pending'),
-      provider.getFeeData(),
-    ]);
-
+    const feeData = await provider.getFeeData();
     const preparedRequest = {
       ...transactionRequest,
-      nonce,
-      gasLimit: bufferedGasLimit(estimatedGas),
     };
 
     // Ganache is local-only and legacy gas pricing is understood by every
@@ -69,6 +62,20 @@ export async function sendWalletContractTransaction({
     } else if (feeData.gasPrice != null) {
       preparedRequest.gasPrice = feeData.gasPrice;
     }
+
+    // Reimbursing contracts branch on tx.gasprice. Estimate the same fee
+    // fields that will be broadcast, otherwise a zero-price simulation can
+    // skip token reimbursement and underestimate the actual transaction.
+    const [estimatedGas, nonce] = await Promise.all([
+      provider.estimateGas({ ...preparedRequest, from: sender }).catch((error) => {
+        const reason = decodeEscrowError(error);
+        if (reason) throw new Error(reason, { cause: error });
+        throw error;
+      }),
+      provider.getTransactionCount(sender, 'pending'),
+    ]);
+    preparedRequest.nonce = nonce;
+    preparedRequest.gasLimit = bufferedGasLimit(estimatedGas);
 
     const finalSignerAddress = await signer.getAddress();
     const finalWalletNetwork = await signer.provider?.getNetwork();
@@ -103,6 +110,28 @@ export async function resolveWalletSigner(signer, connect) {
   return connection.signer;
 }
 
+/**
+ * Ensure a read-only ERC-20 contract has enough allowance for a following
+ * wallet transaction. Approval is intentionally separate so MetaMask shows
+ * the exact spender and amount before the business action is submitted.
+ */
+export async function ensureTokenAllowance({ token, spender, amount, signer, provider }) {
+  const required = BigInt(amount || 0);
+  if (!token || !spender || required <= 0n || !signer || !provider) return null;
+  const owner = await signer.getAddress();
+  const current = BigInt(await token.allowance(owner, spender));
+  if (current >= required) return null;
+
+  const approval = await sendWalletContractTransaction({
+    contract: token,
+    method: 'approve',
+    args: [spender, required],
+    signer,
+    provider,
+  });
+  return approval.wait();
+}
+
 export function formatWalletTransactionError(error, fallback = 'The blockchain transaction failed.') {
   if (
     error?.code === 4001
@@ -111,6 +140,8 @@ export function formatWalletTransactionError(error, fallback = 'The blockchain t
   ) {
     return 'Transaction cancelled in MetaMask.';
   }
+  const escrowReason = decodeEscrowError(error);
+  if (escrowReason) return escrowReason;
 
   const messages = collectErrorMessages(error);
   const normalized = messages.join(' ').toLowerCase();

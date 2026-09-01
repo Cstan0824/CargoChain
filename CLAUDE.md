@@ -1,6 +1,6 @@
 # CLAUDE.md — Claude Code Specific Instructions
 
-> **Read `AGENTS.md` first.** This file only contains Claude Code-specific overrides and shortcuts. If anything here conflicts with `AGENTS.md`, `AGENTS.md` wins.
+> This file contains legacy Claude Code-specific notes. For the current implementation, use [`README.md`](README.md), [`docs/Spec.md`](docs/Spec.md), and [`API_v1.md`](API_v1.md).
 
 ## Identity
 
@@ -20,7 +20,7 @@ If a request implies changing any of the above, refuse and refer to `AGENTS.md` 
 ## Cstan's explicit out-of-scope items
 
 - **NO QR-code recipient verification.** The PRD v3 lists R13 (QR confirmation) — **treat as REMOVED** in any planning or implementation work.
-- **Supabase Storage for photo-proof** is the current implementation. Do not reintroduce the retired local storage backend.
+- **Pinata/IPFS encrypted proof storage** is the current implementation. Supabase Postgres stores chat and wrapped proof keys.
 
 ## Common tasks — recipe
 
@@ -56,11 +56,11 @@ If a request implies changing any of the above, refuse and refer to `AGENTS.md` 
 
 ## Things Cstan has explicitly told me (don't second-guess)
 
-- **Two BE + two FE devs in parallel** for SPM (different project). CargoChain has 5 members — use the table in `AGENTS.md`.
+- **CargoChain has five members.** The implemented ownership matrix is maintained in [`docs/Module-Split.md`](docs/Module-Split.md).
 - **No wagmi / viem** even when modern tutorials push them. Course mandate.
 - **No Next.js, no TypeScript** (project owner choice 2026-07-06 — React 18 + Vite, plain JS).
 - **Truffle `migrate --reset` if state is broken**, never hand-edit `build/contracts/`.
-- **Photo-proof storage**: `crypto.subtle.digest('SHA-256', …)` in browser → upload to the Supabase `milestone-proofs` bucket → page sends the proof URL and content hash through `submitProof(...)`.
+- **Photo-proof storage**: browser SHA-256 → AES-256-GCM encryption → short-lived Express-authorised Pinata/IPFS ciphertext upload → on-chain `ipfs://` URI submission. Supabase Postgres stores wrapped proof keys, not new proof images.
 - **Repo renamed** from "LogiChain" (PRD v3) to "CargoChain" (GitHub repo). When you see references to LogiChain in older docs, that's the same project.
 
 ## Tone for this project

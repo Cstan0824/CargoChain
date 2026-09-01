@@ -17,6 +17,7 @@ import { useToast } from '../hooks/useToast.js';
 import {
   formatDate,
   formatEth,
+  formatCargo,
   requestStatusLabel,
   REQUEST_TONE,
   shortAddress,
@@ -212,13 +213,13 @@ export function Funds() {
           />
           <KpiCard
             label="Locked escrow"
-            value={lockedEscrow == null ? '—' : formatEth(lockedEscrow.totalLocked)}
+            value={lockedEscrow == null ? '—' : formatCargo(lockedEscrow.totalLocked)}
             sub={lockedEscrow ? `${lockedEscrow.activeRequestCount} active request${lockedEscrow.activeRequestCount === 1 ? '' : 's'}` : 'No escrow data'}
             tone="info"
           />
           <KpiCard
             label="Released earnings"
-            value={formatEth(totalEarnings)}
+            value={formatCargo(totalEarnings)}
             sub={`${earningsPayments.length} payment${earningsPayments.length === 1 ? '' : 's'} received`}
             tone="positive"
           />
@@ -232,13 +233,13 @@ export function Funds() {
               <h2>Earnings trend</h2>
               <p>Milestone releases and completion tips received by this wallet.</p>
             </div>
-            <Badge tone="success">{formatEth(totalEarnings)} total</Badge>
+            <Badge tone="success">{formatCargo(totalEarnings)} total</Badge>
           </div>
           <LineChart
             values={cumulativeEarnings}
             height={160}
             color="var(--chart-5)"
-            ariaLabel={`Cumulative earnings ending at ${formatEth(totalEarnings)}`}
+            ariaLabel={`Cumulative earnings ending at ${formatCargo(totalEarnings)}`}
           />
         </Card>
       )}
@@ -328,7 +329,7 @@ function TxHistoryTable({ rows, onRowClick, show }) {
               <td><Badge tone={PAYMENT_ACTION_TONE[row.action] || 'neutral'}>{paymentActionLabel(row.action, row.milestoneId)}</Badge></td>
               <td><span className={styles.requestId}>#{String(row.requestId).padStart(4, '0')}</span></td>
               <td><Badge tone={REQUEST_TONE[row.requestStatus] || 'neutral'}>{requestStatusLabel(row.requestStatus)}</Badge></td>
-              <td className={styles.numeric}>{formatEth(row.amount)}</td>
+              <td className={styles.numeric}>{formatCargo(row.amount)}</td>
               <td className={styles.muted}>{formatDate(row.timestamp)}</td>
               <td>
                 <button type="button" className={styles.hashButton} onClick={(event) => copyHash(event, row.transactionHash)}>

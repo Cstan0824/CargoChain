@@ -24,7 +24,7 @@ import { EmptyState } from '../components/EmptyState.jsx';
 import { Card } from '../components/Card.jsx';
 import { Skeleton } from '../components/Skeleton.jsx';
 import {
-  formatEth,
+  formatCargo,
   formatDate,
   formatDaysLeft,
   formatRelative,
@@ -153,7 +153,7 @@ export function Marketplace() {
       skeleton: { width: '70%' },
       render: (r) => (
         <div className={styles.rewardCell}>
-          <div className={styles.rewardMain}>{formatEth(r.proposedAmountWei)}</div>
+          <div className={styles.rewardMain}>{formatCargo(r.proposedAmountWei)}</div>
           <div className={styles.rewardSub}>Not funded yet</div>
         </div>
       ),
@@ -342,7 +342,7 @@ export function Marketplace() {
                 <div className={styles.cardFooter}>
                   <div className={styles.cardPaymentBox}>
                   <span className={styles.footerLabel}>PLANNED PAYMENT</span>
-                  <strong className={styles.footerVal}>{formatEth(r.proposedAmountWei)}</strong>
+                  <strong className={styles.footerVal}>{formatCargo(r.proposedAmountWei)}</strong>
                   </div>
                   <div className={styles.cardDeadlineBox}>
                     <span className={styles.footerLabel}>DEADLINE</span>

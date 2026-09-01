@@ -40,13 +40,13 @@ export function ConfirmDialog({
         <div className={`${styles.iconWrap} ${isDanger ? styles.dangerIcon : styles.primaryIcon}`}>
           <Icon aria-hidden="true" />
         </div>
-        <button type="button" className={styles.closeButton} onClick={onCancel} aria-label="Close confirmation">
-          <HiOutlineXMark aria-hidden="true" />
-        </button>
         <div className={styles.content}>
           <h2 id="confirm-dialog-title">{title}</h2>
           <p id="confirm-dialog-message">{message}</p>
         </div>
+        <button type="button" className={styles.closeButton} onClick={onCancel} aria-label="Close confirmation">
+          <HiOutlineXMark aria-hidden="true" />
+        </button>
         <div className={styles.actions}>
           <Button ref={cancelButtonRef} variant="secondary" onClick={onCancel}>{cancelLabel}</Button>
           <Button

@@ -11,22 +11,24 @@
 
 ## What is CargoChain?
 
+**CargoChain** is the platform. Its ETH-backed payment currency is **CARGO**, with the on-chain symbol **`C.`**. The interface displays amounts such as `500 C.`. The fixed conversion rate remains `1 ETH = 10,000 C.`; network gas is paid in ETH.
+
 A milestone-based delivery marketplace where:
 
 1. A **shipper** posts a goods request with cargo details, a route, payment amount, and deadline.
-2. Carriers submit their own milestone proposals. The shipper reviews the proposals, selects one, and locks the exact ETH amount in escrow; remaining active proposals are rejected on-chain.
+2. Carriers submit their own milestone proposals. The shipper reviews the proposals, selects one, and locks the CARGO compensation plus a refundable carrier gas reserve; remaining active proposals become effectively rejected on-chain.
 3. The accepted carrier uploads a **photo-proof** for each checkpoint. The browser validates a JPEG/PNG/WebP up to 2 MiB, hashes and encrypts it with AES-256-GCM, uploads only ciphertext through a short-lived Pinata signed URL, and records a canonical `ipfs://` reference and remark on-chain.
 4. The **shipper verifies** each proof in the web UI, releasing that checkpoint's agreed escrow allocation to the carrier.
-5. After acceptance, either party can negotiate an amendment: extend or shorten a deadline under the applicable rules, add ETH to unpaid checkpoints, or insert a newly funded checkpoint without rewriting completed work.
+5. After acceptance, either party can negotiate an amendment: extend or shorten a deadline under the applicable rules, add CARGO to unpaid checkpoints, or insert a newly funded checkpoint without rewriting completed work.
 6. Either participant can request mutual cancellation. If the other accepts, completed payouts remain with the carrier and only unpaid escrow returns to the shipper. Overdue requests retain a separate refund path.
 7. After completion, the shipper may send one optional, one-time tip directly to the carrier.
 8. The shipper may publish one permanent 1-5 star rating with up to three predefined feedback tags. Carrier profiles combine those verified ratings with aggregate completion and timing outcomes.
 
-CargoChain also includes account-based access: one account can enable Shipper, Carrier, or both roles, then link one or more MetaMask wallets for on-chain signing. Wallet-backed display names and request-scoped private chat remain available. Chat messages are private, off-chain Supabase data; the accompanying delivery timeline is reconstructed from relevant, verified on-chain events.
+The connected MetaMask wallet is the CargoChain identity and can act as shipper or carrier according to its relationship to each request. Wallet-backed display names and request-scoped private chat remain available. Chat messages are private, off-chain Supabase data; the accompanying delivery timeline is reconstructed from relevant on-chain events.
 
 This is the **assignment version** — built for clarity, demo, and grading — not a production logistics platform.
 
-> **Note on naming:** The PRD written 2026-07-05 was titled "LogiChain v3". The GitHub repo is named **CargoChain** to avoid collision with the published TARUC reference (`TARUCmarketplace.zip`) and to make the project discoverable. When you see "LogiChain" in older docs (`docs/PRD.md`), it's the same project.
+Older planning drafts used the name LogiChain. The repository and current documentation use CargoChain.
 
 ---
 
@@ -55,28 +57,31 @@ This is the **assignment version** — built for clarity, demo, and grading — 
 - A registered shipper creates an open request with cargo items, pickup/destination, advertised payment, and deadline.
 - Each registered carrier may keep one active proposal per request, revoke it, and submit a revised plan while the request remains open.
 - The shipper can compare active proposals, sort them by date and checkpoint count, inspect details, optionally reject with a note, or approve exactly one plan.
-- Approval locks the advertised ETH in `DeliveryEscrow`, assigns the carrier, and automatically rejects competing active proposals with an auditable reason.
+- Approval locks the advertised CARGO and contract-calculated operational reserve in `DeliveryEscrow`, assigns the carrier, and makes competing active proposals effectively rejected with an auditable reason.
 
 ### During delivery
 
 - The accepted carrier submits a JPEG, PNG, WebP, GIF, AVIF, or BMP image proof up to 2 MiB for the next checkpoint. The browser computes a plaintext SHA-256, encrypts with a fresh AES-256-GCM key, and sends neutral `.bin` ciphertext to Pinata through the authenticated Express proof API.
 - Express re-checks the assigned-carrier/milestone state, issues a constrained short-lived Pinata URL, verifies the returned CID and ciphertext hash, and stores only a master-key-wrapped per-proof key in Supabase. The contract stores the provider-independent `ipfs://` URI; the viewer releases and decrypts it only for the current shipper or carrier.
 - The shipper approves or rejects the submitted proof. Approval releases the checkpoint's payout directly to the carrier.
+- The carrier pays native ETH gas when submitting proof. The first successful proof submission for each checkpoint may receive measured and capped CARGO reimbursement from the shipper-funded operational reserve. Withdrawals, corrected submissions, reverted transactions, and repeated submissions are not reimbursed.
+- The contract preserves enough operational reserve for later checkpoints. The shipper may fund an extra buffer or top up an active request; unused reserve returns to the shipper when the request settles.
 - Checkpoints have stable IDs. An amendment can insert a new checkpoint into the execution order without changing prior proof, payment, or event references.
 - If the shipment deadline passes, the shipper can reclaim remaining unpaid escrow. A refunded request cannot accept further milestone proofs.
 
 ### Agreement changes and completion
 
 - A shipper can directly extend a deadline when no negotiation is pending. Either participant can otherwise request an amendment with a response deadline, reason, funding allocations, and newly funded checkpoints.
+- Each new amendment checkpoint includes its required proof-operation reserve. Amendments may use `EachPaysOwn` or `RequesterCoversResponse`; a covered acceptance or rejection may receive one measured and capped CARGO reimbursement, with unused response allowance returned to its funder.
 - A request can have only one pending amendment or cancellation at a time. Resolved negotiations preserve a history of the requester, notes, before/after values, and outcome.
 - Once funded, cancellation is mutual: either participant requests it, the other accepts/rejects, and acceptance returns only remaining unpaid escrow to the shipper. It cannot settle while a proof is awaiting verification.
 - After all checkpoints are paid, the shipper can send one optional, separate tip directly to the carrier.
-- A completed request can receive one immutable shipper rating. Carrier reputation opens in a read-only proposal/track modal, while `/profile` shows the connected wallet's own aggregate delivery outcomes.
+- A completed request can receive one immutable shipper rating. Carrier reputation opens in a read-only proposal/track modal, while `/account` shows the connected wallet's own aggregate delivery outcomes.
 
 ### Identity and chat
 
-- A connected MetaMask wallet is the CargoChain identity. A wallet can register an on-chain display name through `UserRegistry`, then act as both shipper and carrier on different requests.
-- The accepted shipper/carrier pair receives a request-scoped conversation. Text messages live in Supabase; SIWE authorisation and server-side contract checks protect access.
+- A connected MetaMask wallet is the CargoChain identity. It may register an on-chain display name through `UserRegistry`, then act as shipper or carrier according to its relationship to each request.
+- A request-scoped conversation can be created after a carrier submits an on-chain proposal. It remains writable before selection while the request is open. After the shipper accepts a carrier, only that carrier's conversation remains writable; other proposal conversations become read-only. Text messages live in Supabase, with SIWE authorisation and server-side contract checks protecting access.
 - Chat also renders a filtered, read-only activity timeline from `DeliveryEscrow` and `LifecycleManager` events, including completion and expiry outcomes. Pending amendments and cancellations link directly to the relevant Track review section.
 
 For exact callable functions and validation rules, see [`API_v1.md`](API_v1.md). For product decisions around amendments, cancellation, and tips, see [`docs/Agreement-Changes.md`](docs/Agreement-Changes.md).
@@ -118,7 +123,7 @@ CargoChain/
 
 | Tool | Version | Why |
 |---|---|---|
-| **Node.js** | 18.x or 20.x LTS | Truffle + ethers + Vite + Express |
+| **Node.js** | 22.x LTS (`.nvmrc`) | Truffle + ethers + Vite + Express |
 | **npm** | 9+ (bundled with Node) | package management |
 | **Git** | 2.30+ | version control |
 | **Ganache** | 7.x | local Ethereum chain |
@@ -311,7 +316,7 @@ That command starts deterministic Ganache with a local `ganache-data/` database,
 ```
 RPC Listening on 127.0.0.1:7545
 [cargochain-api] listening on http://127.0.0.1:3000
-VITE v5.4.21 ready
+VITE ready
 ➜  Local: http://127.0.0.1:5174/
 ```
 
@@ -394,18 +399,21 @@ npm run test:frontend # Vitest frontend suite
 npm run build         # production bundle
 ```
 
-The latest full local verification completed with **72 passing contract tests** and **48 passing frontend tests**.
+The current automated verification baseline is **93 passing contract tests**, **196 passing frontend tests**, and **18 passing server tests**. The separate fresh-wallet Ganache frontend integration test remains optional and was skipped by decision.
 
 ### `docs/` — Documentation
 
 | File | Content |
 |---|---|
-| `PRD.md` | Exported PRD v3 (LogiChain) — product requirements baseline |
-| `Spec.md` | Concise functional + technical spec — quick-reference for the team |
-| `Architecture.md` | Diagram-rich architecture overview |
-| `Module-Split.md` | Detailed responsibilities, dependencies, handoffs per module |
+| `PRD.md` | Current CargoChain product requirements baseline |
+| `Spec.md` | Current functional and technical specification |
+| `Architecture.md` | Current system and contract architecture |
+| `BusinessFlow.md` | Current user and settlement workflow |
+| `Module-Feature-Listing.md` | Implemented feature matrix |
+| `Module-Split.md` | Responsibilities, dependencies, and hand-offs per module |
 | `Agreement-Changes.md` | Implemented amendment, mutual-cancellation, and completion-tip rules |
 | `DESIGN.md` | Shared UI typography, surfaces, layering, tables, loading, and accessibility contract |
+| `Cargo-Token-and-Gas-Model.md` | Implemented CARGO settlement, operational reserve, and gas-reimbursement model |
 
 ---
 
@@ -449,7 +457,7 @@ The demo runs end-to-end on Ganache + a fresh `npm run migrate`:
 1. **Connect a Ganache wallet** in MetaMask and register its optional public display name through the profile flow.
 2. **Switch MetaMask wallets** when demonstrating the other party. Each connected wallet may act as a shipper or carrier according to the shipment action.
 3. **Create and propose:** the shipper creates a request at `http://127.0.0.1:5174/`; two carriers submit milestone plans; the shipper compares, selects, and funds one.
-4. **Proof and payment:** with a synthetic JPEG/PNG/WebP no larger than 2 MiB, the accepted carrier signs in on demand, uploads encrypted ciphertext through Pinata, submits the returned `ipfs://` reference, and the shipper verifies it; show the released ETH and on-chain payment entry.
+4. **Proof and payment:** with a synthetic JPEG, PNG, WebP, GIF, AVIF, or BMP image no larger than 2 MiB, the accepted carrier signs in on demand, uploads encrypted ciphertext through Pinata, submits the returned `ipfs://` reference, and the shipper verifies it; show the released CARGO and on-chain payment entry. ETH remains available in both wallets for gas.
 5. **Private chat:** the accepted pair authenticates with SIWE and exchanges request-scoped messages. Show that the activity timeline only contains events for that carrier/request pair.
 6. **Agreement change:** request a funded amendment or mutual cancellation, then show its review panel, on-chain decision, and history. Do not try to finalise cancellation while a proof is awaiting verification.
 7. **Completion:** finish remaining checkpoints, show the optional one-time tip in Payments, and confirm it reaches the carrier without changing escrow accounting.
@@ -472,8 +480,8 @@ The demo runs end-to-end on Ganache + a fresh `npm run migrate`:
 - PRD: [`docs/PRD.md`](docs/PRD.md)
 - Module breakdown: [`docs/Module-Split.md`](docs/Module-Split.md)
 - Contract API: [`API_v1.md`](API_v1.md)
-- Account and asset plan: [`docs/Account-Based-Access-and-Asset-Plan.md`](docs/Account-Based-Access-and-Asset-Plan.md)
-- Coding-agent rules: [`AGENTS.md`](AGENTS.md)
+- CARGO and gas allocation: [`docs/Cargo-Token-and-Gas-Model.md`](docs/Cargo-Token-and-Gas-Model.md)
+- Interface design: [`DESIGN.md`](DESIGN.md)
 
 ---
 

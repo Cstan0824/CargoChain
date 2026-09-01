@@ -71,7 +71,7 @@ describe('Profile identity surface', () => {
 
   it('renders a registered wallet profile without an undefined account variable crash', () => {
     expect(() => render(<Profile />)).not.toThrow();
-    expect(screen.getByText('A registered shipper')).toBeTruthy();
+    expect(screen.getAllByText('A registered shipper').length).toBeGreaterThan(0);
     expect(screen.getByText('Shipper')).toBeTruthy();
     expect(screen.getByText('Carrier')).toBeTruthy();
   });

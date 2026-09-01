@@ -16,7 +16,7 @@ import { useToast } from './ToastContext.jsx';
 import { useAccountAccess } from './AccountAccessContext.jsx';
 import { CARGO_NETWORK_CONFIG, contractAddress, deploymentIdentityKey } from '../utils/network.js';
 
-const UserProfileContext = createContext(null);
+export const UserProfileContext = createContext(null);
 const CLOSED_MODAL = {
   isOpen: false,
   mandatory: false,

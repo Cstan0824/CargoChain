@@ -83,10 +83,10 @@ export function ConversationList({
               className={`${styles.item} ${isSelected ? styles.selected : ''}`}
             >
               <span className={styles.itemTopline}>
-                <strong>{presentation.title || `Shipment#${conversation.request_id}`}</strong>
+                <strong>{presentation.title || 'Participant'} · {presentation.otherRole || 'Participant'}</strong>
                 {timestamp && <time>{formatRelative(Math.floor(new Date(timestamp).getTime() / 1000))}</time>}
               </span>
-              <span className={styles.workLabel}>{presentation.workLabel || 'Shipment work'}</span>
+              <span className={styles.workLabel}>{presentation.shipmentLabel || `Shipment #${conversation.request_id}`}</span>
               <span className={styles.preview}>{presentation.preview || 'Shipment activity'}</span>
               <span className={styles.route}>
                 {presentation.route || 'Loading route…'}

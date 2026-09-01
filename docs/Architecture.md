@@ -2,6 +2,8 @@
 
 > Current v1 architecture. This project is designed for a local Ganache demonstration, not a public production deployment.
 
+The diagrams below describe the running CARGO settlement and encrypted Pinata/IPFS proof implementation. Supabase stores private chat records and server-only wrapped proof keys; it is not used for new proof-image uploads. ETH remains the backing and native gas asset, not delivery escrow.
+
 ## 1. System overview
 
 ```mermaid
@@ -23,7 +25,7 @@ flowchart LR
   Browser -->|allowlisted gateway retrieval| IPFS
 ```
 
-The browser is the DApp. Ganache holds all delivery state and ETH accounting.
+The browser is the DApp. Ganache holds delivery state, CARGO accounting, and the ETH-backed token reserve. ETH remains the native gas currency.
 Express is not a delivery authority: it authenticates the shared SIWE wallet
 session, re-reads on-chain request/milestone state for proof operations and
 chat, and accesses Supabase only for private chat data and wrapped proof keys.
@@ -33,12 +35,15 @@ chat, and accesses Supabase only for private chat data and wrapped proof keys.
 ```mermaid
 flowchart TB
   Registry[UserRegistry<br/>display name / registration]
+  Token[CargoToken<br/>ETH-backed CARGO]
   Escrow[DeliveryEscrow<br/>requests, proposals, escrow, proofs,<br/>checkpoints, refunds, tips]
   Lifecycle[LifecycleManager<br/>amendments, cancellation,<br/>one-pending-negotiation lock]
   Reputation[ReputationRegistry<br/>completed-request ratings,<br/>feedback aggregates]
   Events[PaymentEvents<br/>event definitions]
 
   Registry -->|registration checks| Escrow
+  Token -->|business settlement| Escrow
+  Token -->|staged amendment funding| Lifecycle
   Events -->|inherited events| Escrow
   Lifecycle -->|canonical shipment/progress reads| Escrow
   Lifecycle -->|restricted finalisation calls| Escrow
@@ -50,9 +55,10 @@ flowchart TB
 Deployment order is:
 
 ```text
+CargoToken
 UserRegistry
-LifecycleManager
-DeliveryEscrow(registryAddress, lifecycleManagerAddress)
+LifecycleManager(cargoTokenAddress)
+DeliveryEscrow(registryAddress, lifecycleManagerAddress, cargoTokenAddress)
 LifecycleManager.initializeDeliveryEscrow(escrowAddress)
 ReputationRegistry(escrowAddress)
 ```
@@ -65,7 +71,7 @@ The frontend creates read-only ethers contract instances from Truffle artifacts 
 stateDiagram-v2
   [*] --> Open: shipper creates request
   Open --> Open: carriers propose / revoke / resubmit
-  Open --> Funded: shipper approves one proposal and funds exact ETH
+  Open --> Funded: shipper funds CARGO compensation + reserve
   Funded --> InProgress: carrier submits proof
   InProgress --> InProgress: proof rejected / resubmitted
   InProgress --> Completed: final proof verified and paid
@@ -80,7 +86,7 @@ Every checkpoint receives an immutable `milestoneId`. The contract keeps a separ
 ## 4. Proof and payment data path
 
 ```text
-Carrier selects JPEG / PNG / WebP file (≤ 2 MiB)
+Carrier selects JPEG / PNG / WebP / GIF / AVIF / BMP file (≤ 2 MiB)
   → browser computes plaintext SHA-256 and encrypts with AES-256-GCM
   → Express authorizes the wallet and returns a short-lived Pinata URL
   → browser posts multipart `network=public`, `file`, and `name` fields
@@ -95,7 +101,7 @@ The plaintext image and AES key are not written to the blockchain. Only the
 provider-independent encrypted URI and proof metadata are recorded in the
 contract. Public IPFS exposes the ciphertext/CID, not the plaintext; gateway
 selection is configurable and is not an access-control boundary. Existing
-Supabase HTTPS proof URLs remain readable during migration.
+Legacy HTTPS proof URLs remain readable for compatibility. New proof uploads always use the encrypted IPFS path.
 
 ## 5. Negotiation architecture
 

@@ -27,7 +27,7 @@ Use the course-mandated stack only:
 - Frontend: **React 18 + Vite** (plain JavaScript, no TypeScript)
 - Blockchain client library: **ethers.js v6** (project owner decision 2026-07-06 — supersedes the earlier Web3.js v1.x rule)
 - Tests: **Mocha + Chai through Truffle**
-- Off-chain support: **Node.js + Express.js** for SIWE/private chat; **Supabase Storage** for photo proofs
+- Off-chain support: **Node.js + Express.js** for SIWE/private chat; **Pinata/IPFS** for encrypted photo proofs; **Supabase Postgres** for chat and wrapped proof keys
 - **Sepolia testnet: future plan, NOT part of v1.** The team has explicitly deferred it. The Sepolia block in `truffle-config.js` is commented out and the `.env.example` Sepolia vars are blank by design. Do not enable or test against Sepolia until the team agrees to ship v2.
 
 Do **not** replace the stack with:
@@ -56,7 +56,7 @@ The project must include UI integration with deployed smart contracts. A Remix-o
 |---|---|---|---|
 | **a. User Profile & Wallet** | Login/Signup via wallet identity · Wallet connection (MetaMask) · Web3 provider detection · Network/chain validation · User registration · Role management (Shipper / Carrier) · Role-based UI access | **wx** | `UserRegistry.sol` |
 | **b. Goods Request Management** | Shipper creates delivery request · Goods info + milestones · Pickup/destination + deadline · Carriers browse · FCFS acceptance · Cancel before acceptance · Delivery recovery (republish) | **GAN** | `DeliveryEscrow.sol`, `LifecycleManager.sol` |
-| **c. Payment & Escrow** | ETH escrow lock on request creation · Escrow balance check · Milestone-based release · Partial payment · Final completion · ETH refund (cancel/timeout) · Transaction history · Payment status | **Jeremy** | `DeliveryEscrow.sol` (re-used), `PaymentEvents.sol` |
+| **c. Payment & Escrow** | CARGO escrow lock on request creation · Escrow balance check · Milestone-based release · Partial payment · Final completion · CARGO refund (cancel/timeout) · Transaction history · Payment status · Gas allowance reimbursement | **Jeremy** | `DeliveryEscrow.sol` (re-used), `PaymentEvents.sol`, `CargoToken.sol` |
 | **d. Milestone Tracking & Proof** | Shipper traces milestone progress · Carrier updates progress · Carrier uploads photo-proof per milestone · Browser SHA-256 hash · Hash on-chain · Shipper verifies/rejects · Milestone completion · Triggers payment release after verification | **Melissa** | `MilestoneVerifier.sol` |
 | **e. Frontend & UI/UX** | React 18 + Vite · ethers.js v6 ↔ Solidity bridge · MetaMask integration · Contract calls · Transaction submission · Photo upload integration · Demo flow navigation · UI for all 4 BE modules | **Cstan (Cs)** | — |
 
@@ -64,7 +64,7 @@ The project must include UI integration with deployed smart contracts. A Remix-o
 
 Expected contract files:
 
-- `contracts/DeliveryEscrow.sol` — request lifecycle, ETH escrow, payout, refund (Modules b + c)
+- `contracts/DeliveryEscrow.sol` — request lifecycle, CARGO escrow, payout, refund, and operational reserve (Modules b + c)
 - `contracts/MilestoneVerifier.sol` — proof hash submission, milestone verification, milestone state (Module d)
 - `contracts/LifecycleManager.sol` — deadline tracking, stuck delivery handling, republishing, public timeline (Module b)
 - `contracts/UserRegistry.sol` — address ↔ userId mapping, role tracking (Module a) — *new file, to be added by wx*
@@ -242,7 +242,7 @@ Keep these assumptions unless the team decides otherwise:
 - One delivery request has one active carrier at a time.
 - Multi-carrier collaboration is represented only through recovery/republishing, not full custody transfer.
 - Photo-proof uses SHA-256 hash, not full forensic verification.
-- Payment uses ETH, not a custom token.
+- Payment uses the approved ETH-backed CARGO token for business settlement. ETH remains the native gas currency.
 - Ganache is the v1 chain. Sepolia is a future plan (commented in `truffle-config.js`), not part of v1.
 
 ## Do-Not-Change List
@@ -254,7 +254,7 @@ Do not change these without asking the project owner (Cstan):
 - Five-module split (a / b / c / d / e) and named owners (wx / GAN / Jeremy / Melissa / Cstan)
 - Main contract names (DeliveryEscrow, MilestoneVerifier, LifecycleManager)
 - Single active carrier model
-- ETH escrow payment model
+- Approved CARGO business-payment model and ETH-backed fixed-rate token
 - Photo-proof hash approach (no QR — Cstan decision 2026-07-05)
 - UI integration requirement
 
