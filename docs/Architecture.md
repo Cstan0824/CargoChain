@@ -100,8 +100,7 @@ Carrier selects JPEG / PNG / WebP / GIF / AVIF / BMP file (≤ 2 MiB)
 The plaintext image and AES key are not written to the blockchain. Only the
 provider-independent encrypted URI and proof metadata are recorded in the
 contract. Public IPFS exposes the ciphertext/CID, not the plaintext; gateway
-selection is configurable and is not an access-control boundary. Existing
-Legacy HTTPS proof URLs remain readable for compatibility. New proof uploads always use the encrypted IPFS path.
+selection is configurable and is not an access-control boundary.
 
 ## 5. Negotiation architecture
 
