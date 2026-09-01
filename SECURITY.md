@@ -52,11 +52,8 @@ Please **do not** include working exploit code in public issues. A short descrip
 - A `VITE_*` variable ends up in the JS file served to every visitor. If
   the value is sensitive, **do not use the `VITE_` prefix**. Use a regular
   env var and read it server-side only (Truffle, Express, etc.).
-- The frontend does not need `SEPOLIA_RPC` (Truffle uses it; the browser
-  talks to MetaMask, which already knows its own RPC). `SEPOLIA_RPC` and
-  `TEAM_MNEMONIC` are **future plan only** — see `.env.example` and the
-  commented Sepolia block in `truffle-config.js`. Do not fill them in or
-  enable Sepolia until the team agrees to ship v2.
+- The frontend does not use a Sepolia RPC. CargoChain uses only the local
+  Ganache network and its configured local development values.
 
 ## Local-only by default
 
@@ -80,9 +77,7 @@ so a fresh clone never accidentally exposes a wallet RPC, chat API, or dev UI.
   user input, sanitise first.
 - No fetching of arbitrary URLs from user input. Encrypted proof retrieval is
   limited to HTTPS gateway bases configured through the public
-  `VITE_IPFS_GATEWAY_URLS` variable, and legacy HTTPS proof compatibility is
-  limited to same-origin URLs or the configured Supabase project's public
-  `milestone-proofs` path.
+  `VITE_IPFS_GATEWAY_URLS` variable.
 - No third-party CDN scripts loaded at runtime. All deps are in
   `package.json` and installed locally.
 

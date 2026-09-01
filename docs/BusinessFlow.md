@@ -56,7 +56,7 @@ Shipper verifies or rejects
 ```
 
 - Proof images must be JPEG, PNG, WebP, GIF, AVIF, or BMP and at most **2 MiB** before encryption. SVG is intentionally excluded because it can contain active or externally loaded content.
-- New proof plaintext is encrypted in the browser; public IPFS exposes only ciphertext. Express verifies the ciphertext hash and stores a wrapped key for authorized viewing. Existing HTTPS/Supabase proof URLs remain readable during migration.
+- New proof plaintext is encrypted in the browser; public IPFS exposes only ciphertext. Express verifies the ciphertext hash and stores a wrapped key for authorized viewing.
 - The carrier pays native ETH gas to submit proof. The first successful submission for each checkpoint may receive measured and capped CARGO reimbursement from the request's operational reserve. Withdrawals, corrected submissions, reverted transactions, and repeated submissions are not reimbursed.
 - The contract protects the reserve required for later checkpoints before paying an earlier reimbursement. Extra funded reserve may increase saved gas-price coverage, and unused reserve returns to the shipper when the request settles.
 - Checkpoints must complete in the request's current execution order.
@@ -121,7 +121,9 @@ After the final checkpoint is paid, the shipper may make one optional tip paymen
 
 ## 9. Carrier reputation
 
-After a request reaches `Completed`, its shipper can submit one permanent 1-5 rating and up to three predefined feedback tags for the accepted carrier. Proposal cards show the verified rating average and count. A read-only reputation modal adds completed-delivery, on-time, expiry, accepted-cancellation, and common-tag information during proposal review, while `/account` shows the connected wallet's own rating and delivery aggregates. The public reputation UI does not reveal route, cargo, proof, escrow, request ID, or chat details.
+After a request reaches `Completed`, its shipper can submit one permanent 1-5 rating and up to three predefined feedback tags for the accepted carrier. The available tags are good communication, clear milestone updates, careful cargo handling, responsive, professional service, communication could improve, milestone updates could improve, and cargo handling concern. Free-text reviews are not collected.
+
+Proposal cards show the verified rating average and count. A read-only reputation modal adds completed-delivery, on-time, expiry, accepted-cancellation, and common-tag information during proposal review, while `/account` shows the connected wallet's own rating and delivery aggregates. Reputation views do not reveal route, cargo, proof, escrow, request ID, or chat details.
 
 ## 10. Out of scope
 

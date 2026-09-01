@@ -1,6 +1,6 @@
 # CargoChain — Technical Specification
 
-> Assignment specification. [`API_v1.md`](../API_v1.md) remains the authoritative function-level reference for the currently implemented contracts. New proof uploads use the implemented encrypted Pinata/IPFS path; existing HTTPS/Supabase proof references remain readable during migration. See [IPFS-Pinata-Execution-Plan.md](IPFS-Pinata-Execution-Plan.md) for rollout constraints.
+> [`API_v1.md`](../API_v1.md) remains the authoritative function-level reference for the currently implemented contracts.
 
 ## 1. Scope
 
@@ -17,10 +17,10 @@ The current build also supports wallet display names, request-scoped private cha
 | Browser app | React 18, Vite, JavaScript, ethers v6 |
 | Wallet | MetaMask browser extension |
 | Private chat | Express SIWE API + Supabase Postgres / Realtime |
-| Proof image storage | Browser AES-256-GCM ciphertext pinned to Pinata public IPFS through Express-issued signed URLs; server-only wrapped per-proof keys in Supabase `proof_keys`; legacy HTTPS/Supabase URLs remain readable. |
+| Proof image storage | Browser AES-256-GCM ciphertext pinned to Pinata public IPFS through Express-issued signed URLs; server-only wrapped per-proof keys in Supabase `proof_keys`. |
 | Tests | Truffle Mocha/Chai and Vitest |
 
-Sepolia, QR recipient confirmation, auto-release dispute windows, and carrier republishing are not part of v1. CARGO is the approved business-payment currency; ETH remains the native gas currency.
+Sepolia, QR recipient confirmation, auto-release dispute windows, carrier republishing, custody transfer, general marketplace chat, staking, and a scalable event indexer are not included in CargoChain. CARGO is the business-payment currency; ETH remains the native gas currency.
 
 ## 3. Contracts
 
@@ -73,9 +73,67 @@ PendingProof / Rejected → Submitted → Paid
 
 The shipper can reject a submitted proof, returning it to `Rejected` for carrier resubmission. A checkpoint is paid only after shipper verification.
 
+### CARGO payment and gas accounting
+
+CargoChain uses the fixed-rate CARGO token for business settlement. The token has 18 decimals, uses the on-chain symbol `C.`, and is backed by ETH at `1 ETH = 10,000 C.`. `CargoToken.deposit()` mints CARGO only when a wallet deposits ETH. `redeem()` burns a divisible CARGO amount and returns the matching backing ETH. The token has no owner mint or reserve-withdrawal function.
+
+Delivery compensation, operational reserve, amendment funding, refund, completion tip, and amendment response allowance are separate CARGO accounting categories. ETH is used only by the transaction sender for native blockchain gas and by CARGO conversion/redemption.
+
+#### Initial operational reserve
+
+When a shipper accepts a proposal, the contract requires one proof-submission reserve for every proposed checkpoint:
+
+```text
+minimum operational reserve
+= checkpoint count × (1,200,000 gas-unit cap + 50,000 overhead)
+  × max(block base fee + 1 gwei, 2 gwei)
+  × 10,000 C. per ETH
+```
+
+At the local 2 gwei floor, one checkpoint requires 25 C. and two checkpoints require 50 C. The shipper can add a higher refundable reserve. The request stores the resulting gas-price coverage, which also prices newly inserted amendment checkpoints.
+
+#### Proof-submission reimbursement
+
+The carrier pays ETH gas first. On the first successful on-chain proof submission for a checkpoint, the contract calculates CARGO reimbursement from measured gas:
+
+```text
+eligible reimbursement
+= min(measured gas + 50,000 overhead, 1,200,000)
+  × min(transaction gas price, request gas-price coverage)
+  × 10,000 C. per ETH
+```
+
+The payment is also capped at 50 C., the available reserve, and the amount that can be spent while retaining reserve for later eligible checkpoints. Withdrawn proofs, replacement proofs, failed/reverted calls, and later submissions are not reimbursed. Unused operational reserve returns to the shipper when the request completes, is mutually cancelled, or is refunded after deadline expiry.
+
+#### Amendment response reimbursement
+
+An amendment defaults to `EachPaysOwn`. `RequesterCoversResponse` stages a separate CARGO allowance for one response. Its contract minimum is:
+
+```text
+minimum response allowance
+= (6,000,000 gas-unit cap + 40,000 overhead)
+  × max(block base fee + 1 gwei, 2 gwei)
+  × 10,000 C. per ETH
+```
+
+The responder still pays ETH gas first. One successful amendment acceptance or rejection may receive measured CARGO reimbursement, capped by the 6,000,000 gas-unit limit, allowance-funded gas-price coverage, remaining allowance, and 150 C. maximum. Withdrawal and expiry do not reimburse a responder because no response transaction occurred; the unused allowance returns to its recorded funder.
+
+#### Validated maximum-input benchmarks
+
+| Operation | Measured transaction gas | Test reimbursement | Absolute reimbursement cap |
+| --- | ---: | ---: | ---: |
+| Maximum permitted proof submission | 1,006,348 gas | 18.45144 C. | 50 C. |
+| Eighteen-checkpoint amendment acceptance | 5,044,722 gas | 99.76998 C. | 150 C. |
+
+Reimbursements are approximate and capped. A participant always needs enough ETH to submit the original transaction.
+
 ### Reputation
 
-`ReputationRegistry` accepts one permanent 1-5 rating from the shipper after a request reaches `Completed`, plus up to three predefined feedback tags. Carrier profiles aggregate those ratings and derive completion/timing outcomes from `DeliveryEscrow` request records and `RequestCompleted`/`RequestExpired` events.
+`ReputationRegistry` accepts one permanent 1-5 rating from the shipper after a request reaches `Completed`, plus up to three predefined feedback tags. The contract stores the shipper, accepted carrier, timestamp, score, and tag bitmask. It maintains carrier rating-count, total-score, and per-tag aggregates.
+
+The eight fixed tags are good communication, clear milestone updates, careful cargo handling, responsive, professional service, communication could improve, milestone updates could improve, and cargo handling concern. Free-text reviews are not stored.
+
+The interface shows average rating and verified rating count on proposal/review surfaces. Its carrier reputation modal also derives completed-delivery count, on-time rate, expiry outcomes, and common selected tags from contract records and events. The connected wallet's Account page shows its own rating aggregate. Reputation views do not disclose route, cargo, proof, escrow amount, request ID, or chat text.
 
 ## 5. Agreement rules
 
@@ -186,8 +244,6 @@ npm run build
 - The assignment supports MetaMask extension flow only.
 - Chat is between request participants only; it is not a public marketplace messenger.
 
-## 10. Implementation status and future scope
+## 10. Implementation boundary
 
-The CARGO token, contract-calculated operational allowances, measured/capped CARGO reimbursement, and encrypted Pinata/IPFS evidence path are implemented in this branch. The exact current rules are documented in [`Cargo-Token-and-Gas-Model.md`](Cargo-Token-and-Gas-Model.md), [`Architecture.md`](Architecture.md), and [`API_v1.md`](../API_v1.md).
-
-Future scope remains limited to public-network deployment, recipient QR confirmation, automatic dispute-window release, carrier republishing/recovery, public marketplace chat, staking, and a scalable event indexer.
+The CARGO token, contract-calculated operational allowances, measured/capped CARGO reimbursement, and encrypted Pinata/IPFS evidence path are implemented. Sections 1–9 describe the full current system. The exclusions in Section 9 are not implemented.

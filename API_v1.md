@@ -1,7 +1,7 @@
 # CargoChain Smart Contract API v1
 
 > **Status:** Implemented contract surface.
-> Business payment amounts are CARGO base units after the CARGO migration. Native ETH is used only for gas and token conversion. Timestamps are Unix seconds. Request IDs start at 1. Milestone IDs are stable, zero-indexed creation IDs within a request; their completion order is retrieved separately and may change when an amendment inserts a checkpoint.
+> Business payment amounts are CARGO base units. Native ETH is used only for gas and token conversion. Timestamps are Unix seconds. Request IDs start at 1. Milestone IDs are stable, zero-indexed creation IDs within a request; their completion order is retrieved separately and may change when an amendment inserts a checkpoint.
 
 ## Deployment order
 
@@ -29,11 +29,11 @@ ReputationRegistry reputation = new ReputationRegistry(address(escrow));
 `CargoToken` is the fixed-rate, ETH-backed business-payment token. It has no
 owner and no administrative mint or reserve-withdrawal function. The token is
 deployed before the payment contracts. Delivery escrow uses CARGO base units
-for business settlement after the migration.
+for business settlement.
 
 ### Constants and metadata
 
-The platform is CargoChain, the currency name is CARGO, and its symbol is `C.`. UI amounts use a suffix, for example `500 C.`. The name and symbol are both ERC-20 metadata stored on-chain. Existing deployed tokens retain their old metadata; redeploy to use the new name and symbol. Conversion and backing rules are unchanged.
+The platform is CargoChain, the currency name is CARGO, and its symbol is `C.`. UI amounts use a suffix, for example `500 C.`. The name and symbol are ERC-20 metadata stored on-chain.
 
 ```solidity
 name() view returns (string)                 // CARGO
@@ -244,6 +244,14 @@ getAmendmentNewMilestones(uint256 requestId, uint256 amendmentId)
 minimumResponseAllowance() view returns (uint256)
 ```
 
+`minimumResponseAllowance()` requires:
+
+```text
+(6,000,000 response gas-unit cap + 40,000 overhead)
+× max(block base fee + 1 gwei, 2 gwei)
+× 10,000 C. per ETH
+```
+
 - **Purpose:** Own post-acceptance agreement-change state without increasing the already-large escrow contract.
 - **Escrow relationship:** The one-time `deliveryEscrow` link identifies the authoritative request, milestone, and escrow contract. The manager does not duplicate shipment data.
 - **Negotiation lock:** A request can expose only one active `Amendment` or `Cancellation` record at a time. `None` means there is no pending workflow.
@@ -253,6 +261,7 @@ minimumResponseAllowance() view returns (uint256)
 - **Mutual amendments:** Either party may request a deadline/funding change. A carrier cannot shorten the deadline. Shipper shortening requires carrier approval and at least `0.01 CARGO` of new funding.
 - **Funding:** The shipper stages CARGO when requesting a funded amendment. A carrier requests an amount and the shipper supplies it when accepting. Allocations must exactly equal the new CARGO and may only top up unpaid milestones or fund new milestones.
 - **Response reimbursement:** The default `requestAmendment` policy is `EachPaysOwn`. `RequesterCoversResponse` stages a separate minimum response allowance, saves the allowance-funded gas-price cap, and reimburses one successful acceptance or rejection in CARGO. Unused allowance returns to its recorded funder after resolution.
+- **Response cap:** Reimbursement caps measured gas at 6,000,000 units, uses the lower of transaction gas price and stored coverage, and cannot exceed 150 C. or the remaining response allowance.
 - **New-checkpoint reserve:** Every added checkpoint requires `DeliveryEscrow.minimumAdditionalOperationalAllowance(requestId, count)` based on the request's saved proof-gas coverage. This reserve is staged separately from checkpoint compensation.
 - **Timing:** Mutual amendments close one hour before the current shipment deadline. The tracking form defaults responses to 24 hours, falling back to one hour before the shipment deadline, and defaults extensions to 24 hours after the current deadline.
 - **Insertion:** New milestones may be placed before an unpaid milestone or appended as the new final checkpoint. Paid checkpoints are locked drop targets. Original milestone names, payouts, completed work, and released funds remain unchanged.
@@ -269,7 +278,7 @@ Events: `DeliveryEscrowInitialized`, `ShipmentDeadlineExtended`, `AmendmentReque
 `CancellationWithdrawn`, `CancellationExpired`, `AmendmentResponseAllowanceFunded`,
 `AmendmentResponseReimbursed`, and `AmendmentResponseAllowanceRefunded`.
 
-The finalized workflow rules and phased implementation boundary are documented in `docs/Agreement-Changes.md`.
+The finalized workflow rules are documented in `docs/Agreement-Changes.md`.
 
 ---
 
@@ -390,6 +399,17 @@ checkpoint compensation.
 Returns the minimum CARGO base-unit reserve required for one successful proof
 submission per proposed checkpoint. The calculation uses the contract's gas
 unit cap, overhead, reference gas price, and fixed conversion rate.
+
+```text
+proposal checkpoint count
+× (1,200,000 proof gas-unit cap + 50,000 reimbursement overhead)
+× max(block base fee + 1 gwei, 2 gwei)
+× 10,000 C. per ETH
+```
+
+`referenceGasPrice()` exposes the gas-price term. At the local 2 gwei floor,
+one checkpoint reserve is 25 C. The request saves the funded coverage; larger
+reserve or an active top-up can raise that coverage for future eligible proofs.
 
 `minimumProofAllowance()` returns the minimum for one proof at the current reference gas price. `minimumAdditionalOperationalAllowance(requestId, count)` returns the reserve required for new amendment checkpoints at that request's saved coverage.
 
@@ -823,25 +843,3 @@ retrieve ciphertext through an allowlisted HTTPS gateway, verify both hashes,
 decrypt in memory, and revoke its temporary Blob URL when the viewer closes or
 the wallet/network changes. An unrelated wallet receives `403`; a missing
 wrapped key receives `404`.
-
-Existing HTTPS/Supabase proof references remain readable in the viewer during
-migration, but they do not use this key route.
-
-## Changelog
-
-| Date | Change |
-|---|---|
-| 2026-09-01 | Documented the current CARGO top-up/balance UX, proposal reserve breakdown, current Pinata/IPFS media types, and corrected completion-tip transfer semantics to CARGO allowance transfer. |
-| 2026-08-31 | Added fresh-wallet CARGO funding quotes, request-specific gas coverage, amendment checkpoint reserves, stale-proof submission guards, named-error decoding, standard-size deployment support, and maximum-input gas benchmarks. |
-| 2026-08-18 | Added `ReputationRegistry`: one immutable structured shipper rating per completed request, carrier rating/tag aggregates, read-only reputation modal/profile summary UI, and completion/expiry delivery events used by objective performance reporting. |
-| 2026-08-03 | Completed verification coverage for mutual cancellation, staged amendment refunds, response expiry, stable checkpoint ordering, tip limits, and lifecycle authorization. Documented the chat timeline's read-only use of escrow and lifecycle events. |
-| 2026-08-03 | Stabilised milestone identity: amendment insertions now alter a dedicated execution-order list, while each milestone keeps its original ID, proof/payment history, and event references. Added order views and `APPEND_MILESTONE_ID`. |
-| 2026-08-02 | Added Phase 5 shipment amendments: unilateral shipper extensions, mutually approved deadline/funding changes, milestone top-ups and insertion, staged-fund refunds, stale-progress protection, and tracking-page UI/history. |
-| 2026-08-02 | Added Phase 4 mutual cancellation: two-party request/decision flow, notes and response deadlines, pending-proof guard, remaining-escrow settlement, history UI, and restricted escrow finalization. |
-| 2026-08-02 | Added Phase 3 one-time completion tips, direct carrier transfer, payment-history integration, and carrier-earnings inclusion. |
-| 2026-08-02 | Added Phase 2 proposal rejection notes: optional manual notes, a 500-byte on-chain limit, and a fixed reason for proposals closed by another proposal's acceptance. |
-| 2026-08-02 | Added the Phase 1 `LifecycleManager` negotiation foundation and separated agreement-change state from `DeliveryEscrow` to preserve contract bytecode headroom. |
-| 2026-07-29 | Added role-free `UserRegistry`, mandatory escrow registration checks, registry-first deployment, and maintained per-shipper locked escrow totals/counts. Reconciled this document to the implemented API. |
-| 2026-07-21 | Documented proposal-based escrow, refund accounting, payment summary, and event-derived payment history. |
-| 2026-07-05 | Initial v1 draft; recipient QR remained out of scope. |
-| 2026-08-31 | Added the approved CARGO token API, fixed-rate conversion, strict redemption divisibility, explicit deposits, and fresh-deployment boundary. |

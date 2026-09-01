@@ -28,10 +28,6 @@ The connected MetaMask wallet is the CargoChain identity and can act as shipper 
 
 This is the **assignment version** — built for clarity, demo, and grading — not a production logistics platform.
 
-Older planning drafts used the name LogiChain. The repository and current documentation use CargoChain.
-
----
-
 ## Tech stack
 
 | Layer | Tool |
@@ -39,7 +35,7 @@ Older planning drafts used the name LogiChain. The repository and current docume
 | Smart contracts | Solidity `^0.8.0` |
 | Dev framework | Truffle Suite |
 | Local chain | Ganache (127.0.0.1:7545) |
-| Testnet | Sepolia — **future plan, not part of v1** |
+| Testnet | Not included in CargoChain |
 | Frontend | React 18 + Vite (plain JavaScript) |
 | Wallet layer | ethers.js v6 |
 | Off-chain services | Express SIWE/proof/chat API + Supabase Database/Realtime |
@@ -106,12 +102,11 @@ CargoChain/
 ├── server/                 # Express SIWE authentication + request-scoped chat API
 ├── scripts/                # chat schema, development launcher, scenario helpers
 ├── docs/                   # PRD, specification, architecture, agreement-change rules
-├── truffle-config.js       # Ganache default; Sepolia commented (future plan)
+├── truffle-config.js       # Ganache development configuration
 ├── vite.config.mjs         # Vite dev server on 127.0.0.1:5174
 ├── package.json
 ├── README.md               # this file
 ├── AGENTS.md               # Coding-agent rules (read first)
-├── CLAUDE.md               # Claude Code specific instructions
 ├── SECURITY.md             # Secret-handling + local-only defaults
 ├── .env.example            # Template for .env (committed)
 └── API_v1.md               # Contract function reference
@@ -159,9 +154,8 @@ Install the browser extension from [https://metamask.io/](https://metamask.io/).
 ## Ganache — your local blockchain
 
 **What it is:** A one-machine Ethereum blockchain that runs on your laptop.
-It speaks the same JSON-RPC protocol as mainnet / Sepolia, so MetaMask,
-Truffle, and ethers.js all work against it without any code changes. It's
-the project's v1 chain — Sepolia is a future plan, not active.
+It speaks the Ethereum JSON-RPC protocol, so MetaMask, Truffle, and ethers.js
+all work against it. It is CargoChain's only blockchain network.
 
 ### What Ganache gives you for free
 
@@ -259,11 +253,10 @@ tests use this to verify deadline-based proof and refund rules.
 
 ### What Ganache is **not**
 
-- **Not a public chain.** Nothing on Ganache is visible to anyone else. If
-  you want a "live" demo the tutor can verify on a block explorer, that's
-  Sepolia — which is a future plan.
-- **Not persistent.** A laptop restart wipes the chain. Don't store any
-  real data in the contracts.
+- **Not a public chain.** Nothing on Ganache is visible to anyone else.
+- **Not a durable record.** The development launcher keeps local history in
+  `ganache-data/`, but the chain can be reset or replaced at any time. Do not
+  store real data in the contracts.
 - **Not representative of mainnet gas costs.** A `createRequest` on
   Ganache costs 0 fake ETH. On mainnet, the same tx might cost $0.50–$2
   in real ETH. Design the contract logic to be gas-efficient anyway, but
@@ -302,7 +295,7 @@ encrypted proof ciphertext:
 2. Apply [`scripts/apply-proof-key-schema.sql`](scripts/apply-proof-key-schema.sql) to create the server-only `proof_keys` table. Keep RLS enabled; do not add browser policies for this table.
 3. Create a scoped Pinata JWT that can create public signed uploads, and set `PINATA_GATEWAY_HOST` to the account's HTTPS gateway host. Generate a random 32-byte `IPFS_MASTER_KEY` (base64url or 64 hex characters). These values are Express-only; never prefix them with `VITE_`.
 4. Set `VITE_IPFS_GATEWAY_URLS` to a comma-separated list of HTTPS gateway bases (the example includes Pinata and the public IPFS gateway). These URLs are public and are used only for retrieval fallback.
-5. New proof images are JPEG, PNG, WebP, GIF, AVIF, or BMP up to **2 MiB**. The browser encrypts them before uploading neutral `.bin` ciphertext; no proof Storage bucket is required. Existing Supabase HTTPS proof URLs remain readable during migration. SVG is intentionally excluded because it can contain active or externally loaded content.
+5. New proof images are JPEG, PNG, WebP, GIF, AVIF, or BMP up to **2 MiB**. The browser encrypts them before uploading neutral `.bin` ciphertext; no proof Storage bucket is required. SVG is intentionally excluded because it can contain active or externally loaded content.
 6. Restart the API/Vite processes after changing `.env` values. Never commit `.env` or the service-role key.
 
 **Every dev session — one command, one terminal:**
@@ -413,7 +406,6 @@ The current automated verification baseline is **93 passing contract tests**, **
 | `Module-Split.md` | Responsibilities, dependencies, and hand-offs per module |
 | `Agreement-Changes.md` | Implemented amendment, mutual-cancellation, and completion-tip rules |
 | `DESIGN.md` | Shared UI typography, surfaces, layering, tables, loading, and accessibility contract |
-| `Cargo-Token-and-Gas-Model.md` | Implemented CARGO settlement, operational reserve, and gas-reimbursement model |
 
 ---
 
@@ -470,7 +462,7 @@ The demo runs end-to-end on Ganache + a fresh `npm run migrate`:
 - Chat is request-scoped for the shipper and the specific carrier. It is not a general marketplace messaging system.
 - IPFS CIDs are content-addressed but public and provider pinning is not an availability guarantee. New proof plaintext is encrypted in the browser, while ciphertext and the canonical URI remain public; gateway access is not an access-control mechanism.
 - Keep `PINATA_JWT`, `IPFS_MASTER_KEY`, Supabase service-role credentials, and SIWE signing secrets server-only. Use synthetic evidence for the classroom demo and apply the `proof_keys` schema before testing encrypted viewing.
-- Time-travel tests depend on Ganache's `evm_increaseTime`. (Sepolia is a future plan; when/if activated, its clock is real-time.)
+- Time-travel tests depend on Ganache's `evm_increaseTime`.
 - The main workflow is responsive, but MetaMask extension remains the supported wallet flow.
 
 ---
@@ -480,7 +472,7 @@ The demo runs end-to-end on Ganache + a fresh `npm run migrate`:
 - PRD: [`docs/PRD.md`](docs/PRD.md)
 - Module breakdown: [`docs/Module-Split.md`](docs/Module-Split.md)
 - Contract API: [`API_v1.md`](API_v1.md)
-- CARGO and gas allocation: [`docs/Cargo-Token-and-Gas-Model.md`](docs/Cargo-Token-and-Gas-Model.md)
+- CARGO and gas allocation: [`docs/Spec.md`](docs/Spec.md)
 - Interface design: [`DESIGN.md`](DESIGN.md)
 
 ---
