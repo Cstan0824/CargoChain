@@ -2,6 +2,8 @@
 
 > Current v1 architecture. This project is designed for a local Ganache demonstration, not a public production deployment.
 
+The diagrams below describe the running CARGO settlement and encrypted Pinata/IPFS proof implementation. Supabase stores private chat records and server-only wrapped proof keys; it is not used for new proof-image uploads. ETH remains the backing and native gas asset, not delivery escrow.
+
 ## 1. System overview
 
 ```mermaid
@@ -84,7 +86,7 @@ Every checkpoint receives an immutable `milestoneId`. The contract keeps a separ
 ## 4. Proof and payment data path
 
 ```text
-Carrier selects JPEG / PNG / WebP file (≤ 2 MiB)
+Carrier selects JPEG / PNG / WebP / GIF / AVIF / BMP file (≤ 2 MiB)
   → browser computes plaintext SHA-256 and encrypts with AES-256-GCM
   → Express authorizes the wallet and returns a short-lived Pinata URL
   → browser posts multipart `network=public`, `file`, and `name` fields
@@ -99,7 +101,7 @@ The plaintext image and AES key are not written to the blockchain. Only the
 provider-independent encrypted URI and proof metadata are recorded in the
 contract. Public IPFS exposes the ciphertext/CID, not the plaintext; gateway
 selection is configurable and is not an access-control boundary. Existing
-Supabase HTTPS proof URLs remain readable during migration.
+Legacy HTTPS proof URLs remain readable for compatibility. New proof uploads always use the encrypted IPFS path.
 
 ## 5. Negotiation architecture
 

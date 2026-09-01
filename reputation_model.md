@@ -4,6 +4,30 @@
 **Scope:** Carrier reputation first; shipper reputation is a future extension
 **Primary goal:** Help shippers evaluate carrier reliability without exposing unrelated delivery information
 
+## Implementation status as of 2026-08-23
+
+This document keeps the full original roadmap so the team can review and implement the remaining ideas. Some sections use future-tense proposal language even when the first version has since been built. Use the status table below to distinguish current code from remaining work.
+
+| Area | Status | Current implementation or remaining work |
+|---|---|---|
+| Rating rules and privacy boundaries | Implemented | Only the completed request's shipper can publish one immutable 1-5 rating with up to three predefined tags. |
+| `ReputationRegistry.sol` | Implemented | Contract, deployment migration, aggregates, tag counts, event, and frontend deployment-link validation are present. |
+| Contract tests | Core coverage implemented | Current tests cover eligibility, caller restriction, duplicate prevention, score and tag validation, aggregates, event data, and zero-address deployment. The longer test checklist below remains useful for regression expansion. |
+| Frontend rating form | Implemented | The completed Track view provides stars, optional tags, MetaMask transaction state, and a read-only published state. |
+| Proposal reputation summary | Implemented | Proposal cards and history show average rating and verified rating count. |
+| Carrier reputation modal | Implemented | The modal shows identity, shortened wallet, rating average/count, completed deliveries, on-time rate, and common tags. |
+| Connected-wallet reputation | Implemented | `/profile` shows the connected wallet's average, rating count, completed deliveries, on-time rate, and common tags. |
+| Objective performance service | Implemented | The frontend calculates completion, on-time, expiry, accepted carrier-cancellation, completion-rate, and badge data from contract records and events. |
+| Reputation chat activity | Implemented | `CarrierRated` appears in the request-scoped activity timeline and is filtered to the matching carrier conversation. |
+| Public `/profile/:wallet` page | Not implemented | The current public comparison view is a modal. The dedicated route remains a future option. |
+| Badge display | Not implemented | Badge rules and tests exist, but the current modal and Profile page do not render the badges. |
+| Full performance display | Partly implemented | Completion rate, terminal unsuccessful deliveries, and carrier-initiated cancellation count are calculated but not displayed in the current reputation UI. |
+| Reputation-based proposal sorting | Not implemented | Current sorting remains based on milestone count and proposal date. |
+| Scalable event indexer | Not implemented | The browser reads current contract records and events directly, which is suitable for the local assignment build. |
+| Shipper reputation | Not implemented | This remains a separate future module and must not be merged into the carrier score. |
+
+The detailed phases and future expansion sections below are intentionally retained. They record both the path already taken and ideas that remain available for later work.
+
 ## 1. Objective
 
 The reputation module should help a shipper answer:
@@ -195,7 +219,7 @@ This keeps reputation logic outside the already-large escrow contract and preven
 
 #### Contract responsibilities
 
-`ReputationRegistry.sol` will:
+`ReputationRegistry.sol` does:
 
 - Reference the current `DeliveryEscrow` deployment
 - Verify that the request exists
@@ -210,7 +234,7 @@ This keeps reputation logic outside the already-large escrow contract and preven
 
 It will not:
 
-- Receive or release ETH
+- Receive or release CARGO or ETH
 - Change shipment status
 - Change escrow balances
 - Cancel deliveries
@@ -461,7 +485,7 @@ Every request status has a documented answer for:
 - Add supported-tag validation.
 - Add the maximum-three-tags rule.
 - Add duplicate-rating prevention.
-- Verify that the contract remains independent from ETH settlement.
+- Verify that the contract remains independent from CARGO and ETH settlement.
 
 #### Deliverables
 
@@ -485,7 +509,7 @@ The contract API is frozen before frontend work begins.
 - Add it to the frontend contract loader.
 - Ensure redeployments update the frontend automatically.
 - Confirm contract bytecode size.
-- Confirm no rating method can transfer ETH or alter deliveries.
+- Confirm no rating method can transfer CARGO/ETH or alter deliveries.
 
 #### Completion criteria
 

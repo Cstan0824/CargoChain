@@ -67,7 +67,7 @@ the repo listens on a public interface unless you explicitly opt in.
 |------------------|------|--------------|---------------------------|
 | Ganache CLI      | 7545 | 127.0.0.1    | `--host 0.0.0.0`          |
 | CargoChain API   | 3000 | 127.0.0.1    | source change required (not recommended) |
-| Vite dev server  | 5173 | 127.0.0.1    | `vite --host 0.0.0.0`     |
+| Vite dev server  | 5174 | 127.0.0.1    | `vite --host 0.0.0.0`     |
 | Vite preview     | 8080 | 127.0.0.1    | `vite preview --host 0.0.0.0` |
 
 The repository intentionally does not provide a shared-Ganache mode. Each

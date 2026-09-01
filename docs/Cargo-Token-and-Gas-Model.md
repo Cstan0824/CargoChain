@@ -1,11 +1,11 @@
-# CargoChain CARGO Token and Gas Allocation Proposal
+# CargoChain CARGO token and gas allocation model
 
-**Status:** Core implementation and confirmed blocker fixes verified; final UI review and manual browser QA pending
+**Status:** Implemented current model. The contract, frontend, and automated verification are complete for v1. A separate live Pinata smoke test was intentionally skipped; this is recorded as a limitation rather than a failed feature.
 **Decision date:** 2026-08-22  
 **Scope:** Replace ETH as CargoChain's business payment currency with a fixed-rate, ETH-backed ERC-20 token; retain ETH as the native gas currency  
 **Coordination note:** The Pinata/IPFS proof implementation was merged in commit `51ada6f`. CARGO settlement and gas allocation are implemented in the current branch. The encrypted-proof flow remains the evidence-storage baseline.
 
-**UI implementation update, 2026-08-31:** Section 20 records the latest desktop UI decisions and their implementation status. The source and automated checks are complete for this pass; connected-wallet manual browser QA remains pending.
+**Current-reference note, 2026-09-01:** This document retains its original phased rationale so decisions remain explainable. For the current system overview and diagrams, use [README.md](../README.md), [Architecture.md](Architecture.md), [BusinessFlow.md](BusinessFlow.md), and [API_v1.md](../API_v1.md). Where an older section says “planned” or “will”, read it as historical rationale unless it is explicitly listed as future scope.
 
 The current proof-storage baseline uses browser-side AES-256-GCM encryption and Pinata Public IPFS for new images. Supabase Postgres remains responsible for private chat and wrapped proof-key records, not new proof-image uploads. Existing HTTPS/Supabase proof references remain readable for compatibility. See [IPFS-Pinata-Execution-Plan.md](IPFS-Pinata-Execution-Plan.md) for the selected storage design.
 
@@ -15,14 +15,15 @@ proposal/proof state, operational proof reimbursement, amendment response
 reimbursement, the amendment policy controls, and the first Cargo Wallet UI.
 Follow-up fixes add fresh-wallet funding quotes, stale-proof review protection,
 fee-coverage top-ups, normal-size deployments, worst-case gas benchmarks, and
-cross-contract reserve reconciliation. The remaining gate is the user's manual
-browser scenario; the live Pinata smoke test remains skipped by user choice.
+cross-contract reserve reconciliation. The original manual browser scenario and
+live Pinata smoke test remain historical verification notes. The live smoke test
+is skipped by user choice and must not be represented as completed testing.
 
 ## 1. Purpose
 
-CargoChain currently expresses delivery payments directly in ETH. Although Ganache ETH is fake during development, values such as `0.035 ETH` are less intuitive for a logistics payment than currency-like values such as `350 CARGO`.
+Before the current implementation, CargoChain expressed delivery payments directly in ETH. Although Ganache ETH is fake during development, values such as `0.035 ETH` are less intuitive for a logistics payment than currency-like values such as `350 CARGO`.
 
-CargoChain will therefore introduce an internal ERC-20 settlement currency named **CARGO**.
+CargoChain therefore implements an internal ERC-20 settlement currency named **CARGO**.
 
 The agreed economic model is:
 

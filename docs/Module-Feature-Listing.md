@@ -20,10 +20,11 @@
 | Requests | Shipper creates an open request with items, route, payment, and deadline. | `DeliveryEscrow.createRequest` |
 | Proposals | Multiple carriers may propose; one active proposal per carrier; carriers can revoke/resubmit; shipper can manually reject with an optional note. | `DeliveryEscrow`, `ProposeMilestones`, `Track` |
 | Funding | Shipper approves one plan and supplies its advertised CARGO compensation plus the contract-calculated proof reserve; other active plans receive an effective automatic rejection reason. | `approveAndFundWithAllowance` |
-| Proof | Carrier encrypts a JPEG/PNG/WebP proof (≤2 MiB) in the browser, uploads ciphertext through the authenticated Pinata path, then submits the canonical URI/remark on-chain. | `proofCrypto.js`, `proofApiClient.js`, `submitProof` |
+| Proof | Carrier encrypts a supported raster proof (≤2 MiB) in the browser, uploads ciphertext through the authenticated Pinata path, then submits the canonical URI/remark on-chain. | `proofCrypto.js`, `proofApiClient.js`, `submitProof` |
 | Verification | Shipper verifies or rejects submitted proof; verified checkpoint funds release directly to the carrier. | `verifyMilestone` |
+| Gas reimbursement | Shipper funds a refundable operational reserve; the first successful proof submission per checkpoint receives measured and capped CARGO reimbursement while future checkpoint reserves remain protected. | `minimumOperationalAllowance`, `submitProof`, `topUpOperationalAllowance` |
 | Refund | After deadline expiry, or accepted mutual cancellation, only remaining unpaid escrow is refundable. | `refundRemaining`, `finalizeMutualCancellation` |
-| Amendments | Deadline changes, top-ups for unpaid checkpoints, and newly funded checkpoints can be negotiated with a shared response deadline and lock. | `LifecycleManager` |
+| Amendments | Deadline changes, CARGO top-ups, and newly funded checkpoints can be negotiated with a shared response deadline and lock. New checkpoints include proof reserve; `RequesterCoversResponse` supports one capped response reimbursement. | `LifecycleManager` |
 | Stable order | Newly inserted checkpoints receive new immutable IDs and alter only the execution-order list. | `getMilestoneExecutionOrder` |
 | Cancellation | Either accepted participant may request cancellation; counterparty decision, withdrawal, expiry, notes, and pending-proof protection are supported. | `LifecycleManager` |
 | Tip | Completed shipment may receive one optional shipper tip paid directly to the carrier. | `tipCarrier` |
@@ -42,7 +43,8 @@
 ```bash
 npm test
 npm run test:frontend
+npm run test:server
 npm run build
 ```
 
-The latest automated verification completed with 93 passing Truffle tests, 180 passing Vitest tests plus one opt-in Ganache integration test, and 18 passing server tests. See [`test/README.md`](../test/README.md) for suite ownership and coverage, and [`docs/Agreement-Changes.md`](Agreement-Changes.md) for the negotiated-shipment rules.
+The current automated verification baseline is 93 passing Truffle tests, 196 passing Vitest tests, and 18 passing server tests. The separate fresh-wallet Ganache frontend integration test is optional and skipped by decision. See [`test/README.md`](../test/README.md) for suite ownership and coverage, and [`docs/Agreement-Changes.md`](Agreement-Changes.md) for the negotiated-shipment rules.

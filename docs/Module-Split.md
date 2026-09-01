@@ -2,6 +2,8 @@
 
 > This document describes the implemented boundaries. For exact Solidity signatures, events, and caller restrictions, use [`API_v1.md`](../API_v1.md).
 
+The CARGO payment model and encrypted Pinata/IPFS evidence path are included in the implemented boundaries below. Supabase remains responsible only for private chat and wrapped proof-key records.
+
 ## a. User profile and wallet — wx
 
 **Owned areas:** `UserRegistry.sol`, wallet/profile contexts, registration modal, profile presentation.

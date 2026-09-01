@@ -89,6 +89,7 @@ The shipper can reject a submitted proof, returning it to `Rejected` for carrier
 - Shipper-requested funding is staged in `LifecycleManager`; rejection, withdrawal, and expiry refund it.
 - Carrier-requested funding is supplied by the shipper at acceptance.
 - Amendment acceptance checks the milestone-state version captured at request time; it fails if proof progress changed in the meantime.
+- `RequesterCoversResponse` stages a separate refundable CARGO allowance for one successful amendment acceptance or rejection. It is not used for photo-proof submission reimbursement.
 
 ### Mutual cancellation
 
@@ -103,12 +104,13 @@ The shipper can reject a submitted proof, returning it to `Rejected` for carrier
 - Shipment must be completed.
 - It must be non-zero and can occur once only.
 - It transfers directly to the carrier without entering or altering escrow.
+- The shipper approves and transfers CARGO, not native ETH, for this one-time payment.
 
 ## 6. Off-chain services
 
 ### Proof images — encrypted Pinata/IPFS design
 
-The browser validates a JPEG/PNG/WebP file up to 2 MiB, computes the raw
+The browser validates a JPEG, PNG, WebP, GIF, AVIF, or BMP file up to 2 MiB, computes the raw
 SHA-256, encrypts the bytes with a fresh AES-256-GCM key, and sends only
 ciphertext to the authenticated Express proof API. The API verifies the
 assigned carrier and milestone state against `DeliveryEscrow`, creates a
@@ -173,6 +175,7 @@ run `npm run compile`, `npm run migrate`, `npm run server`, and
 ```bash
 npm test
 npm run test:frontend
+npm run test:server
 npm run build
 ```
 
@@ -182,3 +185,9 @@ npm run build
 - One carrier is accepted per request, but several can propose while it is open.
 - The assignment supports MetaMask extension flow only.
 - Chat is between request participants only; it is not a public marketplace messenger.
+
+## 10. Implementation status and future scope
+
+The CARGO token, contract-calculated operational allowances, measured/capped CARGO reimbursement, and encrypted Pinata/IPFS evidence path are implemented in this branch. The exact current rules are documented in [`Cargo-Token-and-Gas-Model.md`](Cargo-Token-and-Gas-Model.md), [`Architecture.md`](Architecture.md), and [`API_v1.md`](../API_v1.md).
+
+Future scope remains limited to public-network deployment, recipient QR confirmation, automatic dispute-window release, carrier republishing/recovery, public marketplace chat, staking, and a scalable event indexer.

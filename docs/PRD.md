@@ -43,20 +43,23 @@ A registered wallet can be a shipper for some requests and carrier for others. T
 ### 4.2 Request and proposal marketplace
 
 - Shipper creates an open request with route, cargo items, advertised CARGO payment, and deadline.
+- The request form checks the connected C. balance before publication. If the advertised payment exceeds it, the user can top up C. in the same workflow rather than losing the draft.
 - Carrier browses open requests and may submit one active milestone proposal for each request.
 - Carrier can revoke an active proposal and submit a revised proposal while the request is open.
 - Shipper can sort/inspect proposals, manually reject a proposal with an optional note, or accept exactly one plan.
-- Shipper funds the exact advertised CARGO in the same acceptance transaction.
-- All competing active proposals become rejected with a recorded automatic reason.
+- Shipper funds the advertised CARGO compensation plus the contract-calculated operational reserve when accepting a proposal.
+- The funding review separates delivery compensation from the proof reserve and shows the reserve calculation by eligible proof-submission count.
+- All competing active proposals become effectively rejected with a recorded automatic reason.
 
 ### 4.3 Checkpoint proof and payment
 
-- Carrier uploads JPEG, PNG, or WebP proof image to Supabase Storage after browser SHA-256 hashing.
-- Carrier submits proof URL and remark for the next checkpoint in the current execution order.
+- Carrier validates and hashes a supported proof image in the browser, encrypts it with AES-256-GCM, and uploads ciphertext to Pinata/IPFS through the authenticated Express proof API.
+- Carrier submits the canonical `ipfs://` proof URI and remark for the next checkpoint in the current execution order.
 - Shipper verifies or rejects submitted proof.
 - Verified proof releases that checkpoint's payable amount to the carrier.
 - Rejected proof may be resubmitted.
 - Completed checkpoint payments are final and cannot be refunded from the carrier.
+- The first successful proof submission for each checkpoint may receive measured and capped CARGO gas reimbursement from the request's operational reserve.
 
 ### 4.4 Refunds and cancellation
 
@@ -74,7 +77,10 @@ A registered wallet can be a shipper for some requests and carrier for others. T
 - Amendments may change the deadline, add CARGO to unpaid existing checkpoints, and add newly funded checkpoints.
 - A carrier cannot shorten deadline; shipper shortening requires extra funding and carrier acceptance.
 - Each new checkpoint has an immutable new ID. Inserting it changes execution order only and must not rewrite old proofs/payments/payouts.
-- Shipper-staged amendment funding is refunded after rejection, withdrawal, or expiry.
+- Each new checkpoint includes its required proof-operation reserve.
+- Amendments may use `EachPaysOwn` or `RequesterCoversResponse`; covered responses receive one measured and capped CARGO reimbursement.
+- The response allowance is separate from operational proof reserve. Its minimum is calculated by `LifecycleManager`; unused allowance returns to the original funder after settlement.
+- Shipper-staged amendment compensation and unused response/operational reserves return to their original funders after rejection, withdrawal, or expiry.
 - One request can have only one pending amendment/cancellation workflow at a time.
 
 ### 4.6 Completion tip
@@ -104,7 +110,7 @@ A registered wallet can be a shipper for some requests and carrier for others. T
 | Smart contracts | Solidity 0.8.x, Truffle Suite, Ganache local network. |
 | Frontend | React 18 + Vite, plain JavaScript, ethers v6. |
 | Wallet | MetaMask browser extension. |
-| Storage | Supabase Storage milestone-proofs bucket; browser uses a SHA-256-derived proof object path and submits its URL on-chain. |
+| Proof storage | Browser AES-256-GCM encryption, Pinata public IPFS ciphertext, canonical on-chain URI, and server-only wrapped keys in Supabase Postgres. |
 | Chat | Node/Express, SIWE, Supabase Postgres and Realtime with RLS. |
 | Network | 127.0.0.1:7545, chain/network ID 1337. |
 | Testing | Truffle Mocha/Chai, Vitest, production Vite build. |
@@ -114,8 +120,9 @@ A registered wallet can be a shipper for some requests and carrier for others. T
 | Contract | Responsibility |
 |---|---|
 | UserRegistry.sol | Wallet display-name registration. |
-| DeliveryEscrow.sol | Request/proposal state, escrow, proof, payouts, refunds, stable checkpoints, tips. |
-| LifecycleManager.sol | Amendment/cancellation records and restricted escrow finalisation. |
+| CargoToken.sol | Fixed-rate ETH-backed CARGO conversion, transfers, and redemption. |
+| DeliveryEscrow.sol | Request/proposal state, CARGO escrow, proof, payouts, refunds, operational reserve, stable checkpoints, and tips. |
+| LifecycleManager.sol | Amendment/cancellation records, staged CARGO funding, response allowances, and restricted escrow finalisation. |
 | PaymentEvents.sol | Payment event declarations. |
 | ReputationRegistry.sol | Completed-request carrier ratings and feedback-tag aggregates. |
 
@@ -135,6 +142,7 @@ LifecycleManager is intentionally separate to preserve DeliveryEscrow bytecode h
 npm run compile
 npm test
 npm run test:frontend
+npm run test:server
 npm run build
 ~~~
 

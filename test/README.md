@@ -29,13 +29,22 @@ npm run test:frontend
 
 Current frontend coverage includes wallet transaction preparation, artifact loading, profile identities, SIWE chat session behavior, message composition, chat timeline conversion, payment history, upload hashing, text limits, and confirmation dialogs.
 
+## Server tests
+
+The Express proof/chat support layer has focused Node tests for environment validation, canonical proof URIs, wrapped-key encryption, Pinata provider behaviour, trusted chain reads, and proof-route authorisation:
+
+```bash
+npm run test:server
+```
+
 ## Expected verification
 
 ```bash
 npm run compile
 npm test
 npm run test:frontend
+npm run test:server
 npm run build
 ```
 
-The latest complete local run recorded 93 passing contract tests, 180 passing frontend tests with one opt-in Ganache integration test skipped by default, and 18 passing server tests. Set `CARGO_TEST_RPC` only to a disposable Ganache RPC to run the fresh-wallet frontend integration test.
+The current local verification baseline is 93 contract tests, 196 frontend tests with one optional Ganache integration test skipped by default, and 18 server tests. Set `CARGO_TEST_RPC` only to a disposable Ganache RPC to run the fresh-wallet frontend integration test.

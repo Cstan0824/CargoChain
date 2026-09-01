@@ -1,5 +1,7 @@
 # CargoChain Pinata IPFS execution plan
 
+> **Status, 2026-09-01:** Implemented design. This file records the execution decisions behind the current encrypted Pinata/IPFS proof path. The standalone live-provider smoke test was intentionally skipped; automated route, key, URI, and frontend tests cover the implemented path.
+
 **Decision date:** 2026-08-30  
 **Selected hosted platform:** Pinata Public IPFS  
 **Research:** [IPFS-Platform-Research.md](IPFS-Platform-Research.md)  

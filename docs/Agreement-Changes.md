@@ -2,6 +2,8 @@
 
 This document records the implemented business rules for post-acceptance amendments, mutual cancellation, and completion tips. For exact Solidity signatures and events, use [`API_v1.md`](../API_v1.md).
 
+The current implementation stages and settles **CARGO**. ETH is paid by the transaction sender as native gas only. Amendments can use `EachPaysOwn` or `RequesterCoversResponse`; the latter stages a separate refundable CARGO allowance for one successful response.
+
 ## Current implementation boundary
 
 The implementation was delivered in these phases:
@@ -12,15 +14,15 @@ The implementation was delivered in these phases:
 - reusable participant, response-deadline, and active-shipment checks; and
 - a minimum additional-funding constant of `0.01 CARGO`.
 
-`LifecycleManager` owns the negotiation lock and future agreement-change records. `DeliveryEscrow` remains the authoritative source for request parties, accepted milestones, milestone progress, original escrow, payouts, and refunds. The manager reads milestone-state versions and pending-proof status from the escrow instead of copying shipment data.
+`LifecycleManager` owns the negotiation lock and agreement-change records. `DeliveryEscrow` remains the authoritative source for request parties, accepted milestones, milestone progress, CARGO escrow, payouts, and refunds. The manager reads milestone-state versions and pending-proof status from the escrow instead of copying shipment data.
 
-Phase 2 adds proposal rejection notes. A shipper may leave an optional note when manually rejecting a carrier plan. When accepting one plan automatically rejects the remaining active plans, each receives the fixed reason documented below. The note is stored on the historical on-chain proposal and displayed to both parties.
+Proposal rejection notes are implemented. A shipper may leave an optional note when manually rejecting a carrier plan. When accepting one plan automatically rejects the remaining active plans, each receives the fixed reason documented below. The note is stored on the historical on-chain proposal and displayed to both parties.
 
-Phase 3 adds one optional completion tip. After the final milestone is paid, the shipper may send one separate payable transaction directly to the carrier. The amount is recorded on-chain and included in payment history and carrier earnings without entering escrow.
+Completion tips are implemented. After the final milestone is paid, the shipper may transfer one separate positive CARGO amount directly to the carrier. The amount is recorded on-chain and included in payment history and carrier earnings without entering escrow.
 
-Phase 4 implements mutual cancellation end to end. Either participant can submit the required note and response deadline; the counterparty accepts or rejects; the requester may withdraw; unanswered requests can expire. Acceptance calls a manager-only escrow hook that preserves released milestone payments and refunds only unpaid escrow. The tracking page exposes the decision and its on-chain history.
+Mutual cancellation is implemented end to end. Either participant can submit the required note and response deadline; the counterparty accepts or rejects; the requester may withdraw; unanswered requests can expire. Acceptance calls a manager-only escrow hook that preserves released milestone payments and refunds only unpaid CARGO escrow. The tracking page exposes the decision and its on-chain history.
 
-Phase 5 implements amendments end to end. The shipper can extend a deadline directly;
+Amendments are implemented end to end. The shipper can extend a deadline directly;
 either party can request a mutually approved change; new CARGO can top up unpaid existing
 milestones or fully fund newly inserted milestones; staged shipper funding is refunded
 when a request is rejected, withdrawn, or expires. The tracking page exposes the active
@@ -35,6 +37,14 @@ amendment history.
 - Work continues under the current accepted agreement while a negotiation is pending.
 - Rejection, withdrawal, or expiry leaves the current agreement unchanged.
 - The opposite party alone accepts or rejects a request.
+
+### Response gas policy
+
+- `EachPaysOwn` is the default. The requester pays the ETH gas for opening the amendment, and the responder pays the ETH gas for its own acceptance or rejection.
+- `RequesterCoversResponse` stages a separate refundable CARGO response allowance in `LifecycleManager`. The requester must fund at least `minimumResponseAllowance()`.
+- The responder still pays ETH gas first. The contract measures one successful `acceptAmendment` or `rejectAmendment` call, caps the gas units, gas-price coverage, absolute reimbursement, and remaining allowance, then transfers the calculated CARGO to the responder.
+- Withdrawal and expiry have no responder decision. The unused response allowance returns to its recorded funder. Rejection returns the unused remainder after any eligible responder reimbursement.
+- This response allowance is distinct from the operational reserve that covers eligible photo-proof submissions for original or newly inserted checkpoints.
 
 ## Amendment state machine
 
@@ -105,6 +115,6 @@ Rules:
 ## Completion tip
 
 - After a request reaches `Completed`, the shipper may send one optional tip.
-- The tip is a separate payable transaction and is transferred directly to the completed request's carrier.
+- The tip is a separate CARGO transfer and is transferred directly to the completed request's carrier.
 - A request may receive at most one tip.
 - The tip does not alter original escrow, milestone allocations, released payment totals, or refund accounting.

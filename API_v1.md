@@ -310,11 +310,12 @@ getLifecycleSnapshot(uint256 requestId)
 ### Constructor and registry getter
 
 ```solidity
-constructor(address registryAddress, address lifecycleManagerAddress)
+constructor(address registryAddress, address lifecycleManagerAddress, address cargoTokenAddress)
 userRegistry() view returns (address)
+cargoToken() view returns (address)
 ```
 
-`userRegistry()` is the public getter for the immutable `IUserRegistry` reference.
+`userRegistry()` and `cargoToken()` are public getters for the immutable registry and CARGO-token references. Construction rejects zero registry, lifecycle-manager, or CARGO-token addresses.
 
 ### `createRequest(...) returns (uint256 requestId)`
 
@@ -331,7 +332,7 @@ function createRequest(
 
 - **Purpose:** Publish an unfunded delivery request.
 - **Caller:** Any registered wallet; the caller becomes the shipper.
-- **Payable:** No. ETH is not locked until `approveAndFund`.
+- **Payable:** No. The request only records an advertised CARGO amount. No CARGO or ETH is locked until `approveAndFund` or `approveAndFundWithAllowance`.
 - **Validation:** Non-empty pickup/delivery, future deadline, positive proposed amount, at least one item, non-empty item names, and positive quantities.
 - **Effects:** Stores request/items, sets status to `Open`, and adds the ID to all/open request indexes.
 - **Event:** `RequestCreated(requestId, shipper, proposedAmount)`.
@@ -493,9 +494,9 @@ The submission-number guard prevents a transaction prepared for an older proof f
 
 - **Purpose:** Send one optional post-completion tip directly to the accepted carrier.
 - **Caller:** Registered request shipper only.
-- **Value:** `msg.value` must be greater than zero.
+- **Parameters:** `amount` is a positive CARGO base-unit amount. The shipper must grant `DeliveryEscrow` a matching CARGO allowance.
 - **Allowed state:** `Completed` only, with no earlier tip recorded for the request.
-- **Effects:** Records the tip amount, transfers the full value directly to the carrier, and leaves escrow, milestone payouts, released totals, and refunds unchanged.
+- **Effects:** Records the tip amount, transfers the approved CARGO directly from shipper to carrier, and leaves escrow, milestone payouts, released totals, and refunds unchanged.
 - **Event:** `CarrierTipped(requestId, shipper, carrier, amount)`.
 - **Frontend:** Completed shipment Payments tab; profile transaction history and carrier earnings.
 
@@ -787,7 +788,7 @@ the authenticated assigned carrier. The JSON body must include:
 }
 ```
 
-Plaintext must be JPEG, PNG, or WebP and no larger than **2 MiB**; AES-GCM's
+Plaintext must be JPEG, PNG, WebP, GIF, AVIF, or BMP and no larger than **2 MiB**; AES-GCM's
 16-byte tag makes the ciphertext ceiling 2 MiB + 16 bytes. The response returns
 only `sessionId`, `uploadUrl`, a server-derived filename, content type, size
 limit, and expiry. The browser then posts multipart `network=public`, `file`,
@@ -830,6 +831,7 @@ migration, but they do not use this key route.
 
 | Date | Change |
 |---|---|
+| 2026-09-01 | Documented the current CARGO top-up/balance UX, proposal reserve breakdown, current Pinata/IPFS media types, and corrected completion-tip transfer semantics to CARGO allowance transfer. |
 | 2026-08-31 | Added fresh-wallet CARGO funding quotes, request-specific gas coverage, amendment checkpoint reserves, stale-proof submission guards, named-error decoding, standard-size deployment support, and maximum-input gas benchmarks. |
 | 2026-08-18 | Added `ReputationRegistry`: one immutable structured shipper rating per completed request, carrier rating/tag aggregates, read-only reputation modal/profile summary UI, and completion/expiry delivery events used by objective performance reporting. |
 | 2026-08-03 | Completed verification coverage for mutual cancellation, staged amendment refunds, response expiry, stable checkpoint ordering, tip limits, and lifecycle authorization. Documented the chat timeline's read-only use of escrow and lifecycle events. |
