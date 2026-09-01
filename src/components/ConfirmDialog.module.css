@@ -13,7 +13,7 @@
   position: relative;
   width: min(440px, 100%);
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-columns: 48px minmax(0, 1fr) 44px;
   gap: var(--s-3);
   padding: var(--s-5);
   border-radius: calc(var(--r-lg) + var(--s-3));
@@ -36,9 +36,6 @@
 .dangerIcon { color: var(--danger); background: var(--danger-soft); }
 
 .closeButton {
-  position: absolute;
-  top: var(--s-3);
-  right: var(--s-3);
   width: 44px;
   height: 44px;
   display: grid;
@@ -57,7 +54,7 @@
 .closeButton:active { scale: 0.96; }
 .closeButton svg { width: 21px; height: 21px; }
 
-.content { min-width: 0; padding-right: var(--s-4); }
+.content { min-width: 0; }
 .content h2 {
   margin: 1px 0 var(--s-2);
   color: var(--text-primary);
@@ -86,12 +83,12 @@
 @media (max-width: 520px) {
   .scrim { align-items: end; padding: var(--s-3); }
   .dialog {
-    grid-template-columns: 42px minmax(0, 1fr);
+    grid-template-columns: 42px minmax(0, 1fr) 42px;
     padding: var(--s-4);
     border-radius: calc(var(--r-lg) + var(--s-2));
   }
   .iconWrap { width: 42px; height: 42px; border-radius: var(--r-md); }
-  .content { padding-right: var(--s-3); }
+  .closeButton { width: 42px; height: 42px; }
   .actions { align-items: stretch; flex-direction: column-reverse; }
   .actions :global(button) { width: 100%; min-height: 44px; }
 }

@@ -43,6 +43,7 @@ describe('sendWalletContractTransaction', () => {
     expect(provider.estimateGas).toHaveBeenCalledWith(expect.objectContaining({
       from: '0x0000000000000000000000000000000000000002',
       data: '0x1234',
+      gasPrice: 2_000_000_000n,
     }));
     expect(signer.sendUncheckedTransaction).toHaveBeenCalledWith(expect.objectContaining({
       nonce: 7,

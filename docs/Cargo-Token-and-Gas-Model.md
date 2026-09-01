@@ -1,9 +1,11 @@
 # CargoChain CARGO Token and Gas Allocation Proposal
 
-**Status:** In progress
+**Status:** Core implementation and confirmed blocker fixes verified; final UI review and manual browser QA pending
 **Decision date:** 2026-08-22  
 **Scope:** Replace ETH as CargoChain's business payment currency with a fixed-rate, ETH-backed ERC-20 token; retain ETH as the native gas currency  
-**Coordination note:** The Pinata/IPFS proof implementation was merged in commit `51ada6f`. CARGO and gas allocation remain planned. Their implementation should preserve the merged encrypted-proof flow and re-inspect the affected contract and API interfaces before changes.
+**Coordination note:** The Pinata/IPFS proof implementation was merged in commit `51ada6f`. CARGO settlement and gas allocation are implemented in the current branch. The encrypted-proof flow remains the evidence-storage baseline.
+
+**UI implementation update, 2026-08-31:** Section 20 records the latest desktop UI decisions and their implementation status. The source and automated checks are complete for this pass; connected-wallet manual browser QA remains pending.
 
 The current proof-storage baseline uses browser-side AES-256-GCM encryption and Pinata Public IPFS for new images. Supabase Postgres remains responsible for private chat and wrapped proof-key records, not new proof-image uploads. Existing HTTPS/Supabase proof references remain readable for compatibility. See [IPFS-Pinata-Execution-Plan.md](IPFS-Pinata-Execution-Plan.md) for the selected storage design.
 
@@ -11,9 +13,10 @@ Implementation checkpoints `4ef69d0`, `3831814`, and `951ec19` contain the
 backed CARGO token, CARGO settlement in escrow and lifecycle contracts, bounded
 proposal/proof state, operational proof reimbursement, amendment response
 reimbursement, the amendment policy controls, and the first Cargo Wallet UI.
-Remaining work covers final benchmark hardening, operational reserve funding for
-new amendment checkpoints, deeper integration checks, and the full manual
-end-to-end scenario.
+Follow-up fixes add fresh-wallet funding quotes, stale-proof review protection,
+fee-coverage top-ups, normal-size deployments, worst-case gas benchmarks, and
+cross-contract reserve reconciliation. The remaining gate is the user's manual
+browser scenario; the live Pinata smoke test remains skipped by user choice.
 
 ## 1. Purpose
 
@@ -164,11 +167,14 @@ The ETH held by `CargoToken` is collateral. It must not be reused as delivery es
 
 Agreed representation:
 
+- Platform name: `CargoChain`
 - ERC-20 decimals: `18`
-- Token name: `CargoChain CARGO`
-- Token symbol: `CARGO`
+- Token name: `CARGO`
+- Token symbol: `C.`
 - Normal UI precision: `2` decimal places
-- Display format: `1,250.50 CARGO`
+- Display format: `1,250.50 C.`
+
+Both the token name and symbol are stored on-chain. The interface keeps CARGO in currency descriptions and uses `C.` after amounts. ETH remains the backing asset and native gas currency, at the unchanged fixed rate of `1 ETH = 10,000 C.`. Existing deployments require redeployment for the metadata change. Current formatting retains up to four decimal places; the two-decimal presentation above remains a UI refinement target.
 
 With both ETH and CARGO using 18 decimal places, depositing one wei mints `10,000` CARGO base units. Redemption must define an explicit divisibility or dust rule so integer division cannot silently lose user value.
 
@@ -257,22 +263,22 @@ the reset boundary explicit.
 
 ## 5. Cargo Wallet experience
 
-The Profile page should include a Cargo Wallet section:
+The canonical Account page at `/account` will separate wallet balances from conversion controls. Section 20 supersedes the earlier single Cargo Wallet panel layout.
 
 ```text
 CARGO balance
-4,250.00 CARGO
-Used for CargoChain delivery payments
+4,250.00 C.
+Used for delivery compensation, escrow, refunds, and tips.
 
-ETH gas balance
+ETH Balance
 1.84 ETH
-Required for blockchain transactions
+Used to top up the CARGO wallet and pay transaction gas.
 
 Fixed conversion
-1 ETH = 10,000 CARGO
+1 ETH = 10,000 C.
 
-[Convert ETH to CARGO]
-[Redeem CARGO]
+[ETH to C. | C. to ETH]
+Two editable conversion amounts, followed by the selected action.
 ```
 
 The interface may also offer `Add CARGO to MetaMask`, because MetaMask may not display a newly deployed local ERC-20 automatically.
@@ -897,9 +903,7 @@ Implementation must explicitly cover:
 
 ## 16. CARGO implementation phases
 
-**Plan revised:** 2026-08-31. Phases 1 through 6 are implemented in the
-current branch. Phases 7 through 9 remain in progress and cover the remaining
-wallet/payment polish, cross-module checks, final benchmarks, and manual QA.
+**Plan revised:** 2026-08-31. The core token, payment, proof, and reimbursement paths are implemented. The confirmed funding, stale-proof, fee-coverage, and deployment-size blockers have regression coverage. This is not a declaration that every UI item in Phases 7 and 8 has been manually verified. The full browser scenario and a final comparison against those UI requirements remain pending.
 This sequence supersedes the earlier phase order in this document and is
 separate from the desktop UI phase documents.
 
@@ -907,17 +911,17 @@ The user chose to skip the pre-implementation live IPFS smoke test and use the m
 
 ### Phase overview
 
-| Phase | Deliverable | Main risk |
+| Phase | Deliverable | Current status |
 |---|---|---|
-| 1 | Baseline review and agreed APIs/accounting | Conflicting assumptions between contracts and IPFS |
-| 2 | Backed CARGO token | Collateral loss or incorrect redemption |
-| 3 | Bounded proposals and proof lifecycle | Blocked acceptance, stale review, or broken key access |
-| 4 | CARGO delivery and amendment settlement | Incorrect transfers or refunds across two contracts |
-| 5 | Operational gas allowance | Underfunding, repeated claims, or exhausted future reserves |
-| 6 | Amendment response reimbursement | Mixing funders, response budgets, and delivery compensation |
-| 7 | Cargo Wallet and payment UI | Wrong units, allowances, or wallet transaction sequencing |
-| 8 | Cross-module integration | Stale deployments or inconsistent proof/chat/reputation state |
-| 9 | Final verification and documentation | Untested settlement branches and inaccurate submission claims |
+| 1 | Baseline review and agreed APIs/accounting | Implemented |
+| 2 | Backed CARGO token | Implemented and tested |
+| 3 | Bounded proposals and proof lifecycle | Implemented, including submission-number guard |
+| 4 | CARGO delivery and amendment settlement | Implemented and reconciled across both contracts |
+| 5 | Operational gas allowance | Implemented with funded fee coverage and top-ups |
+| 6 | Amendment response reimbursement | Implemented with separate funder/refund accounting |
+| 7 | Cargo Wallet and payment UI | Core flows implemented; funding helpers tested on-chain; final UI review pending |
+| 8 | Cross-module integration | Automated checks pass; live browser and encrypted-proof regression not performed |
+| 9 | Final verification and documentation | Automated gates pass; manual scenario and remaining UI checklist pending |
 
 Phases 4, 5, and 6 carry the largest payment and accounting risk. Phase 7 also touches many files, but it should consume contract rules already established by those phases.
 
@@ -1148,29 +1152,42 @@ Completion gate: no required accounting or authorization test remains failing, r
 17. Unused operational and response allowance returns to its funder.
 18. Carrier redeems earned CARGO for backing ETH.
 
-## 18. Items still requiring benchmark decisions
+## 18. Benchmark results and remaining verification
 
-The initial proof-submission constants selected for the current local
-implementation are:
+The proof-submission constants selected after maximum-valid-input measurement are:
 
-- Proof gas-unit cap: `250,000`
+- Proof gas-unit cap: `1,200,000`
 - Measurement overhead: `50,000` gas units
 - Minimum gas-price floor: `2 gwei`
 - Priority-fee buffer: `1 gwei`
-- Maximum proof reimbursement per action: `10 CARGO`
+- Maximum proof reimbursement per action: `50 CARGO`
 
-These values still need a final receipt-versus-measurement benchmark after the
-remaining payment paths are integrated.
+The measured maximum proof transaction used a 512-byte URI and 500-byte remark:
+`1,006,348` gas used, with `18.45144 CARGO` reimbursed at the test fee settings.
 
-The following values still require benchmark or compatibility decisions:
+Amendment-response constants are:
 
-- Exact gas-unit cap for amendment responses
-- Maximum optional allowance or coverage multiplier
-- Exact URI, remark, and other string limits after measuring current URLs and UI validation
-- Exact dust/divisibility rule for CARGO redemption
-- Whether direct ETH transfers to CargoToken automatically convert or must use an explicit function
+- Response gas-unit cap: `6,000,000`
+- Response measurement overhead: `40,000` gas units
+- Minimum gas-price floor: `2 gwei`
+- Priority-fee buffer: `1 gwei`
+- Maximum response reimbursement: `150 CARGO`
 
-These values must be derived from the final CARGO implementation and automated gas measurements. Proof-reference limits must accommodate the merged IPFS URI format and its encryption and integrity metadata.
+The measured 18-checkpoint amendment acceptance used `5,044,722` gas and
+reimbursed `99.76998 CARGO` at the test fee settings.
+
+The current implementation also fixes these compatibility decisions:
+
+- A shipper may still choose a larger refundable reserve; the funded amount determines saved gas-price coverage while per-action maximums remain enforced.
+- Proof URI and remark limits are 512 and 500 bytes. Milestone names are bounded at 128 bytes.
+- Redemption accepts only amounts divisible by `10,000` token base units; non-divisible dust stays in the wallet.
+- ETH conversion is explicit through `deposit()`; direct ETH transfers revert.
+
+The user-run manual browser flow in Section 17 and final UI-requirement review remain pending. The user chose not to run the separate live IPFS smoke test. Automated tests establish the exercised code paths, not a guarantee that every planned interface detail is finished.
+
+Standard-limit deployment is verified without `allowUnlimitedContractSize`. Current runtime sizes are 22,915 bytes for DeliveryEscrow and 24,019 bytes for LifecycleManager, both below the 24,576-byte limit. Named escrow errors are decoded into readable client messages.
+
+Operational reserves and future checkpoint requirements use the saved request gas-price coverage, not a changing block fee. A funded buffer or top-up raises coverage for remaining eligible actions. If coverage changes while an amendment is pending, its captured state version becomes stale; withdraw/refund and submit a newly quoted amendment instead of accepting outdated funding terms.
 
 ## 19. Final agreed model
 
@@ -1201,3 +1218,187 @@ Security
 ```
 
 No platform wallet, administrator, governance process, relayer, or token market is required. All conversion, escrow, allowance, reimbursement, retry, and refund rules are enforced by the deployed contracts.
+
+## 20. Desktop UI refinement decisions
+
+**Recorded and implemented:** 2026-08-31. Connected-wallet manual browser QA remains pending. This section records related Account, Messages, navigation, proposal-editor, reimbursement, and modal decisions. These changes do not alter the contract payment or reimbursement rules.
+
+### 20.1 Scope and completed currency naming
+
+Already implemented in source:
+
+- Platform name: CargoChain.
+- ERC-20 name: `CARGO`; ERC-20 symbol: `C.`.
+- Amounts use a suffix: `0 C.`, `500 C.`, and `1 ETH = 10,000 C.`.
+- ETH remains the backing asset and native gas currency. The conversion rate is unchanged.
+- Source changes to token metadata require redeployment to appear on-chain. Existing contracts do not change in place.
+
+Confirmed scope for the pending work:
+
+- Focus on desktop use. Address obvious clipping and cramped smaller desktop windows, but do not start a separate tablet/mobile redesign.
+- Keep mouse and keyboard interactions. Do not add touch-dragging, mobile-wallet integration, or virtual-keyboard handling in this pass.
+- Fix Account's own layout before considering changes to the app-wide navigation breakpoint.
+- Preserve existing responsive behaviour unless a scoped desktop fix requires an adjustment.
+- Do not add a notification centre, unread badges, background/cross-page notifications, browser push, or another service for notifications.
+- Keep the current IPFS proof flow, contract rules, and future roadmap ideas intact.
+
+### 20.2 Account balance boxes
+
+Confirmed:
+
+- Put two matching balance boxes beside each other: **CARGO Balance on the left**, **ETH Balance on the right**.
+- Reuse the existing Available Balance box design, with equal dimensions and matching typography, spacing, and visual emphasis.
+- Rename Available Balance to ETH Balance.
+- Use plain `C.` as the CARGO icon and `Ξ` as the ETH icon, replacing the wallet icon for these boxes.
+- CARGO description: "Used for delivery compensation, escrow, refunds, and tips."
+- ETH description should explain that ETH tops up CARGO and pays gas, and that users must retain ETH to initiate transactions. Suggested wording: "Used to top up your CARGO wallet and pay gas. Keep ETH available to initiate transactions."
+- Remove the duplicate CARGO balance from the conversion section below.
+- Use `C.` in amount/unit labels and compact controls where suitable; retain CARGO when naming or explaining the currency improves clarity.
+
+Layout recommendation for implementation review: give long balances the full width below each title, use readable numeric sizing and grouping, and reflow the two equal boxes when their available space is insufficient. Exact-value disclosure and compact notation such as `1.25M C.` were suggested for extreme amounts but were not separately approved. Do not silently truncate important financial values or show a failed/loading read as zero.
+
+### 20.3 Conversion-only section
+
+Confirmed:
+
+- Repurpose the current Cargo Wallet section exclusively for conversion.
+- Use a two-part **segmented control**, matching the user's Posts/Comments reference: one rounded light-grey track, two equal-width segments, a white selected segment with subtle shadow, and muted unselected text. No count badges or underline-style tabs.
+- Segment labels: **ETH to C.** and **C. to ETH**.
+- ETH to C. starts with how many CARGO tokens the user wants to receive, then shows the ETH required. Example: `5 C.` requires `0.0005 ETH`.
+- C. to ETH starts with how much ETH the user wants to receive, then shows the CARGO required. Example: `0.02 ETH` requires `200 C.`.
+- Both amount fields are editable. Editing either recalculates the other at the fixed rate.
+- Show the rate and the appropriate **Top up** or **Redeem** action.
+- Clicking the action opens a confirmation modal before any MetaMask transaction request.
+
+Implementation safeguards: use exact base-unit arithmetic, respect redemption divisibility, validate balances, identify input units clearly, and never silently round a non-convertible amount. Confirm the amount leaving, amount received, and that ETH network gas is separate. Switching direction must not reinterpret an existing amount under the wrong unit.
+
+### 20.4 Account activity layout
+
+Confirmed direction:
+
+- Fix the Account content layout rather than changing the entire app's navigation behaviour.
+- Remove the need to scroll horizontally just to read Account activity or its empty state.
+- Make "No on-chain activity yet" and its description fit the available panel.
+
+Implementation approach discussed: let Account's identity and finance areas reflow before they become cramped; use a compact stacked activity-row presentation when a table cannot fit; render empty/error states independently from a wide table. Preserve the event, shipment, amount, status, and transaction-copy information. The existing 620px Account table minimum and late profile/finance stacking need review. This is not authorisation for an app-wide mobile redesign.
+
+### 20.5 Proposal acceptance and initial reserve
+
+Confirmed:
+
+- Show the funding breakdown in the proposal acceptance UI before requesting MetaMask approval.
+- Separate delivery compensation, the contract-calculated **minimum gas reserve**, **extra reserve**, and **total to fund**.
+- Default extra reserve to `0 C.`. Let the shipper increase the funded reserve, but never fund below the current contract minimum.
+- The extra amount may be revised before confirmation as long as it is nonnegative. This does not permit withdrawal of an already funded reserve.
+- Update the total when the extra amount changes.
+- Explain that the reserve is separate from milestone compensation and unused funds are refundable at settlement.
+- Distinguish ERC-20 approval from the actual transfer so two wallet prompts do not look like two payments.
+
+If a fresh minimum quote changes the confirmed total, present the updated amount for confirmation rather than increasing the transfer silently.
+
+### 20.6 Proof, reimbursement, and settlement feedback
+
+Confirmed scope:
+
+- Before a carrier submits proof, say whether this submission is eligible for reimbursement or the checkpoint's reimbursement has already been used.
+- Explain that the sender pays ETH upfront and receives eligible reimbursement in CARGO, not ETH.
+- Include the actual reimbursement in the current action's success message after confirmation, for example: "Proof submitted. You received 4 C. gas reimbursement."
+- Include actual reserve returns in settlement/refund success messages. Separate delivery escrow refunds from unused gas-reserve refunds.
+- Keep feedback local to the current action/page. Do not notify the other participant in the background or add a new notification system.
+- Use confirmed transaction events for paid/returned values, not a pre-transaction estimate.
+
+Preserve the current rules: first successful proof submission only, capped approximate reimbursement, no repeated reimbursement after withdrawal or rejection, and no reimbursement of failed transactions. Do not imply that every network fee is fully covered.
+
+### 20.7 Payments and collapsible escrow activity
+
+Confirmed:
+
+- The **entire Escrow activity section is collapsed by default** in Payments.
+- Show its header and a chevron. Clicking the header expands/collapses the contents.
+- Put the escrow breakdown, gas-reserve details, and Add reserve button inside that disclosure.
+- Keep the completion-tip card outside the disclosure so it remains discoverable and the timeline tipping shortcut can still target it.
+- Clearly distinguish reserve funded, reimbursed, returned, and still held. The accounting should reconcile: `funded = reimbursed + returned + still held`.
+- Keep reimbursement records distinguishable from milestone payouts, tips, and delivery refunds. Never count returned reserve as carrier earnings.
+
+### 20.8 Add reserve modal
+
+Confirmed:
+
+- Replace the always-visible "Add CARGO operational reserve" input with an **Add reserve** button.
+- Clicking it opens a modal containing reference information and an amount input.
+- Use this modal as the pre-transaction confirmation, not a modal followed by another confirmation modal.
+
+Reference information discussed: total funded reserve, reimbursements paid, remaining reserve, eligible proof submissions remaining, and the shipper's available CARGO balance. Provide a positive **Additional reserve** input and show the resulting remaining reserve. Use **Cancel** and **Confirm top-up** actions.
+
+Explain that the extra amount does not increase milestone compensation and unused reserve is refundable. If a coverage increase would make a pending amendment stale, show that consequence before submission. After success, refresh the figures and report the confirmed amount added. Keep token approval and the top-up transaction distinct.
+
+### 20.9 Amendment funding transparency
+
+Confirmed direction:
+
+- Show amendment response allowance separately from added milestone compensation and reserves for new checkpoints.
+- Explain who funds the response allowance and whether acceptance/rejection is reimbursable.
+- Include actual response reimbursements and allowance returns in the relevant local action feedback.
+- Preserve the existing gas-policy choices and contract minimums; this work improves their presentation rather than changing the policy.
+
+### 20.10 Shared modal design
+
+Implemented direction:
+
+- Standardise active modals around the **branded form** style the user prefers: subtle blue-tinted header, heading icon, consistent spacing, and one close-button treatment.
+- Share backdrop, corners, shadow, header/footer treatment, focus handling, dismissal rules, and animation where appropriate.
+- Allow small, medium, and large widths based on the task rather than forcing every form into one width.
+- Keep image-viewer content specialised while matching the shared outer controls and backdrop.
+- Preserve business actions, content, and busy-state protections.
+- No full mobile-modal redesign is required in this pass.
+
+The source inventory found ten active modal implementations, grouped into roughly eight visual families. Three legacy modal implementations outside the active route flow are not the visual reference. The cargo hover preview is a popover, not a modal. These are source-level findings, not results of a complete browser visual test.
+
+### 20.11 Proposal editor and navigation
+
+Final proposal-editor decision after visual review:
+
+- Keep the position-aware **+** insertion buttons before, between, and after milestones.
+- Remove the temporary footer-only Add checkpoint treatment.
+- Preserve the current milestone card design, drag-and-drop interaction, name and payout fields, remove action, validation, payout rules, and visible `x / 10` limit.
+- Disable insertion controls at ten milestones and explain that the maximum is reached.
+- No whole-card redesign is requested now.
+
+Confirmed navigation changes:
+
+- Make the sidebar CargoChain logo and name a link to Marketplace at `/`.
+- Remove the nonfunctional **Need help? / Contact us** section.
+- Preserve the connected-wallet section and current navigation routes.
+
+### 20.12 Account identity and chat roles
+
+The user approved the full recorded refinement set before implementation.
+
+**Account identity concern:** "DN", "Display name not set", and "Shipper · Carrier" feel unappealing or confusing.
+
+Suggested resolution:
+
+- For a genuinely unregistered wallet, use a neutral user-outline icon, "Register your wallet", the shortened address, brief display-name guidance, and a Register wallet action.
+- After registration, show the actual name and initials or existing avatar.
+- Keep loading, lookup failure, and unregistered states distinct.
+- Remove the permanent "Shipper · Carrier" identity label. Show roles in individual shipment/conversation contexts instead.
+
+**Messages concern:** the current presentation labels the viewer's role as "Shipper work" or "Carrier work" beside the other participant's name. It also combines a name and request number as `Alex#12`, which makes the relationship unclear.
+
+Suggested resolution:
+
+- Show the other participant's name and explicit role together, for example **Alex · Carrier** when the viewer is the shipper.
+- Show `Shipment #12` and the route separately, with the latest-message preview retained in the list.
+- Remove "Shipper work" / "Carrier work" and avoid repeating a role badge on every message bubble.
+- Use the conversation's participant wallets to determine roles, including historical/rejected-carrier conversations. Do not infer a permanent account role.
+
+### 20.13 Handoff and verification
+
+- Implementation was authorised after the discussion and completed as one coordinated UI pass.
+- Recheck the current code before editing because a teammate may change the same areas.
+- Implement and verify in bounded groups: shared modal foundation; Account/conversion; acceptance/reserve feedback; proposal/navigation cleanup. Keep the unconfirmed identity/chat suggestions separate.
+- Verify positive, zero, invalid, insufficient-balance, loading, failed-read, wallet-rejection, and confirmed-transaction states where relevant.
+- Check a normal desktop window and a narrower desktop window for clipping, readable amounts, scrolling, and modal controls. Do not report mobile-device support from those checks.
+- Exercise the minimum-plus-extra reserve quote, exact conversion calculations, and event-derived reimbursement/refund totals in tests.
+- Keep deployment requirements explicit: UI-only changes do not require a redeployment; contract metadata or API changes do. Do not reset the user's normal Ganache or change live Supabase/Pinata data merely to review the UI.
+- Report what was actually verified. Do not mark the plan complete from source inspection or passing unit tests alone.

@@ -1,3 +1,4 @@
+const decodeEscrowError = require('./helpers/escrowError');
 const UserRegistry = artifacts.require('UserRegistry');
 const DeliveryEscrow = artifacts.require('DeliveryEscrow');
 const LifecycleManager = artifacts.require('LifecycleManager');
@@ -77,7 +78,7 @@ contract('LifecycleManager', (accounts) => {
       assert.fail('Expected revert not received');
     } catch (error) {
       assert(
-        error.message.includes(reason),
+        decodeEscrowError(error).includes(reason),
         `Expected "${reason}" but got "${error.message}"`,
       );
     }
@@ -164,7 +165,7 @@ contract('LifecycleManager', (accounts) => {
   it('keeps completed milestone pay with the carrier and refunds only the remainder', async () => {
     await createFundedRequest();
     await escrow.submitProof(1, 0, ['proof://pickup'], 'Picked up', { from: carrier });
-    await escrow.verifyMilestone(1, 0, true, '', { from: shipper });
+    await escrow.verifyMilestone(1, 0, true, '', 1, { from: shipper });
 
     await manager.requestCancellation(
       1,
@@ -322,7 +323,7 @@ contract('LifecycleManager', (accounts) => {
       'milestone proof is awaiting verification',
     );
 
-    await escrow.verifyMilestone(1, 0, true, '', { from: shipper });
+    await escrow.verifyMilestone(1, 0, true, '', 1, { from: shipper });
     await manager.acceptCancellation(1, 0, { from: carrier });
     const summary = await escrow.getPaymentSummary(1);
     assert.equal(summary.totalReleased.toString(), web3.utils.toWei('0.4', 'ether'));
@@ -415,7 +416,7 @@ contract('LifecycleManager', (accounts) => {
         'Completed',
         { from: carrier },
       );
-      await escrow.verifyMilestone(1, milestoneId, true, '', { from: shipper });
+      await escrow.verifyMilestone(1, milestoneId, true, '', 1, { from: shipper });
     }
     const completed = await escrow.getPaymentSummary(1);
     const completedRequest = await escrow.getRequest(1);
@@ -688,7 +689,7 @@ contract('LifecycleManager', (accounts) => {
     );
 
     await escrow.submitProof(1, 0, ['proof://pickup'], 'Picked up', { from: carrier });
-    await escrow.verifyMilestone(1, 0, true, '', { from: shipper });
+    await escrow.verifyMilestone(1, 0, true, '', 1, { from: shipper });
     const extra = web3.utils.toWei('0.02', 'ether');
     await expectRevert(
       manager.requestAmendment(

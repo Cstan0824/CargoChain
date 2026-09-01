@@ -16,7 +16,7 @@ const CHAT_EXP_KEY = 'cargochain_chat_exp';
 const ChatAuthContext = createContext(null);
 
 export function ChatAuthProvider({ children }) {
-  const { account, walletChainId, signer } = useWallet();
+  const { account, walletChainId, walletInitialized = true, signer } = useWallet();
 
   const [authStatus, setAuthStatus] = useState('disconnected'); // 'disconnected' | 'unauthenticated' | 'authenticating' | 'authenticated' | 'error'
   const [authenticatedWallet, setAuthenticatedWallet] = useState(null);
@@ -59,6 +59,7 @@ export function ChatAuthProvider({ children }) {
   }, []);
 
   const restoreChatSession = useCallback(async () => {
+    if (!walletInitialized) return false;
     if (!account) {
       setAuthStatus('disconnected');
       setAuthenticatedWallet(null);
@@ -115,10 +116,11 @@ export function ChatAuthProvider({ children }) {
       }
       return false;
     }
-  }, [account, walletChainId, getChatAccessToken, clearChatSession]);
+  }, [account, walletChainId, walletInitialized, getChatAccessToken, clearChatSession]);
 
   // Handle automatic session verification and account/chain change events
   useEffect(() => {
+    if (!walletInitialized) return undefined;
     const currentSourceKey = account && walletChainId != null
       ? `${Number(walletChainId)}:${account.toLowerCase()}`
       : '';
@@ -164,7 +166,7 @@ export function ChatAuthProvider({ children }) {
     return () => {
       window.removeEventListener('cargochain:chat_auth_401', handle401);
     };
-  }, [account, walletChainId, clearChatSession, restoreChatSession]);
+  }, [account, walletChainId, walletInitialized, clearChatSession, restoreChatSession]);
 
   /**
    * Explicit user-triggered SIWE authentication.

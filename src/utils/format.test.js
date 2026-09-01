@@ -1,11 +1,32 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatCargo,
+  formatEth,
   formatRemarks,
   formatTime,
   hasRemarks,
   milestoneStatusLabel,
   requestStatusLabel,
 } from './format';
+
+describe('currency formatting', () => {
+  it('uses the C. suffix for CARGO balances and payments', () => {
+    expect(formatCargo(0n)).toBe('0 C.');
+    expect(formatCargo(500000000000000000000n)).toBe('500 C.');
+    expect(formatCargo('25500000000000000000')).toBe('25.5 C.');
+    expect(formatCargo(1234567890000000000n)).toBe('1.2345 C.');
+    expect(formatCargo(-2500000000000000000n)).toBe('-2.5 C.');
+  });
+
+  it('preserves large token amounts without number precision loss', () => {
+    expect(formatCargo(9007199254740993000000000000000001n)).toBe('9007199254740993 C.');
+  });
+
+  it('keeps ETH balances and gas in ETH without converting values', () => {
+    expect(formatEth(0n)).toBe('0 ETH');
+    expect(formatEth(1500000000000000000n)).toBe('1.5 ETH');
+  });
+});
 
 describe('presentation status labels', () => {
   it('combines short-lived request states into the operational delivery states', () => {

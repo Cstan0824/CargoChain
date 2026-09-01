@@ -61,6 +61,7 @@ interface IDeliveryEscrowLifecycle {
     ) external payable;
 
     function minimumProofAllowance() external view returns (uint256);
+    function minimumAdditionalOperationalAllowance(uint256 requestId, uint256 count) external view returns (uint256);
 
     function getMilestoneCount(uint256 requestId) external view returns (uint256);
 
@@ -160,6 +161,7 @@ contract LifecycleManager {
         uint256 responseAllowanceSpent;
         address responseAllowanceFunder;
         bool responseReimbursed;
+        uint256 responseGasPriceCap;
     }
 
     address public immutable initializer;
@@ -171,11 +173,12 @@ contract LifecycleManager {
     uint256 public constant MIN_DEADLINE_CHANGE = 15 minutes;
     uint256 public constant MAX_NOTE_BYTES = 500;
     uint256 public constant MAX_TOTAL_MILESTONES = 20;
-    uint256 public constant AMENDMENT_RESPONSE_GAS_UNIT_CAP = 180_000;
+    // Covers accepting a bounded plan of up to twenty total checkpoints.
+    uint256 public constant AMENDMENT_RESPONSE_GAS_UNIT_CAP = 6_000_000;
     uint256 public constant AMENDMENT_RESPONSE_OVERHEAD = 40_000;
     uint256 public constant AMENDMENT_MIN_GAS_PRICE = 2 gwei;
     uint256 public constant AMENDMENT_PRIORITY_FEE_BUFFER = 1 gwei;
-    uint256 public constant AMENDMENT_MAX_RESPONSE_REIMBURSEMENT = 5 ether;
+    uint256 public constant AMENDMENT_MAX_RESPONSE_REIMBURSEMENT = 150 ether;
 
     mapping(uint256 => ActiveNegotiation) private activeNegotiations;
     mapping(uint256 => CancellationRequest[]) private cancellationRequests;
@@ -347,7 +350,8 @@ contract LifecycleManager {
                 responseAllowance: 0,
                 responseAllowanceSpent: 0,
                 responseAllowanceFunder: address(0),
-                responseReimbursed: false
+                responseReimbursed: false,
+                responseGasPriceCap: 0
             })
         );
         emit ShipmentDeadlineExtended(
@@ -445,7 +449,7 @@ contract LifecycleManager {
             existingFunding,
             newMilestones
         );
-        uint256 operationalAllowance = newMilestones.length * deliveryEscrow.minimumProofAllowance();
+        uint256 operationalAllowance = deliveryEscrow.minimumAdditionalOperationalAllowance(requestId, newMilestones.length);
         require(
             proposedDeadline != currentDeadline || additionalFunding > 0,
             "amendment must change agreement"
@@ -520,7 +524,8 @@ contract LifecycleManager {
                 responseAllowanceFunder: gasPolicy == AmendmentGasPolicy.RequesterCoversResponse
                     ? msg.sender
                     : address(0),
-                responseReimbursed: false
+                responseReimbursed: false,
+                responseGasPriceCap: responseAllowance / ((AMENDMENT_RESPONSE_GAS_UNIT_CAP + AMENDMENT_RESPONSE_OVERHEAD) * 10_000)
             })
         );
         for (uint256 i = 0; i < existingFunding.length; i++) {
@@ -840,7 +845,7 @@ contract LifecycleManager {
             measuredGas = AMENDMENT_RESPONSE_GAS_UNIT_CAP;
         }
         uint256 calculated = measuredGas * (
-            tx.gasprice < referenceGasPrice() ? tx.gasprice : referenceGasPrice()
+            tx.gasprice < amendment.responseGasPriceCap ? tx.gasprice : amendment.responseGasPriceCap
         ) * 10_000;
         if (calculated > AMENDMENT_MAX_RESPONSE_REIMBURSEMENT) {
             calculated = AMENDMENT_MAX_RESPONSE_REIMBURSEMENT;
@@ -996,6 +1001,7 @@ contract LifecycleManager {
         for (uint256 i = 0; i < newMilestones.length; i++) {
             NewMilestoneFunding calldata addition = newMilestones[i];
             require(bytes(addition.name).length > 0, "milestone name required");
+            require(bytes(addition.name).length <= 128, "milestone name too long");
             require(addition.amount > 0, "allocation must be positive");
             uint256 insertionPosition = milestoneCount;
             if (addition.insertBeforeMilestoneId != APPEND_MILESTONE_ID) {

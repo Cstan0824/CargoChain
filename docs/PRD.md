@@ -94,7 +94,7 @@ A registered wallet can be a shipper for some requests and carrier for others. T
 
 - A shipper may submit one immutable 1-5 rating after its request is completed.
 - Ratings use up to three predefined feedback tags; free-form reviews are intentionally excluded.
-- Read-only carrier reputation modals show verified rating and delivery aggregates during proposal review; the connected wallet sees its own aggregates on `/profile`.
+- Read-only carrier reputation modals show verified rating and delivery aggregates during proposal review; the connected wallet sees its own aggregates on `/account`.
 - Objective delivery outcomes are derived from escrow/lifecycle state and events, rather than being user-entered claims.
 
 ## 5. Technical requirements

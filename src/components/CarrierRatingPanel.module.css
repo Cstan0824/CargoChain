@@ -6,6 +6,9 @@
 .actionCopy strong { color: var(--text-primary); font-size: var(--fs-sm); text-wrap: balance; }
 .actionCopy p { margin: 2px 0 0; color: var(--text-secondary); font-size: var(--fs-xs); line-height: 1.45; text-wrap: pretty; }
 .actionBar > button { min-height: 44px; flex: 0 0 auto; }
+.actionCta { width: 184px; max-width: 100%; justify-content: center; }
+.ratingResult { width: 184px; max-width: 100%; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: var(--s-2); color: var(--text-primary); background: var(--bg-surface); border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border)); border-radius: var(--r-md); font-size: var(--fs-sm); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+.ratingResult svg { width: 18px; height: 18px; color: #c58a1d; }
 .actionBar > button svg { width: 17px; height: 17px; }
 .overlay { position: fixed; inset: 0; z-index: var(--z-modal); display: grid; place-items: center; padding: var(--s-5); background: rgba(15, 23, 42, .42); }
 .modal { width: min(100%, 560px); max-height: min(720px, calc(100vh - 40px)); overflow: auto; padding: var(--s-6); background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); }
@@ -31,5 +34,5 @@
 .tagLimit { margin-top: var(--s-3); color: var(--text-muted); font-size: var(--fs-xs); }
 .modalActions { display: flex; justify-content: flex-end; gap: var(--s-2); }
 .transactionState { margin-top: var(--s-4); padding: 10px 12px; color: var(--primary-text); background: var(--primary-soft); border-radius: var(--r-md); font-size: var(--fs-sm); }
-@media (max-width: 768px) { .actionBar { grid-template-columns: 40px minmax(0, 1fr); padding: var(--s-3); } .actionIcon { width: 40px; height: 40px; } .actionBar > button { grid-column: 1 / -1; width: 100%; justify-content: center; } }
+@media (max-width: 768px) { .actionBar { grid-template-columns: 40px minmax(0, 1fr); padding: var(--s-3); } .actionIcon { width: 40px; height: 40px; } .actionBar > button, .ratingResult { grid-column: 1 / -1; width: 100%; justify-content: center; } }
 @media (max-width: 620px) { .tagChoices { grid-template-columns: 1fr; } .modal { padding: var(--s-5); } }

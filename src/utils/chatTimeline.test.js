@@ -7,6 +7,29 @@ import {
 } from './chatTimeline';
 
 describe('mergeChatTimeline', () => {
+  it.each([
+    'MilestonePaid',
+    'RefundIssued',
+    'OperationalAllowanceFunded',
+    'OperationalAllowanceReimbursed',
+    'OperationalAllowanceRefunded',
+    'AmendmentResponseAllowanceFunded',
+    'AmendmentResponseReimbursed',
+    'AmendmentResponseAllowanceRefunded',
+  ])('uses the currency symbol in %s notices without duplicating the currency name', (eventName) => {
+    const notice = eventLogToNotice({
+      eventName,
+      transactionHash: '0xcurrency',
+      index: 0,
+      blockNumber: 1,
+      args: { amount: 25000000000000000000n, milestoneId: 0n },
+    }, 1_700_000_000_000);
+
+    expect(notice.text).toContain('25 C.');
+    expect(notice.text).not.toContain('CARGO');
+    expect(notice.text).not.toContain('ETH');
+  });
+
   it('sorts off-chain messages and on-chain notices into one chronological stream', () => {
     const timeline = mergeChatTimeline(
       [
@@ -34,8 +57,23 @@ describe('mergeChatTimeline', () => {
       args: { amount: 1500000000000000000n },
     }, Date.parse('2026-08-01T10:02:00.000Z'));
 
-    expect(notice.text).toBe('Escrow funded with 1.5 CARGO.');
+    expect(notice.text).toBe('Escrow funded with 1.5 C.');
     expect(notice.tone).toBe('payment');
+  });
+
+  it('uses the checkpoint name in proof notices when the request milestones are available', () => {
+    const context = { milestoneNames: new Map([[0, 'Package Pickup']]) };
+    const proof = eventLogToNotice({
+      eventName: 'ProofSubmitted', transactionHash: '0xproof', index: 0, blockNumber: 5,
+      args: { milestoneId: 0n },
+    }, Date.parse('2026-08-01T10:02:00.000Z'), '', context);
+    const paid = eventLogToNotice({
+      eventName: 'MilestonePaid', transactionHash: '0xpaid', index: 1, blockNumber: 5,
+      args: { milestoneId: 0n, amount: 9000000000000000000n },
+    }, Date.parse('2026-08-01T10:03:00.000Z'), '', context);
+
+    expect(proof.text).toBe('Package Pickup photo proof submitted.');
+    expect(paid.text).toBe('9 C. released for Package Pickup.');
   });
 
   it('uses concise neutral-row copy for request and proposal activity', () => {
@@ -103,9 +141,9 @@ describe('mergeChatTimeline', () => {
 
     expect(amendment.actionable).toBe(true);
     expect(amendment.focusTarget).toBe('amendment');
-    expect(amendment.text).toContain('0.25 CARGO');
+    expect(amendment.text).toContain('0.25 C.');
     expect(proposal.text).toContain('Please add a customs checkpoint.');
-    expect(tip.text).toContain('0.05 CARGO completion tip');
+    expect(tip.text).toContain('0.05 C. completion tip');
     expect(completion.text).toContain('Delivery completed');
     expect(expiry.text).toContain('Shipment deadline passed');
     expect(rating.text).toBe('Carrier rating published.');

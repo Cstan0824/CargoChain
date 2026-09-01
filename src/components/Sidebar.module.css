@@ -28,6 +28,14 @@
   min-width: 156px;
 }
 
+.brandLink {
+  display: inline-flex;
+  border-radius: var(--r-md);
+  text-decoration: none;
+}
+.brandLink:focus-visible { outline: 2px solid var(--primary); outline-offset: 4px; }
+.brandLink:active { transform: scale(0.96); }
+
 .closeNav {
   display: none;
   width: 44px;

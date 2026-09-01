@@ -75,11 +75,49 @@
 .utilityButton:active { transform: scale(0.96); }
 .utilityButton > svg { width: 21px; height: 21px; }
 
+.profileButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 164px;
+  max-width: 240px;
+  height: 48px;
+  flex: 0 1 auto;
+  padding: 7px 12px 7px 8px;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  text-decoration: none;
+  transition-property: background-color, box-shadow, transform;
+  transition-duration: var(--dur-1);
+  transition-timing-function: var(--ease);
+}
+
+.profileButton:hover {
+  background: var(--bg-subtle);
+  box-shadow: var(--shadow-sm);
+  text-decoration: none;
+}
+
+.profileButton:active { transform: scale(0.96); }
+
 .avatar {
-  width: 30px;
-  height: 30px;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   object-fit: cover;
+}
+
+.profileName {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 640px) {
@@ -96,6 +134,7 @@
   .right { display: contents; }
   .actions { grid-column: 1 / -1; grid-row: 2; width: 100%; margin-top: var(--s-3); }
   .actions :global(button) { width: 100%; }
+  .profileButton { grid-column: 3; grid-row: 1; min-width: 0; max-width: 168px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

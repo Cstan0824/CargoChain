@@ -6,7 +6,7 @@ function source(relativePath) {
 }
 
 describe('Phase 9 milestone composer structure', () => {
-  it('uses connector insertion controls instead of a footer append action', () => {
+  it('uses connector insertion controls and keeps drag-and-drop reordering', () => {
     const page = source('./ProposeMilestones.jsx');
     const styles = source('./ProposeMilestones.module.css');
 

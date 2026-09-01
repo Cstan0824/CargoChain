@@ -1,0 +1,15 @@
+.overlay { position: fixed; inset: 0; z-index: var(--z-modal); display: grid; place-items: center; padding: var(--s-4); overflow-y: auto; background: rgba(15, 23, 42, .58); backdrop-filter: blur(4px); }
+.modal { width: min(100%, 560px); max-height: calc(100vh - 32px); display: flex; flex-direction: column; overflow: hidden; border-radius: var(--r-lg); background: var(--bg-surface); box-shadow: var(--shadow-lg); }
+.sm { max-width: 440px; }.md { max-width: 560px; }.lg { max-width: 800px; }.xl { max-width: 960px; }
+.header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s-4); padding: var(--s-5); box-shadow: inset 0 -1px var(--border-soft); }
+.heading { min-width: 0; display: flex; align-items: flex-start; gap: var(--s-3); }
+.icon { width: 44px; height: 44px; flex: 0 0 44px; display: grid; place-items: center; border-radius: var(--r-md); color: var(--primary); background: var(--primary-soft); }
+.icon svg { width: 22px; height: 22px; }
+.header h2 { margin: 0; color: var(--text-primary); font-size: var(--fs-xl); line-height: var(--lh-tight); text-wrap: balance; }
+.header p { margin: 4px 0 0; color: var(--text-secondary); font-size: var(--fs-sm); line-height: 1.45; text-wrap: pretty; }
+.close { width: 44px; height: 44px; flex: 0 0 44px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--r-md); color: var(--text-secondary); background: transparent; cursor: pointer; transition-property: color, background-color, transform; transition-duration: var(--dur-1); transition-timing-function: var(--ease); }
+.close:hover:not(:disabled) { color: var(--text-primary); background: var(--bg-subtle); }.close:active:not(:disabled) { transform: scale(.96); }.close:disabled { opacity: .5; cursor: not-allowed; }.close svg { width: 22px; height: 22px; }
+.body { min-height: 0; overflow-y: auto; padding: var(--s-5); }
+.footer { display: flex; align-items: center; justify-content: flex-end; gap: var(--s-2); padding: var(--s-4) var(--s-5) var(--s-5); box-shadow: inset 0 1px var(--border-soft); }
+@media (max-width: 680px) { .overlay { padding: var(--s-3); } .modal { max-height: calc(100vh - 24px); } .header,.body { padding: var(--s-4); } .footer { padding: var(--s-3) var(--s-4) var(--s-4); } }
+@media (prefers-reduced-motion: reduce) { .close { transition-duration: 1ms; } }

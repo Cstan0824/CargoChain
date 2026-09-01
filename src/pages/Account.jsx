@@ -9,18 +9,20 @@ import {
   HiOutlineEyeSlash,
   HiOutlineIdentification,
   HiOutlineInformationCircle,
+  HiOutlineArrowsRightLeft,
+  HiOutlineUser,
   HiOutlineUserGroup,
-  HiOutlineWallet,
   HiOutlineXMark,
   HiStar,
 } from 'react-icons/hi2';
-import { parseEther } from 'ethers';
+import { formatEther, parseEther } from 'ethers';
 import { useNavigate } from 'react-router-dom';
 import { Topbar } from '../components/Topbar.jsx';
 import { Card } from '../components/Card.jsx';
 import { Button } from '../components/Button.jsx';
 import { Badge } from '../components/Badge.jsx';
 import { Skeleton } from '../components/Skeleton.jsx';
+import { BrandedModal } from '../components/BrandedModal.jsx';
 import { Avatar } from '../components/Avatar.jsx';
 import { useWallet } from '../hooks/useWallet.js';
 import { useAccountAccess } from '../context/AccountAccessContext.jsx';
@@ -84,7 +86,11 @@ export function Account() {
   const [walletRevealed, setWalletRevealed] = useState(false);
   const [walletCopied, setWalletCopied] = useState(false);
   const [snapshot, setSnapshot] = useState(EMPTY_SNAPSHOT);
+  const [conversionDirection, setConversionDirection] = useState('deposit');
   const [cargoAmount, setCargoAmount] = useState('');
+  const [ethAmount, setEthAmount] = useState('');
+  const [conversionError, setConversionError] = useState('');
+  const [conversionConfirmation, setConversionConfirmation] = useState(null);
   const [cargoAction, setCargoAction] = useState(null);
   const snapshotRef = useRef(snapshot);
   const inFlightRef = useRef(null);
@@ -97,7 +103,7 @@ export function Account() {
   const deliveryEscrow = contracts?.deliveryEscrow;
   const cargoToken = contracts?.cargoToken;
   const walletIdentityRegistered = Boolean(isRegistered && walletMatches && displayName);
-  const profileName = walletIdentityRegistered ? displayName : 'Display name not set';
+  const profileName = walletIdentityRegistered ? displayName : 'Register your wallet';
   const avatarSrc = pickAvatar(null, walletAddress);
   const networkLabel = chainId === CARGO_NETWORK_CONFIG.chainId
     ? CARGO_NETWORK_CONFIG.chainName
@@ -261,20 +267,44 @@ export function Account() {
   );
   const financialError = snapshot.balanceError || snapshot.cargoError || snapshot.lockedError;
 
-  const runCargoAction = async (action) => {
-    if (!cargoToken || !signer || !provider || cargoAction) return;
-    let amount;
+  const updateConversionFromCargo = (value) => {
+    setCargoAmount(value);
+    setConversionError('');
+    if (!value.trim()) { setEthAmount(''); return; }
     try {
-      amount = parseEther(cargoAmount.trim());
-    } catch {
-      show('Enter a valid CARGO amount.', 'error');
-      return;
-    }
-    if (amount <= 0n) {
-      show('Enter a CARGO amount greater than zero.', 'error');
-      return;
-    }
+      setEthAmount(conversionFromCargo(value).ethText);
+    } catch { setEthAmount(''); setConversionError('Enter a CARGO amount that converts exactly at the fixed rate.'); }
+  };
 
+  const updateConversionFromEth = (value) => {
+    setEthAmount(value);
+    setConversionError('');
+    if (!value.trim()) { setCargoAmount(''); return; }
+    try {
+      setCargoAmount(conversionFromEth(value).cargoText);
+    } catch { setCargoAmount(''); setConversionError('Enter a valid ETH amount.'); }
+  };
+
+  const prepareCargoAction = () => {
+    try {
+      const ethWei = parseEther(ethAmount.trim());
+      const cargoWei = parseEther(cargoAmount.trim());
+      if (ethWei <= 0n || cargoWei <= 0n || cargoWei !== ethWei * 10_000n) throw new Error();
+      if (conversionDirection === 'deposit' && snapshot.balance != null && ethWei >= snapshot.balance) {
+        setConversionError('Keep enough ETH in your wallet to pay the transaction gas.');
+        return;
+      }
+      if (conversionDirection === 'redeem' && snapshot.cargoBalance != null && cargoWei > snapshot.cargoBalance) {
+        setConversionError('Your CARGO balance is too low for this redemption.');
+        return;
+      }
+      setConversionConfirmation({ action: conversionDirection, ethWei, cargoWei });
+    } catch { setConversionError('Enter a positive amount to continue.'); }
+  };
+
+  const runCargoAction = async ({ action, ethWei, cargoWei }) => {
+    if (!cargoToken || !signer || !provider || cargoAction) return;
+    setConversionConfirmation(null);
     setCargoAction(action);
     let transactionToast;
     try {
@@ -286,8 +316,8 @@ export function Account() {
       const tx = await sendWalletContractTransaction({
         contract: cargoToken,
         method: action === 'deposit' ? 'deposit' : 'redeem',
-        args: action === 'deposit' ? [] : [amount],
-        overrides: action === 'deposit' ? { value: amount } : undefined,
+        args: action === 'deposit' ? [] : [cargoWei],
+        overrides: action === 'deposit' ? { value: ethWei } : undefined,
         signer,
         provider,
       });
@@ -295,6 +325,7 @@ export function Account() {
       await tx.wait();
       transactionToast.success();
       setCargoAmount('');
+      setEthAmount('');
       await loadSnapshot({ initial: false, revision: sourceRevisionRef.current });
     } catch (error) {
       const message = formatWalletTransactionError(error, 'The CARGO wallet transaction failed.');
@@ -328,14 +359,11 @@ export function Account() {
       <Card className={styles.accountWorkspace} grouped padded={false}>
         <aside className={styles.profileRail} aria-labelledby="account-identity-title">
           <div className={styles.identityMain}>
-            <Avatar src={avatarSrc} name={profileName} size={72} />
+            {walletIdentityRegistered ? <Avatar src={avatarSrc} name={profileName} size={72} /> : <span className={styles.unregisteredAvatar} aria-hidden="true"><HiOutlineUser /></span>}
             <div className={styles.identityCopy}>
-              <span className={styles.eyebrow}>Profile</span>
+              <span className={styles.eyebrow}>{walletIdentityRegistered ? 'Profile' : 'Identity'}</span>
               <h2 id="account-identity-title">{profileName}</h2>
-              <ul className={styles.capabilities} aria-label="Account roles">
-                <li className={styles.roleTag}>Shipper</li>
-                <li className={styles.roleTag}>Carrier</li>
-              </ul>
+              {!walletIdentityRegistered && <p className={styles.registrationHint}>Choose a display name so other users can recognise you.</p>}
             </div>
           </div>
 
@@ -350,7 +378,7 @@ export function Account() {
             <div className={styles.walletDisclosure}>
               <button type="button" className={styles.addressButton} onClick={copyWalletAddress} aria-label="Copy wallet address">
                 <span className={`${styles.walletAddressValue} ${!walletRevealed ? styles.walletAddressHidden : ''}`} aria-hidden={!walletRevealed}>
-                  {walletRevealed ? walletAddress : '0x••••••••••••••••'}
+                  {walletAddress}
                 </span>
               </button>
               <button
@@ -409,15 +437,23 @@ export function Account() {
 
           <div className={styles.balanceOverview}>
             <div className={styles.balanceCard}>
-              <span className={styles.balanceIcon} aria-hidden="true"><HiOutlineWallet /></span>
+              <span className={styles.balanceIcon} aria-hidden="true">C.</span>
               <div className={styles.balanceCopy}>
-              <h2 id="account-financial-title" className={styles.balanceLabel}>Available balance</h2>
-              {snapshot.balanceLoading && snapshot.balance == null ? (
+              <h2 id="account-financial-title" className={styles.balanceLabel}>CARGO Balance</h2>
+              {snapshot.cargoLoading && snapshot.cargoBalance == null ? (
                 <Skeleton className={styles.balanceValueSkeleton} width={132} height={32} />
               ) : (
-                <strong className={styles.balanceValue} data-numeric="true">{formatEth(snapshot.balance ?? 0n)}</strong>
+                <strong className={styles.balanceValue} data-numeric="true" title={formatCargo(snapshot.cargoBalance ?? 0n)}>{formatCargo(snapshot.cargoBalance ?? 0n)}</strong>
               )}
-              <p>Funds available in your connected wallet.</p>
+              <p>Used for delivery compensation, escrow, refunds, and tips.</p>
+              </div>
+            </div>
+            <div className={styles.balanceCard}>
+              <span className={styles.balanceIcon} aria-hidden="true">Ξ</span>
+              <div className={styles.balanceCopy}>
+                <h2 className={styles.balanceLabel}>ETH Balance</h2>
+                {snapshot.balanceLoading && snapshot.balance == null ? <Skeleton className={styles.balanceValueSkeleton} width={132} height={32} /> : <strong className={styles.balanceValue} data-numeric="true" title={formatEth(snapshot.balance ?? 0n)}>{formatEth(snapshot.balance ?? 0n)}</strong>}
+                <p>Used to top up your CARGO wallet and pay gas. Keep ETH available to initiate transactions.</p>
               </div>
             </div>
             {financialError && <Button variant="secondary" size="sm" onClick={retrySnapshot}>Try again</Button>}
@@ -426,45 +462,34 @@ export function Account() {
           <section className={styles.cargoWallet} aria-labelledby="cargo-wallet-title">
             <div className={styles.cargoWalletHeader}>
               <div>
-                <span className={styles.metricLabel}>Cargo wallet</span>
-                <h2 id="cargo-wallet-title">CARGO balance</h2>
+                <span className={styles.metricLabel}>Fixed-rate conversion</span>
+                <h2 id="cargo-wallet-title">Convert CARGO and ETH</h2>
               </div>
-              <strong className={styles.cargoBalanceValue} data-numeric="true">
-                {snapshot.cargoLoading && snapshot.cargoBalance == null
-                  ? 'Loading…'
-                  : formatCargo(snapshot.cargoBalance ?? 0n)}
-              </strong>
             </div>
-            <p className={styles.cargoWalletHint}>CARGO pays for delivery compensation, escrow, refunds, and tips. Keep ETH available for gas.</p>
+            <div className={styles.conversionTabs} role="tablist" aria-label="Conversion direction">
+              <button type="button" role="tab" aria-selected={conversionDirection === 'deposit'} className={conversionDirection === 'deposit' ? styles.conversionTabActive : ''} onClick={() => setConversionDirection('deposit')}>ETH to C.</button>
+              <button type="button" role="tab" aria-selected={conversionDirection === 'redeem'} className={conversionDirection === 'redeem' ? styles.conversionTabActive : ''} onClick={() => setConversionDirection('redeem')}>C. to ETH</button>
+            </div>
             <div className={styles.cargoWalletControls}>
-              <label htmlFor="cargo-amount">{cargoAction === 'redeem' ? 'CARGO to redeem' : 'ETH to convert'}</label>
-              <input
-                id="cargo-amount"
-                inputMode="decimal"
-                value={cargoAmount}
-                onChange={(event) => setCargoAmount(event.target.value)}
-                placeholder={cargoAction === 'redeem' ? '0.00 CARGO' : '0.00 ETH'}
-                disabled={Boolean(cargoAction) || !cargoToken}
-              />
-              <div className={styles.cargoWalletButtons}>
-                <Button
-                  size="sm"
-                  disabled={Boolean(cargoAction) || !cargoToken || !signer}
-                  onClick={() => runCargoAction('deposit')}
-                >
-                  Convert ETH to CARGO
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={Boolean(cargoAction) || !cargoToken || !signer}
-                  onClick={() => runCargoAction('redeem')}
-                >
-                  Redeem CARGO
-                </Button>
-              </div>
+              <label htmlFor="cargo-amount">{conversionDirection === 'deposit' ? 'CARGO you receive' : 'CARGO you redeem'}</label>
+              <div className={styles.conversionInput}><input id="cargo-amount" inputMode="decimal" value={cargoAmount} onChange={(event) => updateConversionFromCargo(event.target.value)} placeholder="0.00" disabled={Boolean(cargoAction) || !cargoToken} /><span>C.</span></div>
+              {conversionDirection === 'redeem' && (
+                <span className={styles.conversionBalance}>
+                  {snapshot.cargoBalance == null ? 'Available C.: Loading…' : `Available C.: ${formatCargo(snapshot.cargoBalance)}`}
+                </span>
+              )}
+              <span className={styles.conversionArrow} aria-hidden="true"><HiOutlineArrowsRightLeft /></span>
+              <label htmlFor="eth-amount">{conversionDirection === 'deposit' ? 'ETH you pay' : 'ETH you receive'}</label>
+              <div className={styles.conversionInput}><input id="eth-amount" inputMode="decimal" value={ethAmount} onChange={(event) => updateConversionFromEth(event.target.value)} placeholder="0.00" disabled={Boolean(cargoAction) || !cargoToken} /><span>ETH</span></div>
+              {conversionDirection === 'deposit' && (
+                <span className={styles.conversionBalance}>
+                  {snapshot.balance == null ? 'Available ETH: Loading…' : `Available ETH: ${formatEth(snapshot.balance)}`}
+                </span>
+              )}
+              {conversionError && <span className={styles.conversionError} role="alert">{conversionError}</span>}
+              <Button size="sm" disabled={Boolean(cargoAction) || !cargoToken || !signer || !cargoAmount || !ethAmount} onClick={prepareCargoAction}>{conversionDirection === 'deposit' ? 'Top up CARGO' : 'Redeem CARGO'}</Button>
             </div>
-            <span className={styles.cargoRate}>Fixed rate: 1 ETH = 10,000 CARGO</span>
+            <span className={styles.cargoRate}>Fixed rate: 1 ETH = 10,000 C.</span>
           </section>
 
           <div className={styles.financialGrid}>
@@ -515,6 +540,16 @@ export function Account() {
           refreshUserProfile={refreshUserProfile}
           onClose={() => setIsEditOpen(false)}
         />
+      )}
+      {conversionConfirmation && (
+        <BrandedModal title={conversionConfirmation.action === 'deposit' ? 'Confirm CARGO top-up' : 'Confirm CARGO redemption'} description="Review the fixed-rate conversion before opening MetaMask." Icon={HiOutlineArrowsRightLeft} onClose={() => setConversionConfirmation(null)} busy={Boolean(cargoAction)} footer={<><Button variant="secondary" onClick={() => setConversionConfirmation(null)} disabled={Boolean(cargoAction)}>Cancel</Button><Button onClick={() => runCargoAction(conversionConfirmation)} disabled={Boolean(cargoAction)}>{cargoAction ? 'Confirming…' : conversionConfirmation.action === 'deposit' ? 'Confirm top-up' : 'Confirm redemption'}</Button></>}>
+          <dl className={styles.conversionReview}>
+            <div><dt>{conversionConfirmation.action === 'deposit' ? 'You pay' : 'You receive'}</dt><dd>{formatEth(conversionConfirmation.ethWei)}</dd></div>
+            <div><dt>{conversionConfirmation.action === 'deposit' ? 'You receive' : 'You redeem'}</dt><dd>{formatCargo(conversionConfirmation.cargoWei)}</dd></div>
+            <div><dt>Fixed rate</dt><dd>1 ETH = 10,000 C.</dd></div>
+          </dl>
+          <p className={styles.conversionNotice}>Network gas is paid separately in ETH.</p>
+        </BrandedModal>
       )}
     </div>
   );
@@ -767,6 +802,24 @@ function mapLockedEscrow(result) {
     totalLocked: BigInt(result?.totalLocked ?? result?.[0] ?? 0n),
     activeRequestCount: Number(result?.activeRequestCount ?? result?.[1] ?? 0n),
   };
+}
+
+function formatInputAmount(value) {
+  return formatEther(value).replace(/\.0$/, '');
+}
+
+export function conversionFromCargo(value) {
+  const cargoWei = parseEther(String(value).trim());
+  if (cargoWei < 0n || cargoWei % 10_000n !== 0n) throw new Error('CARGO amount cannot be represented exactly in ETH wei.');
+  const ethWei = cargoWei / 10_000n;
+  return { cargoWei, ethWei, cargoText: formatInputAmount(cargoWei), ethText: formatInputAmount(ethWei) };
+}
+
+export function conversionFromEth(value) {
+  const ethWei = parseEther(String(value).trim());
+  if (ethWei < 0n) throw new Error('ETH amount cannot be negative.');
+  const cargoWei = ethWei * 10_000n;
+  return { cargoWei, ethWei, cargoText: formatInputAmount(cargoWei), ethText: formatInputAmount(ethWei) };
 }
 
 export function accountSnapshotsEqual(left, right) {

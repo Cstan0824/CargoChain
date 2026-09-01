@@ -37,8 +37,8 @@ contract('CargoToken', (accounts) => {
   }
 
   it('uses the agreed token metadata and conversion constants', async () => {
-    assert.equal(await token.name(), 'CargoChain CARGO');
-    assert.equal(await token.symbol(), 'CARGO');
+    assert.equal(await token.name(), 'CARGO');
+    assert.equal(await token.symbol(), 'C.');
     assert.equal((await token.decimals()).toString(), '18');
     assert.equal((await token.CARGO_PER_ETH()).toString(), cargoPerEth.toString());
     assert.equal((await token.REDEMPTION_UNIT()).toString(), cargoPerEth.toString());

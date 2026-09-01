@@ -27,6 +27,7 @@ Sepolia, QR recipient confirmation, auto-release dispute windows, and carrier re
 | Contract | Responsibility |
 |---|---|
 | `UserRegistry.sol` | Wallet registration and display-name lookup/update. |
+| `CargoToken.sol` | Fixed-rate ETH-backed CARGO conversion, transfers, and redemption. |
 | `DeliveryEscrow.sol` | Requests, proposals, accepted shipment state, proof state, milestone payment, refund accounting, stable checkpoint records, and tips. |
 | `LifecycleManager.sol` | Amendment/cancellation records, response deadlines, shared negotiation lock, and restricted calls to escrow finalisation hooks. |
 | `PaymentEvents.sol` | Payment-related events inherited by `DeliveryEscrow`. |
@@ -35,7 +36,7 @@ Sepolia, QR recipient confirmation, auto-release dispute windows, and carrier re
 Deployment order:
 
 ```text
-UserRegistry → LifecycleManager → DeliveryEscrow(registry, manager)
+CargoToken → UserRegistry → LifecycleManager(token) → DeliveryEscrow(registry, manager, token)
                                       ↓
               LifecycleManager.initializeDeliveryEscrow(escrow)
                                       ↓
@@ -55,7 +56,7 @@ Open → Funded → InProgress → Completed
 ```
 
 - `Open`: no accepted proposal; shipper may cancel without escrow.
-- `Funded`: shipper selected a proposal and locked exact ETH.
+- `Funded`: shipper selected a proposal and locked CARGO compensation plus the required operational reserve.
 - `InProgress`: a carrier has submitted milestone proof or work is ongoing.
 - `Completed`: every checkpoint was paid.
 - `Refunded`: remaining escrow was returned after deadline expiry or mutual cancellation.
@@ -83,8 +84,8 @@ The shipper can reject a submitted proof, returning it to `Rejected` for carrier
 - One request may have only one pending amendment or cancellation.
 - A shipper can directly extend the deadline when no negotiation exists.
 - Either participant may request a mutually approved amendment before the final shipment hour.
-- A carrier cannot shorten a deadline. A shipper shortening a deadline requires at least `0.01 ETH` new funding and carrier acceptance.
-- New ETH may top up unpaid existing checkpoints or fully fund newly inserted checkpoints.
+- A carrier cannot shorten a deadline. A shipper shortening a deadline requires at least `0.01 CARGO` new funding and carrier acceptance.
+- New CARGO may top up unpaid existing checkpoints or fully fund newly inserted checkpoints.
 - Shipper-requested funding is staged in `LifecycleManager`; rejection, withdrawal, and expiry refund it.
 - Carrier-requested funding is supplied by the shipper at acceptance.
 - Amendment acceptance checks the milestone-state version captured at request time; it fails if proof progress changed in the meantime.
@@ -149,7 +150,7 @@ The conversation identity includes chain ID, contract address, request ID, and c
 | `/shipments/:id/propose` | Carrier proposal editor, active proposal, and history. |
 | `/track/:id` | Tracking, proof, payments, amendments, cancellation, and history. |
 | `/messages` | Request-scoped private conversations and activity timeline. |
-| `/profile` | Connected wallet profile, payment/transaction presentation, and its own verified carrier feedback aggregates. |
+| `/account` | Connected wallet identity, CARGO conversion/redemption, payment history, and verified carrier feedback aggregates. |
 
 ## 8. Local run and verification
 

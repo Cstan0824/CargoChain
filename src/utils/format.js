@@ -30,10 +30,11 @@ export function formatEth(wei) {
   return `${negative ? '-' : ''}${numStr} ETH`;
 }
 
-// formatCargo(baseUnits) — ERC-20 base units -> "1.234 CARGO".
+// formatCargo(baseUnits) — ERC-20 base units -> "1.234 C.".
+// CARGO is the currency name; C. is its on-chain symbol. ETH keeps its own format.
 export function formatCargo(baseUnits) {
   const value = formatEth(baseUnits);
-  return value.endsWith(' ETH') ? `${value.slice(0, -4)} CARGO` : value;
+  return `${value.slice(0, -4)} C.`;
 }
 
 // shortAddress(addr) — "0x1234…abcd". Validates checksum if possible.

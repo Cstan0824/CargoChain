@@ -25,8 +25,8 @@
 
 **Owned areas:** escrow accounting and payment events in `DeliveryEscrow.sol` / `PaymentEvents.sol`; payment history UI.
 
-- `approveAndFund` locks the exact proposal amount.
-- `verifyMilestone(true)` releases the checkpoint's original payout plus approved amendment top-up, if any.
+- `approveAndFundWithAllowance` locks the proposal compensation plus a refundable operational reserve.
+- `verifyMilestone` releases the checkpoint's original CARGO payout plus approved amendment top-up, if any, after confirming the reviewed proof submission number.
 - `refundRemaining` returns only unpaid escrow after the allowed deadline/cancellation path.
 - Accepted mutual cancellation preserves released payments and refunds the balance only.
 - `tipCarrier` is a separate one-time direct payment after completion and does not alter escrow totals.
@@ -53,7 +53,7 @@ Current primary routes:
 /shipments/:id/propose    carrier proposal editor/history
 /track/:id                tracking, proof, payment, amendment, cancellation
 /messages                 private request conversations
-/profile                  wallet profile and history
+/account                  wallet identity, CARGO conversion, reputation, and history
 ```
 
 Frontend reads use the direct Ganache provider. Wallet writes use the shared transaction executor, which prepares transactions against Ganache and leaves MetaMask responsible for signing/broadcasting.

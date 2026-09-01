@@ -64,7 +64,7 @@ export function DonutChart({
         })}
       </svg>
       <div className={styles.center}>
-        <div className={styles.total}>{totalValue.toFixed(2)} CARGO</div>
+        <div className={styles.total}>{totalValue.toFixed(2)} C.</div>
         <div className={styles.label}>{centerLabel}</div>
       </div>
     </div>

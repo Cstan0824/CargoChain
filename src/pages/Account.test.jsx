@@ -29,7 +29,7 @@ vi.mock('../utils/paymentHistory.js', () => ({
   PAYMENT_ACTION_TONE: {},
   shortTransactionHash: (hash) => hash,
 }));
-import { Account, accountSnapshotsEqual } from './Account.jsx';
+import { Account, accountSnapshotsEqual, conversionFromCargo, conversionFromEth } from './Account.jsx';
 
 describe('Account', () => {
   beforeEach(() => {
@@ -48,8 +48,9 @@ describe('Account', () => {
     render(<Account />);
 
     expect(screen.getByRole('heading', { name: 'Account' })).toBeTruthy();
-    expect(screen.getByText('A registered shipper')).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Available balance' })).toBeTruthy();
+    expect(screen.getAllByText('A registered shipper').length).toBeGreaterThan(0);
+    expect(screen.getByRole('heading', { name: 'CARGO Balance' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'ETH Balance' })).toBeTruthy();
     expect(screen.getByText('Carrier rating')).toBeTruthy();
     expect(screen.getByText('0 verified ratings')).toBeTruthy();
     expect(screen.queryByText('Carrier reputation')).toBeNull();
@@ -62,10 +63,9 @@ describe('Account', () => {
       expect(screen.getByRole('columnheader', { name: label })).toBeTruthy();
     });
     expect(screen.queryByRole('button', { name: /recent activity/i })).toBeNull();
-    expect(screen.getByText('Available balance')).toBeTruthy();
     expect(screen.getAllByText('0 ETH')).toHaveLength(1);
-    expect(screen.getAllByText('0 CARGO')).toHaveLength(3);
-    expect(screen.getByRole('list', { name: 'Account roles' }).textContent).toBe('ShipperCarrier');
+    expect(screen.getAllByText('0 C.')).toHaveLength(3);
+    expect(screen.queryByRole('list', { name: 'Account roles' })).toBeNull();
     expect(screen.queryByText('Profile setup')).toBeNull();
     expect(screen.queryByText('Registered')).toBeNull();
   });
@@ -146,7 +146,7 @@ describe('Account', () => {
     render(<Account />);
 
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Carrier rating unavailable.'));
-    expect(screen.getByRole('heading', { name: 'Available balance' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'CARGO Balance' })).toBeTruthy();
     expect(screen.getByText('No on-chain activity yet')).toBeTruthy();
   });
 
@@ -204,5 +204,16 @@ describe('Account', () => {
     };
     expect(accountSnapshotsEqual(snapshot, { ...snapshot, balance: 10n })).toBe(true);
     expect(accountSnapshotsEqual(snapshot, { ...snapshot, balance: 11n })).toBe(false);
+  });
+});
+
+describe('fixed-rate Account conversions', () => {
+  it('calculates either editable side without floating-point arithmetic', () => {
+    expect(conversionFromCargo('5')).toMatchObject({ cargoText: '5', ethText: '0.0005' });
+    expect(conversionFromEth('0.02')).toMatchObject({ cargoText: '200', ethText: '0.02' });
+  });
+
+  it('rejects CARGO dust that cannot redeem to a whole ETH wei', () => {
+    expect(() => conversionFromCargo('0.000000000000000001')).toThrow(/exactly/);
   });
 });

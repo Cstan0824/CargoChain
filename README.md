@@ -11,18 +11,20 @@
 
 ## What is CargoChain?
 
+**CargoChain** is the platform. Its ETH-backed payment currency is **CARGO**, with the on-chain symbol **`C.`**. The interface displays amounts such as `500 C.`. The fixed conversion rate remains `1 ETH = 10,000 C.`; network gas is paid in ETH.
+
 A milestone-based delivery marketplace where:
 
 1. A **shipper** posts a goods request with cargo details, a route, payment amount, and deadline.
-2. Carriers submit their own milestone proposals. The shipper reviews the proposals, selects one, and locks the exact ETH amount in escrow; remaining active proposals are rejected on-chain.
+2. Carriers submit their own milestone proposals. The shipper reviews the proposals, selects one, and locks the CARGO compensation plus a refundable carrier gas reserve; remaining active proposals become effectively rejected on-chain.
 3. The accepted carrier uploads a **photo-proof** for each checkpoint. The browser validates a JPEG/PNG/WebP up to 2 MiB, hashes and encrypts it with AES-256-GCM, uploads only ciphertext through a short-lived Pinata signed URL, and records a canonical `ipfs://` reference and remark on-chain.
 4. The **shipper verifies** each proof in the web UI, releasing that checkpoint's agreed escrow allocation to the carrier.
-5. After acceptance, either party can negotiate an amendment: extend or shorten a deadline under the applicable rules, add ETH to unpaid checkpoints, or insert a newly funded checkpoint without rewriting completed work.
+5. After acceptance, either party can negotiate an amendment: extend or shorten a deadline under the applicable rules, add CARGO to unpaid checkpoints, or insert a newly funded checkpoint without rewriting completed work.
 6. Either participant can request mutual cancellation. If the other accepts, completed payouts remain with the carrier and only unpaid escrow returns to the shipper. Overdue requests retain a separate refund path.
 7. After completion, the shipper may send one optional, one-time tip directly to the carrier.
 8. The shipper may publish one permanent 1-5 star rating with up to three predefined feedback tags. Carrier profiles combine those verified ratings with aggregate completion and timing outcomes.
 
-CargoChain also includes account-based access: one account can enable Shipper, Carrier, or both roles, then link one or more MetaMask wallets for on-chain signing. Wallet-backed display names and request-scoped private chat remain available. Chat messages are private, off-chain Supabase data; the accompanying delivery timeline is reconstructed from relevant, verified on-chain events.
+The connected MetaMask wallet is the CargoChain identity and can act as shipper or carrier according to its relationship to each request. Wallet-backed display names and request-scoped private chat remain available. Chat messages are private, off-chain Supabase data; the accompanying delivery timeline is reconstructed from relevant on-chain events.
 
 This is the **assignment version** — built for clarity, demo, and grading — not a production logistics platform.
 
@@ -55,7 +57,7 @@ This is the **assignment version** — built for clarity, demo, and grading — 
 - A registered shipper creates an open request with cargo items, pickup/destination, advertised payment, and deadline.
 - Each registered carrier may keep one active proposal per request, revoke it, and submit a revised plan while the request remains open.
 - The shipper can compare active proposals, sort them by date and checkpoint count, inspect details, optionally reject with a note, or approve exactly one plan.
-- Approval locks the advertised ETH in `DeliveryEscrow`, assigns the carrier, and automatically rejects competing active proposals with an auditable reason.
+- Approval locks the advertised CARGO and contract-calculated operational reserve in `DeliveryEscrow`, assigns the carrier, and makes competing active proposals effectively rejected with an auditable reason.
 
 ### During delivery
 
@@ -71,7 +73,7 @@ This is the **assignment version** — built for clarity, demo, and grading — 
 - A request can have only one pending amendment or cancellation at a time. Resolved negotiations preserve a history of the requester, notes, before/after values, and outcome.
 - Once funded, cancellation is mutual: either participant requests it, the other accepts/rejects, and acceptance returns only remaining unpaid escrow to the shipper. It cannot settle while a proof is awaiting verification.
 - After all checkpoints are paid, the shipper can send one optional, separate tip directly to the carrier.
-- A completed request can receive one immutable shipper rating. Carrier reputation opens in a read-only proposal/track modal, while `/profile` shows the connected wallet's own aggregate delivery outcomes.
+- A completed request can receive one immutable shipper rating. Carrier reputation opens in a read-only proposal/track modal, while `/account` shows the connected wallet's own aggregate delivery outcomes.
 
 ### Identity and chat
 
@@ -118,7 +120,7 @@ CargoChain/
 
 | Tool | Version | Why |
 |---|---|---|
-| **Node.js** | 18.x or 20.x LTS | Truffle + ethers + Vite + Express |
+| **Node.js** | 22.x LTS (`.nvmrc`) | Truffle + ethers + Vite + Express |
 | **npm** | 9+ (bundled with Node) | package management |
 | **Git** | 2.30+ | version control |
 | **Ganache** | 7.x | local Ethereum chain |
@@ -311,7 +313,7 @@ That command starts deterministic Ganache with a local `ganache-data/` database,
 ```
 RPC Listening on 127.0.0.1:7545
 [cargochain-api] listening on http://127.0.0.1:3000
-VITE v5.4.21 ready
+VITE ready
 ➜  Local: http://127.0.0.1:5174/
 ```
 
@@ -394,7 +396,7 @@ npm run test:frontend # Vitest frontend suite
 npm run build         # production bundle
 ```
 
-The latest full local verification completed with **72 passing contract tests** and **48 passing frontend tests**.
+The latest automated verification completed with **93 passing contract tests**, **180 passing frontend tests** plus one opt-in Ganache integration test, and **18 passing server tests**.
 
 ### `docs/` — Documentation
 
@@ -472,7 +474,7 @@ The demo runs end-to-end on Ganache + a fresh `npm run migrate`:
 - PRD: [`docs/PRD.md`](docs/PRD.md)
 - Module breakdown: [`docs/Module-Split.md`](docs/Module-Split.md)
 - Contract API: [`API_v1.md`](API_v1.md)
-- Account and asset plan: [`docs/Account-Based-Access-and-Asset-Plan.md`](docs/Account-Based-Access-and-Asset-Plan.md)
+- CARGO and gas allocation: [`docs/Cargo-Token-and-Gas-Model.md`](docs/Cargo-Token-and-Gas-Model.md)
 - Coding-agent rules: [`AGENTS.md`](AGENTS.md)
 
 ---

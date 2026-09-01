@@ -15,15 +15,11 @@ export function ConversationHeader({ conversation, presentation, onBack, onViewS
           </button>
         )}
         <div className={styles.copy}>
-          <h1>{presentation?.title || `Shipment#${conversation.request_id}`}</h1>
-          <p>{presentation?.route || 'Loading route…'}</p>
+          <h1>{presentation?.title || 'Participant'} <span className={styles.role}>· {presentation?.otherRole || 'Participant'}</span></h1>
+          <p>{presentation?.shipmentLabel || `Shipment #${conversation.request_id}`} · {presentation?.route || 'Loading route…'}</p>
         </div>
       </div>
       <div className={styles.actions}>
-        <div className={styles.participant}>
-          <span>{presentation?.workLabel || 'Shipment work'}</span>
-          <strong title={presentation?.otherWallet}>{presentation?.otherName || 'Participant'}</strong>
-        </div>
         {onViewShipment && (
           <button type="button" className={styles.viewShipment} onClick={onViewShipment}>
             View shipment

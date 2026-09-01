@@ -5,9 +5,11 @@
 | File | Coverage |
 |---|---|
 | `userRegistry.test.js` | Name registration/update, trimming, byte limit, duplicate and unregistered behavior. |
+| `cargoToken.test.js` | Fixed conversion, backing reserve, transfers, redemption divisibility, and ownerless reserve safety. |
 | `deliveryEscrow.test.js` | Requests, proposals, exact funding, proof submission/verification, payout/refund protection, registration enforcement, and completion tips. |
 | `lifecycleManager.test.js` | Manager initialisation, cancellation, partial settlement, response expiry, amendments, staged-fund refunds, stable checkpoint ordering, and authorization. |
 | `reputationRegistry.test.js` | Completed-request rating eligibility, immutable ratings, score/tag validation, and carrier aggregates. |
+| `cargoIntegration.test.js` | EIP-170 size, stale-proof guard, operational coverage, refund invariants, response-budget settlement, and worst-case gas benchmarks. |
 
 Run against Ganache:
 
@@ -36,4 +38,4 @@ npm run test:frontend
 npm run build
 ```
 
-The latest complete local run recorded 72 passing contract tests and 40 passing frontend tests.
+The latest complete local run recorded 93 passing contract tests, 180 passing frontend tests with one opt-in Ganache integration test skipped by default, and 18 passing server tests. Set `CARGO_TEST_RPC` only to a disposable Ganache RPC to run the fresh-wallet frontend integration test.

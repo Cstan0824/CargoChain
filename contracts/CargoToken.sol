@@ -4,7 +4,7 @@ pragma solidity ^0.8.20;
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-/// @title CargoChain CARGO
+/// @title CARGO (C.)
 /// @notice A fixed-rate, ETH-backed settlement token for CargoChain.
 ///
 /// The contract has no owner and no administrative mint or withdrawal path.
@@ -26,7 +26,7 @@ contract CargoToken is ERC20, ReentrancyGuard {
         uint256 ethReturned
     );
 
-    constructor() ERC20("CargoChain CARGO", "CARGO") {}
+    constructor() ERC20("CARGO", "C.") {}
 
     /// @notice Deposit ETH and mint CARGO at the fixed deployment rate.
     function deposit() external payable nonReentrant {

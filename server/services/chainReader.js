@@ -207,7 +207,7 @@ async function getDeliveryRequest(requestId) {
   try {
     req = await contract.getRequest(BigInt(requestId));
   } catch (err) {
-    if (err.reason === 'request does not exist' || err.message?.includes('request does not exist')) {
+    if (err.revert?.name === 'RequestDoesNotExist' || err.reason === 'request does not exist' || err.message?.includes('request does not exist')) {
       throw new Error(`Delivery request #${requestId} does not exist on-chain`);
     }
     throw err;
@@ -246,7 +246,7 @@ async function getProposals(requestId) {
   try {
     rawProposals = await contract.getProposals(BigInt(requestId));
   } catch (err) {
-    if (err.reason === 'request does not exist' || err.message?.includes('request does not exist')) {
+    if (err.revert?.name === 'RequestDoesNotExist' || err.reason === 'request does not exist' || err.message?.includes('request does not exist')) {
       return [];
     }
     throw err;
@@ -277,7 +277,7 @@ async function getMilestone(requestId, milestoneId) {
   try {
     rawMilestone = await contract.getMilestone(BigInt(requestId), BigInt(milestoneId));
   } catch (err) {
-    if (err.reason === 'milestone does not exist' || err.message?.includes('milestone does not exist')) {
+    if (err.revert?.name === 'MilestoneDoesNotExist' || err.reason === 'milestone does not exist' || err.message?.includes('milestone does not exist')) {
       const error = new Error(`Milestone #${milestoneId} does not exist for delivery request #${requestId}`);
       error.status = 404;
       throw error;

@@ -20,7 +20,7 @@ function compatibleContracts(overrides = {}) {
     },
     cargoToken: {
       target: '0x9a9f1e9d5b7a5a9d8f7f2f1c4a6e8b0c2d4f6a8b',
-      name: vi.fn().mockResolvedValue('CargoChain CARGO'),
+      name: vi.fn().mockResolvedValue('CARGO'),
       symbol: vi.fn().mockResolvedValue('CARGO'),
       decimals: vi.fn().mockResolvedValue(18n),
     },

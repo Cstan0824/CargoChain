@@ -19,23 +19,25 @@ describe('buildConversationPresentation', () => {
       shipperName: 'Aina',
       carrierName: 'Luna Logistics',
     })).toMatchObject({
-      title: 'Luna Logistics#12',
-      workLabel: 'Shipper work',
+      title: 'Luna Logistics',
+      shipmentLabel: 'Shipment #12',
+      workLabel: 'Carrier',
       route: 'Makassar → Jakarta',
       preview: 'Proof is ready for review.',
       otherName: 'Luna Logistics',
     });
   });
 
-  it('derives Carrier work for the carrier even when one wallet can hold both app roles', () => {
+  it('labels the shipper as the counterpart when the viewer is the carrier', () => {
     expect(buildConversationPresentation({
       conversation,
       account: carrier,
       shipperName: 'Aina',
       carrierName: 'Luna Logistics',
     })).toMatchObject({
-      title: 'Aina#12',
-      workLabel: 'Carrier work',
+      title: 'Aina',
+      shipmentLabel: 'Shipment #12',
+      workLabel: 'Shipper',
     });
   });
 
@@ -44,7 +46,7 @@ describe('buildConversationPresentation', () => {
       conversation: { ...conversation, latest_message_preview: '' },
       account: shipper,
     });
-    expect(view.title).toBe('0xbbbb…bbbb#12');
+    expect(view.title).toBe('0xbbbb…bbbb');
     expect(view.preview).toBe('Shipment activity');
   });
 });

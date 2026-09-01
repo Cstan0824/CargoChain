@@ -10,7 +10,7 @@ The implementation was delivered in these phases:
 - a milestone-state version snapshot for stale amendment detection;
 - detection of submitted proof awaiting shipper verification;
 - reusable participant, response-deadline, and active-shipment checks; and
-- a minimum additional-funding constant of `0.01 ETH`.
+- a minimum additional-funding constant of `0.01 CARGO`.
 
 `LifecycleManager` owns the negotiation lock and future agreement-change records. `DeliveryEscrow` remains the authoritative source for request parties, accepted milestones, milestone progress, original escrow, payouts, and refunds. The manager reads milestone-state versions and pending-proof status from the escrow instead of copying shipment data.
 
@@ -21,7 +21,7 @@ Phase 3 adds one optional completion tip. After the final milestone is paid, the
 Phase 4 implements mutual cancellation end to end. Either participant can submit the required note and response deadline; the counterparty accepts or rejects; the requester may withdraw; unanswered requests can expire. Acceptance calls a manager-only escrow hook that preserves released milestone payments and refunds only unpaid escrow. The tracking page exposes the decision and its on-chain history.
 
 Phase 5 implements amendments end to end. The shipper can extend a deadline directly;
-either party can request a mutually approved change; new ETH can top up unpaid existing
+either party can request a mutually approved change; new CARGO can top up unpaid existing
 milestones or fully fund newly inserted milestones; staged shipper funding is refunded
 when a request is rejected, withdrawn, or expires. The tracking page exposes the active
 comparison, decisions, full before/after confirmation, payment allocations, and detailed
@@ -54,17 +54,17 @@ Rules:
 - Deadline changes are opt-in in the amendment editor. When enabled, the editor defaults
   a proposed extension to 24 hours after the current shipment deadline. Any deadline
   change must be at least 15 minutes.
-- The shipper may extend the deadline without carrier confirmation when no other agreement change is pending. Shortening the deadline requires carrier acceptance and at least `0.01 ETH` of additional funding.
+- The shipper may extend the deadline without carrier confirmation when no other agreement change is pending. Shortening the deadline requires carrier acceptance and at least `0.01 CARGO` of additional funding.
 - A carrier amendment may request a deadline extension, additional funding for existing unpaid milestones, and newly funded milestones.
 - A new milestone may be inserted before a `PendingProof` or `Rejected` checkpoint, or
   appended as the new final checkpoint. Its request-level milestone ID is newly allocated;
   the amendment changes only the separate execution-order list. Existing milestone names,
   original payout allocations, submitted proof, completed progress, released payments, and
   event references remain immutable so historical records retain their original meaning.
-- Every new milestone must be funded entirely with newly added ETH.
+- Every new milestone must be funded entirely with newly added CARGO plus its required proof reserve.
 - Additional funding for existing milestones is added on top of their original payouts; no original payout may be reduced or redistributed.
 - The requester defines how new funds are allocated. Allocations must equal the newly staged amount exactly.
-- When the shipper creates a funded amendment, the additional ETH is staged immediately. Rejection, withdrawal, or expiry refunds that staged amount.
+- When the shipper creates a funded amendment, the additional CARGO and relevant reserves are staged immediately. Rejection, withdrawal, or expiry refunds unused amounts to their recorded funders.
 - Amendment acceptance revalidates the milestone-state version captured when the amendment was opened. If proof submission or verification changed progress meanwhile, the stale amendment cannot be accepted.
 - An amendment rejection note is optional.
 - Before submission, the tracking UI presents the complete current and proposed agreements

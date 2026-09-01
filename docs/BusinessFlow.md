@@ -28,7 +28,7 @@ Carriers submit, revoke, or resubmit proposals
         ↓
 Shipper reviews active plans and history
         ↓
-Shipper approves exactly one plan and funds exact ETH
+Shipper approves exactly one plan and funds CARGO compensation plus the proof reserve
         ↓
 Accepted carrier starts delivery; other active plans are rejected
 ```
@@ -37,7 +37,7 @@ Accepted carrier starts delivery; other active plans are rejected
 - Each carrier can retain at most one active proposal for that request.
 - The shipper may manually reject a plan with an optional note.
 - Selecting one proposal automatically rejects all competing active plans with an explicit recorded reason.
-- The accepted plan produces the initial checkpoint records and locks the advertised ETH.
+- The accepted plan produces the initial checkpoint records and locks the advertised CARGO plus its refundable operational reserve.
 
 ## 4. Proof and payment flow
 
@@ -51,7 +51,7 @@ Express authorizes → Pinata signed URL → public ciphertext upload
 Carrier submits canonical `ipfs://` proof URI + remark on-chain
         ↓
 Shipper verifies or rejects
-        ├─ verify → checkpoint paid → ETH to carrier
+        ├─ verify → checkpoint paid → CARGO to carrier
         └─ reject → carrier may resubmit proof
 ```
 
@@ -97,12 +97,12 @@ Supported changes:
 
 - Direct shipper deadline extension when no negotiation is pending.
 - Mutually approved deadline changes. Carrier cannot shorten; shipper shortening requires new funding and carrier approval.
-- Additional ETH to unpaid existing checkpoints only.
+- Additional CARGO to unpaid existing checkpoints only.
 - Newly funded checkpoints inserted before an eligible unpaid checkpoint or appended as final.
 
 Invariant: original payouts, paid work, proof references, and checkpoint IDs are not rewritten. New checkpoints receive new immutable IDs, while a separate execution-order list controls their sequence.
 
-If the shipper stages ETH with an amendment, rejection, withdrawal, or expiry refunds the staged amount. Carrier-requested funding is supplied by the shipper only when accepting.
+If the shipper stages CARGO with an amendment, rejection, withdrawal, or expiry refunds the staged compensation, operational reserve, and unused response allowance to their respective funders. Carrier-requested funding is supplied by the shipper only when accepting.
 
 ## 7. Completion and tip
 
@@ -117,7 +117,7 @@ After the final checkpoint is paid, the shipper may make one optional tip paymen
 
 ## 9. Carrier reputation
 
-After a request reaches `Completed`, its shipper can submit one permanent 1-5 rating and up to three predefined feedback tags for the accepted carrier. A read-only reputation modal combines these verified ratings with aggregate completion, timing, expiry, and accepted-cancellation outcomes during proposal review, and `/profile` shows the connected wallet's own aggregates. It does not reveal route, cargo, proof, escrow, request ID, or chat details.
+After a request reaches `Completed`, its shipper can submit one permanent 1-5 rating and up to three predefined feedback tags for the accepted carrier. A read-only reputation modal combines these verified ratings with aggregate completion, timing, expiry, and accepted-cancellation outcomes during proposal review, and `/account` shows the connected wallet's own aggregates. It does not reveal route, cargo, proof, escrow, request ID, or chat details.
 
 ## 10. Out of scope
 

@@ -347,7 +347,7 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: var(--s-4);
-  align-items: stretch;
+  align-items: start;
 }
 
 @media (max-width: 560px) {
@@ -358,17 +358,6 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-}
-
-/* Ensure reward box and deadline field stretch to same height */
-.splitHalf .rewardBox {
-  flex: 1;
-}
-.splitHalf .field {
-  flex: 1;
-}
-.splitHalf .inputWrap {
-  flex: 1;
 }
 
 /* ─── Field components ────────────────────────────────────────── */
@@ -511,6 +500,27 @@
   text-transform: uppercase;
   flex-shrink: 0;
 }
+
+.paymentBalance {
+  display: block;
+  margin-top: var(--s-2);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+
+.shortfallNote { color: var(--danger); font-weight: var(--fw-semibold); }
+.inlineTopUpButton { margin-left: var(--s-2); padding: 0; border: 0; color: var(--primary); background: transparent; font: inherit; font-weight: var(--fw-semibold); cursor: pointer; text-decoration: none; }
+.inlineTopUpButton:hover { color: var(--primary-hover); }
+.topUpForm { display: grid; gap: var(--s-2); }
+.topUpInput { display: flex; align-items: center; min-height: 44px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-surface); }
+.topUpInput:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+.topUpInput input { width: 100%; min-height: 42px; padding: 0 var(--s-3); border: 0; outline: 0; color: var(--text-primary); background: transparent; font: inherit; font-variant-numeric: tabular-nums; }
+.topUpInput span { padding-right: var(--s-3); color: var(--text-secondary); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
+.topUpExchange { display: grid; width: 32px; height: 28px; place-items: center; justify-self: center; color: var(--text-muted); font-size: var(--fs-lg); }
+.topUpError { color: var(--danger); font-size: var(--fs-xs); line-height: 1.45; }
+.topUpRate { margin: var(--s-4) 0 0; color: var(--text-secondary); font-size: var(--fs-sm); line-height: 1.45; text-align: right; }
 
 /* ─── Submit hint banner (kept for legacy; hidden via JSX removal) ── */
 .submitHint { display: none; }

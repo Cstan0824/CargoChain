@@ -1,3 +1,4 @@
+const decodeEscrowError = require('./helpers/escrowError');
 const UserRegistry = artifacts.require('UserRegistry');
 const DeliveryEscrow = artifacts.require('DeliveryEscrow');
 const CargoToken = artifacts.require('CargoToken');
@@ -81,9 +82,9 @@ contract('DeliveryEscrow', (accounts) => {
   async function completeRequest(escrow) {
     await createFundedRequest(escrow);
     await escrow.submitProof(1, 0, ['pickup'], 'Picked up', { from: carrier });
-    await escrow.verifyMilestone(1, 0, true, '', { from: shipper });
+    await escrow.verifyMilestone(1, 0, true, '', 1, { from: shipper });
     await escrow.submitProof(1, 1, ['delivery'], 'Delivered', { from: carrier });
-    await escrow.verifyMilestone(1, 1, true, '', { from: shipper });
+    await escrow.verifyMilestone(1, 1, true, '', 1, { from: shipper });
   }
 
   async function expectRevert(promise, reason) {
@@ -92,7 +93,7 @@ contract('DeliveryEscrow', (accounts) => {
       assert.fail('Expected revert not received');
     } catch (error) {
       assert(
-        error.message.includes(reason),
+        decodeEscrowError(error).includes(reason),
         `Expected "${reason}" but got "${error.message}"`,
       );
     }
@@ -389,7 +390,7 @@ contract('DeliveryEscrow', (accounts) => {
     await createFundedRequest(escrow);
 
     await escrow.submitProof(1, 0, ['0xhash'], 'Picked up', { from: carrier });
-    const receipt = await escrow.verifyMilestone(1, 0, true, '', { from: shipper });
+    const receipt = await escrow.verifyMilestone(1, 0, true, '', 1, { from: shipper });
 
     const request = await escrow.getRequest(1);
     const milestone = await escrow.getMilestone(1, 0);
@@ -411,7 +412,7 @@ contract('DeliveryEscrow', (accounts) => {
     await createFundedRequest(escrow);
 
     await escrow.submitProof(1, 0, ['bad-photo'], 'Unclear', { from: carrier });
-    await escrow.verifyMilestone(1, 0, false, 'Photo is unclear', { from: shipper });
+    await escrow.verifyMilestone(1, 0, false, 'Photo is unclear', 1, { from: shipper });
 
     let milestone = await escrow.getMilestone(1, 0);
     assert.equal(Number(milestone.status), 4); // Rejected
@@ -467,7 +468,7 @@ contract('DeliveryEscrow', (accounts) => {
     await createFundedRequest(escrow);
 
     await escrow.submitProof(1, 0, ['bad-proof'], 'Unclear', { from: carrier });
-    await escrow.verifyMilestone(1, 0, false, 'Please retake the photo', { from: shipper });
+    await escrow.verifyMilestone(1, 0, false, 'Please retake the photo', 1, { from: shipper });
     await escrow.submitProof(1, 0, ['replacement'], 'Still unclear', { from: carrier });
     await escrow.withdrawProof(1, 0, { from: carrier });
 
@@ -498,7 +499,7 @@ contract('DeliveryEscrow', (accounts) => {
     assert.equal(await escrow.hasPendingMilestoneProof(1), true);
     assert.equal((await escrow.getMilestoneStateVersion(1)).toString(), '2');
 
-    await escrow.verifyMilestone(1, 0, false, 'Please retake the photo', { from: shipper });
+    await escrow.verifyMilestone(1, 0, false, 'Please retake the photo', 1, { from: shipper });
 
     assert.equal(await escrow.hasPendingMilestoneProof(1), false);
     assert.equal((await escrow.getMilestoneStateVersion(1)).toString(), '3');
@@ -515,7 +516,7 @@ contract('DeliveryEscrow', (accounts) => {
     const afterFirst = await escrow.getPaymentSummary(1);
     assert(BigInt(afterFirst.operationalSpent) > 0n);
 
-    await escrow.verifyMilestone(1, 0, false, 'Retake the photo', { from: shipper });
+    await escrow.verifyMilestone(1, 0, false, 'Retake the photo', 1, { from: shipper });
     await escrow.submitProof(1, 0, ['proof://pickup-replacement'], 'Retaken', { from: carrier });
     const afterReplacement = await escrow.getPaymentSummary(1);
     assert.equal(afterReplacement.operationalSpent.toString(), afterFirst.operationalSpent.toString());
@@ -527,10 +528,10 @@ contract('DeliveryEscrow', (accounts) => {
     await createFundedRequest(escrow);
 
     await escrow.submitProof(1, 0, ['0xhash'], 'Picked up', { from: carrier });
-    await escrow.verifyMilestone(1, 0, true, '', { from: shipper });
+    await escrow.verifyMilestone(1, 0, true, '', 1, { from: shipper });
 
     await expectRevert(
-      escrow.verifyMilestone(1, 0, true, '', { from: shipper }),
+      escrow.verifyMilestone(1, 0, true, '', 1, { from: shipper }),
       'milestone is not submitted',
     );
   });
@@ -540,7 +541,7 @@ contract('DeliveryEscrow', (accounts) => {
     await createFundedRequest(escrow);
 
     await escrow.submitProof(1, 0, ['0xhash'], 'Picked up', { from: carrier });
-    await escrow.verifyMilestone(1, 0, true, '', { from: shipper });
+    await escrow.verifyMilestone(1, 0, true, '', 1, { from: shipper });
 
     const contractBefore = BigInt(await cargoToken.balanceOf(escrow.address));
     const summaryBefore = await escrow.getPaymentSummary(1);
@@ -731,9 +732,9 @@ contract('DeliveryEscrow', (accounts) => {
     );
 
     await escrow.submitProof(1, 0, ['pickup'], 'Picked up', { from: carrier });
-    await escrow.verifyMilestone(1, 0, true, '', { from: shipper });
+    await escrow.verifyMilestone(1, 0, true, '', 1, { from: shipper });
     await escrow.submitProof(1, 1, ['delivery'], 'Delivered', { from: carrier });
-    await escrow.verifyMilestone(1, 1, true, '', { from: shipper });
+    await escrow.verifyMilestone(1, 1, true, '', 1, { from: shipper });
 
     await expectRevert(
       escrow.tipCarrier(1, tipAmount, { from: carrier }),
@@ -781,7 +782,7 @@ contract('DeliveryEscrow', (accounts) => {
       'caller is not registered',
     );
     await expectRevert(
-      escrow.verifyMilestone(1, 0, true, '', { from: unregistered }),
+      escrow.verifyMilestone(1, 0, true, '', 1, { from: unregistered }),
       'caller is not registered',
     );
     await expectRevert(
@@ -837,7 +838,7 @@ contract('DeliveryEscrow', (accounts) => {
     assert.equal(locked.activeRequestCount.toString(), '2');
 
     await escrow.submitProof(1, 0, ['pickup'], 'Picked up', { from: carrier });
-    await escrow.verifyMilestone(1, 0, true, '', { from: shipper });
+    await escrow.verifyMilestone(1, 0, true, '', 1, { from: shipper });
 
     locked = await escrow.getLockedEscrow(shipper);
     const afterFirstPayment = await escrow.getPaymentSummary(1);

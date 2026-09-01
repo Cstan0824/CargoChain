@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "dev:all": "node scripts/dev-launcher.js",
-    "chain": "ganache --wallet.deterministic --server.host 127.0.0.1 --server.port 7545 --chain.chainId 1337 --chain.networkId 1337 --chain.allowUnlimitedContractSize true",
+    "chain": "ganache --wallet.deterministic --server.host 127.0.0.1 --server.port 7545 --chain.chainId 1337 --chain.networkId 1337",
     "build": "vite build",
     "preview": "vite preview --port 8080",
     "compile": "truffle compile",

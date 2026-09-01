@@ -182,7 +182,9 @@ export async function pinEncryptedProof(file, {
   token,
   fetchImpl,
   signal,
+  onStage,
 } = {}) {
+  onStage?.('encrypting');
   const encrypted = await encryptProofFile(file);
   const metadata = {
     requestId: String(requestId),
@@ -195,6 +197,7 @@ export async function pinEncryptedProof(file, {
     plaintextSize: encrypted.plaintextSize,
     encryptionAlgorithm: encrypted.algorithm,
   };
+  onStage?.('uploading');
   const session = await createProofUploadSession(metadata, { token, fetchImpl, signal });
   if (!session?.sessionId || !session?.uploadUrl) {
     throw new ProofApiError('Proof API returned an incomplete upload session.', 502, 'invalid_upload_session', session);
@@ -204,6 +207,7 @@ export async function pinEncryptedProof(file, {
     fetchImpl,
     signal,
   });
+  onStage?.('finalizing');
   const finalized = await finalizeProof({
     ...metadata,
     sessionId: session.sessionId,

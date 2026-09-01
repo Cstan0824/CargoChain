@@ -1,3 +1,4 @@
+const decodeEscrowError = require('./helpers/escrowError');
 const UserRegistry = artifacts.require('UserRegistry');
 const DeliveryEscrow = artifacts.require('DeliveryEscrow');
 const LifecycleManager = artifacts.require('LifecycleManager');
@@ -55,7 +56,7 @@ contract('ReputationRegistry', (accounts) => {
   async function completeRequest() {
     await createFundedRequest();
     await escrow.submitProof(1, 0, ['proof://delivery'], 'Delivered', { from: carrier });
-    return escrow.verifyMilestone(1, 0, true, '', { from: shipper });
+    return escrow.verifyMilestone(1, 0, true, '', 1, { from: shipper });
   }
 
   async function expectRevert(promise, reason) {
@@ -64,7 +65,7 @@ contract('ReputationRegistry', (accounts) => {
       assert.fail('Expected revert not received');
     } catch (error) {
       assert(
-        error.message.includes(reason),
+        decodeEscrowError(error).includes(reason),
         `Expected "${reason}" but got "${error.message}"`,
       );
     }
@@ -106,7 +107,7 @@ contract('ReputationRegistry', (accounts) => {
     );
 
     await escrow.submitProof(1, 0, ['proof://delivery'], 'Delivered', { from: carrier });
-    await escrow.verifyMilestone(1, 0, true, '', { from: shipper });
+    await escrow.verifyMilestone(1, 0, true, '', 1, { from: shipper });
 
     await expectRevert(
       reputation.submitCarrierRating(1, 5, 0, { from: stranger }),
