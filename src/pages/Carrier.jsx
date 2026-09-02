@@ -20,6 +20,7 @@ import {
 import { Topbar } from '../components/Topbar.jsx';
 import { Card } from '../components/Card.jsx';
 import { Button } from '../components/Button.jsx';
+import { ModalShell } from '../components/ModalShell.jsx';
 import { Badge } from '../components/Badge.jsx';
 import { Tabs } from '../components/Tabs.jsx';
 import { ProgressLine } from '../components/ProgressLine.jsx';
@@ -305,8 +306,7 @@ function ProofUploadModal({ job, onClose, onSubmitted }) {
   };
 
   return (
-    <div className={styles.modalScrim} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+    <ModalShell size="md" onClose={onClose} busy={busy} ariaLabel="Upload milestone proof">
         <div className={styles.modalHead}>
           <div>
             <div className={styles.modalTitle}>Upload milestone proof</div>
@@ -314,7 +314,7 @@ function ProofUploadModal({ job, onClose, onSubmitted }) {
               Request <strong>#{String(job.id).padStart(4, '0')}</strong> · {job.from} → {job.to}
             </div>
           </div>
-          <button type="button" className={styles.modalClose} onClick={onClose} aria-label="Close">
+          <button type="button" className={styles.modalClose} onClick={onClose} disabled={busy} aria-label="Close">
             <HiOutlineXMark className={styles.modalCloseIcon} aria-hidden="true" />
           </button>
         </div>
@@ -352,7 +352,6 @@ function ProofUploadModal({ job, onClose, onSubmitted }) {
             {busy ? 'Preparing proof…' : 'Submit proof'}
           </Button>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

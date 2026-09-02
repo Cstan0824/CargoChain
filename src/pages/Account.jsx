@@ -1,20 +1,18 @@
 // src/pages/Account.jsx — canonical CargoChain identity, funds, carrier rating,
 // and recent activity surface.
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   HiOutlineBanknotes,
   HiOutlineExclamationTriangle,
   HiOutlineEye,
   HiOutlineEyeSlash,
-  HiOutlineIdentification,
-  HiOutlineInformationCircle,
   HiOutlineArrowsRightLeft,
   HiOutlineUser,
   HiOutlineUserGroup,
-  HiOutlineXMark,
   HiStar,
 } from 'react-icons/hi2';
+import { SiEthereum } from 'react-icons/si';
 import { formatEther, parseEther } from 'ethers';
 import { useNavigate } from 'react-router-dom';
 import { Topbar } from '../components/Topbar.jsx';
@@ -23,6 +21,7 @@ import { Button } from '../components/Button.jsx';
 import { Badge } from '../components/Badge.jsx';
 import { Skeleton } from '../components/Skeleton.jsx';
 import { BrandedModal } from '../components/BrandedModal.jsx';
+import { EditDisplayNameModal } from '../components/EditDisplayNameModal.jsx';
 import { Avatar } from '../components/Avatar.jsx';
 import { useWallet } from '../hooks/useWallet.js';
 import { useAccountAccess } from '../context/AccountAccessContext.jsx';
@@ -46,9 +45,6 @@ import {
 } from '../utils/paymentHistory.js';
 import { startTransactionToast } from '../utils/transactionToast.js';
 import styles from './Account.module.css';
-
-const MAX_DISPLAY_NAME_BYTES = 64;
-const MAX_DISPLAY_NAME_WORDS = 8;
 
 const EMPTY_SNAPSHOT = {
   balance: null,
@@ -93,7 +89,12 @@ export function Account() {
   const [conversionConfirmation, setConversionConfirmation] = useState(null);
   const [cargoAction, setCargoAction] = useState(null);
   const snapshotRef = useRef(snapshot);
-  const inFlightRef = useRef(null);
+  const balanceLaneRef = useRef(null);
+  const cargoLaneRef = useRef(null);
+  const lockedLaneRef = useRef(null);
+  const historyLaneRef = useRef(null);
+  const historyCursorRef = useRef(null);
+  const historyIdentityRef = useRef(null);
   const sourceRevisionRef = useRef(0);
   const snapshotIdentityRef = useRef(null);
 
@@ -102,6 +103,7 @@ export function Account() {
   const walletAddress = selectedWallet?.wallet_address || account || null;
   const deliveryEscrow = contracts?.deliveryEscrow;
   const cargoToken = contracts?.cargoToken;
+  const contractsPending = Boolean(provider && walletAddress && !contracts && !deployError);
   const walletIdentityRegistered = Boolean(isRegistered && walletMatches && displayName);
   const profileName = walletIdentityRegistered ? displayName : 'Register your wallet';
   const avatarSrc = pickAvatar(null, walletAddress);
@@ -109,23 +111,26 @@ export function Account() {
     ? CARGO_NETWORK_CONFIG.chainName
     : chainId != null ? `Chain ${chainId}` : 'Network unavailable';
 
-  const loadSnapshot = useCallback(async ({ initial = false, revision = sourceRevisionRef.current } = {}) => {
-    if (!provider || !walletAddress || !deliveryEscrow || revision !== sourceRevisionRef.current) return;
+  const loadSnapshot = useCallback(({ initial = false, revision = sourceRevisionRef.current } = {}) => {
+    if (!provider || !walletAddress || revision !== sourceRevisionRef.current) return Promise.resolve();
 
-    const requestKey = `${walletAddress.toLowerCase()}:${deliveryEscrow.target || ''}:${chainId || ''}`;
-    if (inFlightRef.current?.key === requestKey) return;
-    const operation = { key: requestKey };
-    inFlightRef.current = operation;
+    const normalizedWallet = walletAddress.toLowerCase();
+    // Include the source revision so a newly validated deployment can start a
+    // fresh read even if an earlier provider request is still pending.
+    const balanceKey = `${normalizedWallet}:${chainId || ''}:${revision}`;
+    const cargoKey = `${normalizedWallet}:${cargoToken?.target || ''}:${chainId || ''}:${revision}`;
+    const escrowKey = `${normalizedWallet}:${deliveryEscrow?.target || ''}:${chainId || ''}:${revision}`;
 
     if (initial) {
       setSnapshot((previous) => ({
         ...previous,
         initialLoading: true,
         balanceLoading: true,
-        cargoLoading: true,
-        lockedLoading: true,
-        historyLoading: true,
+        cargoLoading: Boolean(cargoToken || contractsPending),
+        lockedLoading: Boolean(deliveryEscrow || contractsPending),
+        historyLoading: Boolean(deliveryEscrow || contractsPending),
         balanceError: null,
+        cargoError: null,
         lockedError: null,
         historyError: null,
       }));
@@ -136,30 +141,32 @@ export function Account() {
       setSnapshot((previous) => ({ ...previous, ...patch }));
     };
 
-    try {
-    const balancePromise = provider.getBalance(walletAddress)
+    const balancePromise = runAccountLane(balanceLaneRef, balanceKey, () => provider.getBalance(walletAddress)
+      .then((value) => updateSnapshot({
+        balance: BigInt(value),
+        balanceError: null,
+        balanceLoading: false,
+      }))
+      .catch((error) => updateSnapshot({
+        balanceError: formatBalanceError(error),
+        balanceLoading: false,
+      })));
+
+    const cargoPromise = cargoToken
+      ? runAccountLane(cargoLaneRef, cargoKey, () => cargoToken.balanceOf(walletAddress)
         .then((value) => updateSnapshot({
-          balance: BigInt(value),
-          balanceError: null,
-          balanceLoading: false,
+          cargoBalance: BigInt(value),
+          cargoError: null,
+          cargoLoading: false,
         }))
         .catch((error) => updateSnapshot({
-          balanceError: formatBalanceError(error),
-          balanceLoading: false,
-        }));
-      const cargoPromise = cargoToken
-        ? cargoToken.balanceOf(walletAddress)
-          .then((value) => updateSnapshot({
-            cargoBalance: BigInt(value),
-            cargoError: null,
-            cargoLoading: false,
-          }))
-          .catch((error) => updateSnapshot({
-            cargoError: formatBalanceError(error),
-            cargoLoading: false,
-          }))
-        : Promise.resolve();
-      const lockedPromise = deliveryEscrow.getLockedEscrow(walletAddress)
+          cargoError: formatBalanceError(error),
+          cargoLoading: false,
+        })))
+      : Promise.resolve(updateSnapshot({ cargoLoading: contractsPending }));
+
+    const lockedPromise = deliveryEscrow
+      ? runAccountLane(lockedLaneRef, escrowKey, () => deliveryEscrow.getLockedEscrow(walletAddress)
         .then((value) => updateSnapshot({
           lockedEscrow: mapLockedEscrow(value),
           lockedError: null,
@@ -168,46 +175,93 @@ export function Account() {
         .catch((error) => updateSnapshot({
           lockedError: formatHistoryError(error),
           lockedLoading: false,
-        }));
-      const historyPromise = loadPaymentHistory({ contract: deliveryEscrow, provider, account: walletAddress })
-        .then((value) => updateSnapshot({
-          transactions: value,
+        })))
+      : Promise.resolve(updateSnapshot({ lockedLoading: contractsPending }));
+
+    if (deliveryEscrow) {
+      runAccountLane(historyLaneRef, escrowKey, async () => {
+        const latestBlockValue = typeof provider.getBlockNumber === 'function'
+          ? await provider.getBlockNumber()
+          : null;
+        const latestBlock = latestBlockValue == null ? null : Number(latestBlockValue);
+        const previousCursor = historyCursorRef.current;
+        const chainReset = latestBlock != null && previousCursor != null && latestBlock < previousCursor;
+        const fromBlock = chainReset || previousCursor == null ? 0 : previousCursor + 1;
+        if (latestBlock != null && fromBlock > latestBlock) {
+          updateSnapshot({ historyError: null, historyLoading: false });
+          return;
+        }
+
+        const value = await loadPaymentHistory({
+          contract: deliveryEscrow,
+          provider,
+          account: walletAddress,
+          fromBlock,
+          toBlock: latestBlock ?? 'latest',
+        });
+        if (latestBlock != null && revision === sourceRevisionRef.current) {
+          historyCursorRef.current = latestBlock;
+        }
+        updateSnapshot({
+          transactions: fromBlock === 0 || chainReset
+            ? value
+            : mergePaymentHistory(snapshotRef.current.transactions, value),
           historyError: null,
           historyLoading: false,
-        }))
-        .catch((error) => updateSnapshot({
-          historyError: formatHistoryError(error),
-          historyLoading: false,
-        }));
-
-      await Promise.all([balancePromise, cargoPromise, lockedPromise, historyPromise]);
-      updateSnapshot({ initialLoading: false });
-    } finally {
-      if (inFlightRef.current === operation) inFlightRef.current = null;
+        });
+      }).catch((error) => updateSnapshot({
+        historyError: formatHistoryError(error),
+        historyLoading: false,
+      }));
+    } else {
+      updateSnapshot({ historyLoading: contractsPending });
     }
-  }, [cargoToken, chainId, deliveryEscrow, provider, walletAddress]);
+
+    // Initial readiness is based on the balance lanes. Activity history can
+    // remain pending without keeping the financial workspace busy.
+    return Promise.allSettled([balancePromise, cargoPromise, lockedPromise])
+      .then(() => updateSnapshot({ initialLoading: false }));
+  }, [cargoToken, chainId, contractsPending, deliveryEscrow, provider, walletAddress]);
 
   useEffect(() => {
     const revision = ++sourceRevisionRef.current;
-    const identity = provider && walletAddress && deliveryEscrow
-      ? `${walletAddress.toLowerCase()}:${deliveryEscrow.target || ''}:${chainId || ''}`
+    const identity = provider && walletAddress
+      ? `${walletAddress.toLowerCase()}:${chainId || ''}`
       : null;
     const identityChanged = snapshotIdentityRef.current !== identity;
     snapshotIdentityRef.current = identity;
+    const historyIdentity = provider && walletAddress && deliveryEscrow
+      ? `${walletAddress.toLowerCase()}:${chainId || ''}:${deliveryEscrow.target || ''}`
+      : null;
+    const historyIdentityChanged = historyIdentityRef.current !== historyIdentity;
+    historyIdentityRef.current = historyIdentity;
     setWalletRevealed(false);
     setWalletCopied(false);
 
-    if (!provider || !walletAddress || !deliveryEscrow) {
+    if (!provider || !walletAddress) {
       snapshotIdentityRef.current = null;
+      historyIdentityRef.current = null;
+      historyCursorRef.current = null;
       setSnapshot({ ...EMPTY_SNAPSHOT });
       return undefined;
     }
 
-    if (identityChanged) setSnapshot({ ...EMPTY_SNAPSHOT });
+    if (identityChanged) {
+      setSnapshot({ ...EMPTY_SNAPSHOT });
+    }
+    if (historyIdentityChanged) {
+      historyCursorRef.current = null;
+      setSnapshot((previous) => ({
+        ...previous,
+        transactions: [],
+        historyError: null,
+        historyLoading: Boolean(deliveryEscrow || contractsPending),
+      }));
+    }
     loadSnapshot({ initial: true, revision });
     const timer = window.setInterval(() => loadSnapshot({ revision }), 10_000);
     return () => window.clearInterval(timer);
-  }, [deliveryEscrow, loadSnapshot, provider, walletAddress]);
+  }, [contractsPending, deliveryEscrow, loadSnapshot, provider, walletAddress]);
 
   useEffect(() => {
     if (!walletAddress || !contracts?.reputationRegistry) {
@@ -449,7 +503,7 @@ export function Account() {
               </div>
             </div>
             <div className={styles.balanceCard}>
-              <span className={styles.balanceIcon} aria-hidden="true">Ξ</span>
+              <span className={styles.balanceIcon} aria-hidden="true"><SiEthereum /></span>
               <div className={styles.balanceCopy}>
                 <h2 className={styles.balanceLabel}>ETH Balance</h2>
                 {snapshot.balanceLoading && snapshot.balance == null ? <Skeleton className={styles.balanceValueSkeleton} width={132} height={32} /> : <strong className={styles.balanceValue} data-numeric="true" title={formatEth(snapshot.balance ?? 0n)}>{formatEth(snapshot.balance ?? 0n)}</strong>}
@@ -481,11 +535,6 @@ export function Account() {
               <span className={styles.conversionArrow} aria-hidden="true"><HiOutlineArrowsRightLeft /></span>
               <label htmlFor="eth-amount">{conversionDirection === 'deposit' ? 'ETH you pay' : 'ETH you receive'}</label>
               <div className={styles.conversionInput}><input id="eth-amount" inputMode="decimal" value={ethAmount} onChange={(event) => updateConversionFromEth(event.target.value)} placeholder="0.00" disabled={Boolean(cargoAction) || !cargoToken} /><span>ETH</span></div>
-              {conversionDirection === 'deposit' && (
-                <span className={styles.conversionBalance}>
-                  {snapshot.balance == null ? 'Available ETH: Loading…' : `Available ETH: ${formatEth(snapshot.balance)}`}
-                </span>
-              )}
               {conversionError && <span className={styles.conversionError} role="alert">{conversionError}</span>}
               <Button size="sm" disabled={Boolean(cargoAction) || !cargoToken || !signer || !cargoAmount || !ethAmount} onClick={prepareCargoAction}>{conversionDirection === 'deposit' ? 'Top up CARGO' : 'Redeem CARGO'}</Button>
             </div>
@@ -717,91 +766,30 @@ function ActivityTableState({ icon: Icon, title, description, action, status = f
   );
 }
 
-function EditDisplayNameModal({ account, provider, signer, userRegistry, walletReady, refreshUserProfile, onClose }) {
-  const titleId = useId();
-  const inputRef = useRef(null);
-  const submitLockRef = useRef(false);
-  const [newName, setNewName] = useState('');
-  const [confirmation, setConfirmation] = useState('');
-  const [touched, setTouched] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => inputRef.current?.focus(), 80);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  const trimmedName = useMemo(() => trimAsciiWhitespace(newName), [newName]);
-  const trimmedConfirmation = useMemo(() => trimAsciiWhitespace(confirmation), [confirmation]);
-  const nameError = getDisplayNameError(trimmedName);
-  const confirmationError = getConfirmationError(trimmedConfirmation, trimmedName);
-
-  const submit = async (event) => {
-    event.preventDefault();
-    if (submitLockRef.current) return;
-    setTouched(true);
-    setError('');
-    if (nameError || confirmationError) return;
-    if (!walletReady || !provider || !signer || !userRegistry) {
-      setError(`Connect this wallet on ${CARGO_NETWORK_CONFIG.chainName} before updating its display name.`);
-      return;
-    }
-
-    submitLockRef.current = true;
-    setSubmitting(true);
-    let transactionToast;
-    try {
-      const signerAddress = await signer.getAddress();
-      if (signerAddress.toLowerCase() !== account.toLowerCase()) throw new Error('The active MetaMask account changed. Close this dialog and try again.');
-      transactionToast = startTransactionToast({ wallet: 'Confirm display name update in MetaMask…', submitted: 'Updating display name…', success: 'Display name updated.' });
-      const transaction = await sendWalletContractTransaction({ contract: userRegistry, method: 'updateDisplayName', args: [trimmedName], signer, provider });
-      transactionToast.submitted();
-      await transaction.wait();
-      await refreshUserProfile();
-      transactionToast.success();
-      onClose();
-    } catch (caughtError) {
-      const message = formatDisplayNameUpdateError(caughtError);
-      if (transactionToast) transactionToast.error(message);
-      else setError(message);
-    } finally {
-      submitLockRef.current = false;
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div className={styles.modalOverlay} role="presentation">
-      <section className={styles.editModal} role="dialog" aria-modal="true" aria-labelledby={titleId}>
-        <header className={styles.modalHeader}>
-          <div className={styles.modalTitleGroup}>
-            <span className={styles.modalIcon} aria-hidden="true"><HiOutlineIdentification /></span>
-            <div><h2 id={titleId}>Edit display name</h2><p>Update the public name associated with this wallet.</p></div>
-          </div>
-          <button type="button" className={styles.modalClose} onClick={onClose} disabled={submitting} aria-label="Close display name editor"><HiOutlineXMark aria-hidden="true" /></button>
-        </header>
-        <form className={styles.modalBody} onSubmit={submit} noValidate>
-          <label className={styles.formLabel} htmlFor={`${titleId}-name`}>New display name</label>
-          <input ref={inputRef} id={`${titleId}-name`} className={`${styles.formInput} ${touched && nameError ? styles.formInputError : ''}`} value={newName} onChange={(event) => setNewName(event.target.value)} onBlur={() => setTouched(true)} autoComplete="nickname" disabled={submitting} aria-invalid={Boolean(touched && nameError)} />
-          <span className={styles.formHint}>{touched && nameError ? nameError : '1–8 words, up to 64 UTF-8 bytes.'}</span>
-          <label className={styles.formLabel} htmlFor={`${titleId}-confirmation`}>Confirm new display name</label>
-          <input id={`${titleId}-confirmation`} className={`${styles.formInput} ${touched && confirmationError ? styles.formInputError : ''}`} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} onBlur={() => setTouched(true)} autoComplete="off" disabled={submitting} aria-invalid={Boolean(touched && confirmationError)} />
-          <span className={styles.formHint}>{touched && confirmationError ? confirmationError : 'Both names must match after trimming.'}</span>
-          <div className={styles.gasNotice}><HiOutlineInformationCircle aria-hidden="true" /><span>Updating your display name requires an on-chain transaction and a small gas fee.</span></div>
-          {error && <div className={styles.modalError} role="alert">{error}</div>}
-          <footer className={styles.modalFooter}><Button variant="secondary" onClick={onClose} disabled={submitting}>Cancel</Button><Button type="submit" disabled={submitting}>{submitting ? 'Updating…' : 'Update display name'}</Button></footer>
-        </form>
-      </section>
-    </div>
-  );
-}
-
 function mapLockedEscrow(result) {
   return {
     totalLocked: BigInt(result?.totalLocked ?? result?.[0] ?? 0n),
     activeRequestCount: Number(result?.activeRequestCount ?? result?.[1] ?? 0n),
   };
+}
+
+function runAccountLane(ref, key, operation) {
+  if (ref.current?.key === key) return ref.current.promise;
+  const entry = { key, promise: null };
+  entry.promise = Promise.resolve()
+    .then(operation)
+    .finally(() => {
+      if (ref.current === entry) ref.current = null;
+    });
+  ref.current = entry;
+  return entry.promise;
+}
+
+function mergePaymentHistory(previous, next) {
+  const byId = new Map((previous || []).map((row) => [row.id, row]));
+  (next || []).forEach((row) => byId.set(row.id, row));
+  return [...byId.values()]
+    .sort((left, right) => right.blockNumber - left.blockNumber || right.logIndex - left.logIndex);
 }
 
 function formatInputAmount(value) {
@@ -855,21 +843,4 @@ function formatHistoryError(error) {
 
 function formatReputationError(error) {
   return error?.shortMessage || error?.reason || error?.message || 'Could not load carrier rating.';
-}
-
-function trimAsciiWhitespace(value) { return value.replace(/^[\x09-\x0d\x20]+|[\x09-\x0d\x20]+$/g, ''); }
-function getDisplayNameError(name) {
-  if (!name) return 'Enter a new display name.';
-  if (countWords(name) > MAX_DISPLAY_NAME_WORDS) return `Display name must be ${MAX_DISPLAY_NAME_WORDS} words or fewer.`;
-  if (new TextEncoder().encode(name).length > MAX_DISPLAY_NAME_BYTES) return 'Display name is too long. Shorten it and try again.';
-  return '';
-}
-function getConfirmationError(confirmation, name) {
-  if (!confirmation) return 'Confirm the new display name.';
-  return confirmation !== name ? 'Display names must match exactly after trimming.' : '';
-}
-function countWords(value) { return value ? value.split(/\s+/u).filter(Boolean).length : 0; }
-function formatDisplayNameUpdateError(error) {
-  if (error?.code === 4001 || error?.code === 'ACTION_REJECTED') return 'Update was cancelled in MetaMask. Your display name was not changed.';
-  return formatWalletTransactionError(error, 'Display name could not be updated. Check MetaMask and try again.');
 }

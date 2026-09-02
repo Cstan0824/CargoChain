@@ -7,8 +7,10 @@ import {
   HiOutlinePlus,
   HiOutlineTrash,
   HiOutlineInformationCircle,
+  HiOutlineXMark,
 } from 'react-icons/hi2';
 import { Button } from './Button.jsx';
+import { ModalShell } from './ModalShell.jsx';
 import { useToast } from '../hooks/useToast.js';
 import { useWallet } from '../hooks/useWallet.js';
 import { useContracts } from '../hooks/useContracts.js';
@@ -130,8 +132,7 @@ export function ProposeMilestoneModal({ isOpen, onClose, requestId, onSuccess })
   if (!isOpen) return null;
 
   return (
-    <div className={styles.overlay} onClick={onClose} aria-modal="true" role="dialog">
-      <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+    <ModalShell size="md" onClose={onClose} busy={submitting} labelledBy="propose-plan-title">
         {/* Header */}
         <div className={styles.head}>
           <div className={styles.headLeft}>
@@ -139,12 +140,12 @@ export function ProposeMilestoneModal({ isOpen, onClose, requestId, onSuccess })
               <HiOutlineCheckBadge className={styles.headIconSvg} />
             </div>
             <div className={styles.headTitles}>
-              <h2 className={styles.modalTitle}>Propose Milestone Plan</h2>
+              <h2 id="propose-plan-title" className={styles.modalTitle}>Propose Milestone Plan</h2>
               <p className={styles.modalSubtitle}>Define delivery milestones and payout percentages.</p>
             </div>
           </div>
-          <button type="button" onClick={onClose} className={styles.closeBtn} aria-label="Close modal">
-            &times;
+          <button type="button" onClick={onClose} className={styles.closeBtn} disabled={submitting} aria-label="Close modal">
+            <HiOutlineXMark aria-hidden="true" />
           </button>
         </div>
 
@@ -228,7 +229,6 @@ export function ProposeMilestoneModal({ isOpen, onClose, requestId, onSuccess })
             </Button>
           </div>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

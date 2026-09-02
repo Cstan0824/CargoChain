@@ -138,6 +138,8 @@
 
 /* ─── Body ────────────────────────────────────────────────────── */
 .body {
+  min-height: 0;
+  overflow-y: auto;
   padding: var(--s-6);
   display: flex;
   flex-direction: column;
@@ -194,7 +196,7 @@
 .routeRow {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
-  align-items: end;
+  align-items: start;
   gap: var(--s-3);
   background: var(--bg-subtle);
   padding: var(--s-4);
@@ -206,11 +208,17 @@
   border-color: rgba(37, 99, 235, 0.2);
 }
 
+/* Keep both route fields aligned when only one shows a validation message. */
+.routeRow > .field {
+  min-height: 88px;
+}
+
 .swapBtnWrap {
+  align-self: stretch;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding-bottom: 2px;
+  justify-content: center;
 }
 
 .swapBtn {
@@ -239,7 +247,8 @@
     grid-template-columns: 1fr;
     gap: var(--s-2);
   }
-  .swapBtnWrap { flex-direction: row; justify-content: center; padding-bottom: 0; }
+  .routeRow > .field { min-height: 0; }
+  .swapBtnWrap { flex-direction: row; }
   .swapBtn { transform: rotate(90deg); }
   .swapBtn:active { transform: scale(0.96) rotate(270deg); }
 }

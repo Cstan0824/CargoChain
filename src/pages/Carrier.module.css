@@ -310,7 +310,7 @@
   justify-content: space-between;
   gap: var(--s-3);
   padding: var(--s-4) var(--s-5);
-  border-bottom: 1px solid var(--border-soft);
+  box-shadow: inset 0 -1px var(--border-soft);
 }
 
 .modalTitle {
@@ -327,7 +327,7 @@
 .modalClose {
   width: 44px;
   height: 44px;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-md);
   background: transparent;
   border: 0;
   display: inline-flex;
@@ -335,12 +335,16 @@
   justify-content: center;
   cursor: pointer;
   color: var(--text-secondary);
-  transition: background var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+  transition-property: background-color, color, transform;
+  transition-duration: var(--dur-1);
+  transition-timing-function: var(--ease);
 }
 .modalClose:hover { background: var(--bg-subtle); color: var(--text-primary); }
+.modalClose:active:not(:disabled) { transform: scale(0.96); }
+.modalClose:disabled { cursor: not-allowed; opacity: 0.5; }
 .modalCloseIcon { width: 18px; height: 18px; }
 
-.modalBody { padding: var(--s-5); flex: 1; overflow-y: auto; }
+.modalBody { min-height: 0; padding: var(--s-5); flex: 1; overflow-y: auto; }
 
 .dropZone {
   position: relative;

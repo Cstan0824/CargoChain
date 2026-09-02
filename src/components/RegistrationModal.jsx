@@ -16,6 +16,7 @@ import {
 import { CARGO_NETWORK_CONFIG, isNetworkMismatch } from '../utils/network.js';
 import { countWords, utf8Length } from '../utils/textLimits.js';
 import { startTransactionToast } from '../utils/transactionToast.js';
+import { ModalShell } from './ModalShell.jsx';
 import styles from './RegistrationModal.module.css';
 
 const MAX_DISPLAY_NAME_BYTES = 64;
@@ -66,23 +67,8 @@ export function RegistrationModal({
     setStage('idle');
     setError('');
     setTransactionHash('');
-
-    if (isOpen) {
-      const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 80);
-      return () => window.clearTimeout(focusTimer);
-    }
     return undefined;
   }, [isOpen, walletAddress, userRegistry]);
-
-  useEffect(() => {
-    if (!isOpen) return undefined;
-
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape' && !submitLockRef.current) onClose();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isOpen, onClose]);
 
   const requestClose = () => {
     if (!submitLockRef.current) onClose();
@@ -170,20 +156,14 @@ export function RegistrationModal({
   if (!isOpen) return null;
 
   return (
-    <div
-      className={styles.overlay}
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) requestClose();
-      }}
+    <ModalShell
+      size="md"
+      onClose={requestClose}
+      busy={isSubmitting}
+      labelledBy={titleId}
+      describedBy={descriptionId}
+      initialFocusRef={inputRef}
     >
-      <section
-        className={styles.modal}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        aria-describedby={descriptionId}
-      >
         <header className={styles.header}>
           <div className={styles.headingGroup}>
             <span className={styles.identityIcon} aria-hidden="true">
@@ -327,8 +307,7 @@ export function RegistrationModal({
             </button>
           </footer>
         </form>
-      </section>
-    </div>
+    </ModalShell>
   );
 }
 

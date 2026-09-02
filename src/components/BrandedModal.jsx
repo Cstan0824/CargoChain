@@ -1,5 +1,6 @@
 import { HiOutlineXMark } from 'react-icons/hi2';
-import { useDialogFocus } from '../hooks/useDialogFocus.js';
+import { useId } from 'react';
+import { ModalShell } from './ModalShell.jsx';
 import styles from './BrandedModal.module.css';
 
 export function BrandedModal({
@@ -12,18 +13,26 @@ export function BrandedModal({
   children,
   footer,
   labelledBy,
+  initialFocusRef,
 }) {
-  const dialogRef = useDialogFocus({ onClose, closeDisabled: busy });
-  const titleId = labelledBy || `modal-${String(title).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+  const generatedId = useId();
+  const titleId = labelledBy || `modal-${generatedId.replace(/[^a-z0-9]+/gi, '')}`;
+  const descriptionId = description ? `${titleId}-description` : undefined;
   return (
-    <div className={styles.overlay} role="presentation" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
-      <section ref={dialogRef} className={`${styles.modal} ${styles[size] || styles.md}`} role="dialog" aria-modal="true" aria-labelledby={titleId}>
+    <ModalShell
+      size={size}
+      onClose={onClose}
+      busy={busy}
+      labelledBy={titleId}
+      describedBy={descriptionId}
+      initialFocusRef={initialFocusRef}
+    >
         <header className={styles.header}>
           <div className={styles.heading}>
             {Icon && <span className={styles.icon} aria-hidden="true"><Icon /></span>}
             <div>
               <h2 id={titleId}>{title}</h2>
-              {description && <p>{description}</p>}
+              {description && <p id={descriptionId}>{description}</p>}
             </div>
           </div>
           <button type="button" className={styles.close} onClick={onClose} disabled={busy} aria-label={`Close ${title}`}>
@@ -32,7 +41,6 @@ export function BrandedModal({
         </header>
         <div className={styles.body}>{children}</div>
         {footer && <footer className={styles.footer}>{footer}</footer>}
-      </section>
-    </div>
+    </ModalShell>
   );
 }

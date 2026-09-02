@@ -20,7 +20,7 @@ import { useWallet } from '../hooks/useWallet.js';
 import { useContracts } from '../hooks/useContracts.js';
 import { useUserProfile } from '../hooks/useUserProfile.js';
 import { useConfirmDialog } from '../hooks/useConfirmDialog.js';
-import { useDialogFocus } from '../hooks/useDialogFocus.js';
+import { ModalShell } from './ModalShell.jsx';
 import {
   formatWalletTransactionError,
   resolveWalletSigner,
@@ -158,12 +158,6 @@ export function CreateRequestModal({ isOpen, onClose, onSuccess }) {
     onClose();
   };
 
-  const dialogRef = useDialogFocus({
-    enabled: isOpen && !confirmation,
-    onClose: requestClose,
-    initialFocusRef: fromRef,
-  });
-
   const markTouched = (field) => setTouched((current) => ({ ...current, [field]: true }));
   const shouldShowError = (field) => submitAttempted || Boolean(touched[field]);
 
@@ -285,15 +279,13 @@ export function CreateRequestModal({ isOpen, onClose, onSuccess }) {
 
   return (
     <>
-    <div className={styles.overlay} onClick={requestClose} role="presentation">
-      <section
-        ref={dialogRef}
-        className={styles.modalContent}
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="create-request-title"
-      >
+    <ModalShell
+      size="lg"
+      onClose={requestClose}
+      busy={submitting}
+      labelledBy="create-request-title"
+      initialFocusRef={fromRef}
+    >
 
         {/* ── Header ── */}
         <div className={styles.head}>
@@ -305,7 +297,7 @@ export function CreateRequestModal({ isOpen, onClose, onSuccess }) {
               <h2 id="create-request-title" className={styles.modalTitle}>Create delivery request</h2>
             </div>
           </div>
-          <button type="button" onClick={requestClose} className={styles.closeBtn} aria-label="Close create request">
+          <button type="button" onClick={requestClose} className={styles.closeBtn} disabled={submitting} aria-label="Close create request">
             <HiOutlineXMark aria-hidden="true" />
           </button>
         </div>
@@ -487,8 +479,7 @@ export function CreateRequestModal({ isOpen, onClose, onSuccess }) {
             </Button>
           </div>
         </div>
-      </section>
-    </div>
+    </ModalShell>
     {confirmation && <ConfirmDialog {...confirmation} />}
     {topUpOpen && (
       <CreateRequestCargoTopUpModal

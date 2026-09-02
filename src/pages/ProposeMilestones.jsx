@@ -855,7 +855,6 @@ export function ProposeMilestones() {
               </div>
 
               <div className={styles.checkpointListFooter}>
-                <span className={styles.checkpointLimit}>{milestones.length} / 10 checkpoints{milestones.length >= 10 ? ' · Maximum reached' : ''}</span>
                 <div
                   className={`${styles.allocationSummary} ${styles[`allocation_${allocation.tone}`]}`}
                   aria-live="polite"

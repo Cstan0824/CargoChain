@@ -65,6 +65,14 @@ ReputationRegistry(escrowAddress)
 
 The frontend creates read-only ethers contract instances from Truffle artifacts and validates that the manager and reputation registry escrow links match the artifact address. This catches a common local Ganache failure where MetaMask/RPC points to a stale deployment.
 
+The `/account` financial surface reads the native ETH balance directly from
+the provider while the contract map is validating. CARGO, locked escrow, and
+event-derived payment history run in independent refresh lanes; payment
+history advances a block cursor after each successful scan instead of querying
+the full chain on every ten-second refresh. Each lane keeps its own loading and
+error state so a slow or unavailable event query does not block the balance
+cards.
+
 ## 3. On-chain delivery flow
 
 ```mermaid

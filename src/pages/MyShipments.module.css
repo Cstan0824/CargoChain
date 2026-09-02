@@ -355,8 +355,9 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: var(--s-1);
-  flex-wrap: wrap;
+  min-width: 184px;
+  gap: var(--s-2);
+  flex-wrap: nowrap;
 }
 
 /* ─── Icon action buttons ─────────────────────────────────────── */
@@ -406,13 +407,15 @@
 
 .shipmentChatButton :global(svg) { width: 17px; height: 17px; }
 
-.editBtn {
+.editBtn,
+.historyBtn {
   border-color: var(--border);
   background: var(--bg-surface);
   box-shadow: var(--shadow-border);
 }
 
-.editBtn:hover {
+.editBtn:hover,
+.historyBtn:hover {
   border-color: color-mix(in srgb, var(--primary) 32%, var(--border));
   background: var(--bg-subtle);
   box-shadow: var(--shadow-border-hover);
@@ -432,20 +435,23 @@
 }
 
 .historyModal {
-  width: min(100%, 640px);
+  width: min(100%, 600px);
   max-height: min(720px, calc(100vh - (var(--s-4) * 2)));
   overflow: hidden;
-  border-radius: var(--r-xl);
+  border-radius: 20px;
   background: var(--bg-surface);
-  box-shadow: 0 24px 56px rgba(15, 23, 42, 0.22), 0 5px 16px rgba(15, 23, 42, 0.12);
+  box-shadow:
+    0 0 0 1px rgba(15, 23, 42, 0.06),
+    0 8px 24px rgba(15, 23, 42, 0.10),
+    0 32px 64px rgba(15, 23, 42, 0.14);
 }
 
 .historyModalHeader {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: var(--s-4);
-  padding: var(--s-5) var(--s-5) var(--s-4);
+  padding: var(--s-5);
   border-bottom: 1px solid var(--border-soft);
 }
 .historyKicker {
@@ -466,9 +472,9 @@
   height: 44px;
   flex: 0 0 44px;
   place-items: center;
-  border: 0;
+  border: 1px solid var(--border-soft);
   border-radius: var(--r-md);
-  background: var(--bg-subtle);
+  background: var(--bg-surface);
   color: var(--text-secondary);
   cursor: pointer;
   transition:
@@ -477,15 +483,15 @@
     transform var(--dur-1) var(--ease);
 }
 .historyClose svg { width: 20px; height: 20px; }
-.historyClose:hover { background: var(--danger-soft); color: var(--danger); }
+.historyClose:hover { background: var(--bg-subtle); color: var(--text-primary); border-color: var(--border); }
 .historyClose:active { transform: scale(0.96); }
 
-.historyModalBody { max-height: 550px; overflow-y: auto; padding: var(--s-4) var(--s-5) var(--s-5); }
+.historyModalBody { flex: 1; min-height: 0; overflow-y: auto; padding: var(--s-4) var(--s-5) var(--s-5); }
 .historyIntro { margin: 0 0 var(--s-4); color: var(--text-secondary); font-size: var(--fs-sm); text-wrap: pretty; }
 .historyProposalList { display: grid; gap: var(--s-3); }
 .historyProposalCard {
   padding: var(--s-4);
-  border-radius: var(--r-lg);
+  border-radius: var(--r-md);
   background: var(--bg-subtle);
   box-shadow: inset 0 0 0 1px var(--border-soft);
 }

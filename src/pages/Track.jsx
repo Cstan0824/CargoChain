@@ -32,6 +32,7 @@ import { Button } from '../components/Button.jsx';
 import { ChatButton } from '../components/chat/ChatButton.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
 import { BrandedModal } from '../components/BrandedModal.jsx';
+import { ModalShell } from '../components/ModalShell.jsx';
 import { CarrierRatingPanel } from '../components/CarrierRatingPanel.jsx';
 import { CarrierReputationSummary } from '../components/CarrierReputationSummary.jsx';
 import { CarrierReputationModal } from '../components/CarrierReputationModal.jsx';
@@ -41,7 +42,6 @@ import { useWallet } from '../hooks/useWallet.js';
 import { useUserProfile } from '../hooks/useUserProfile.js';
 import { useWalletIdentities, walletIdentityLabel } from '../hooks/useWalletIdentities.js';
 import { useConfirmDialog } from '../hooks/useConfirmDialog.js';
-import { useDialogFocus } from '../hooks/useDialogFocus.js';
 import { useChatAuth } from '../context/ChatAuthContext.jsx';
 import {
   formatDate,
@@ -2528,14 +2528,6 @@ function AmendmentConfirmationModal({
   onClose,
   onConfirm,
 }) {
-  useEffect(() => {
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape' && !busy) onClose();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [busy, onClose]);
-
   const existingFunding = new Map(
     draft.existingFunding.map(([milestoneId, amount]) => [Number(milestoneId), amount]),
   );
@@ -2573,14 +2565,13 @@ function AmendmentConfirmationModal({
   const resultingEscrow = shipment.escrow + draft.additionalFunding;
 
   return (
-    <div className={styles.amendmentConfirmScrim} onMouseDown={() => !busy && onClose()}>
-      <section
-        className={styles.amendmentConfirmDialog}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="amendment-confirm-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <ModalShell
+      size="xl"
+      onClose={onClose}
+      busy={busy}
+      labelledBy="amendment-confirm-title"
+      className={styles.amendmentConfirmDialog}
+    >
         <header className={styles.amendmentConfirmHeader}>
           <div>
             <span>Final review</span>
@@ -2650,8 +2641,7 @@ function AmendmentConfirmationModal({
                 : 'Confirm agreement change'}
           </Button>
         </footer>
-      </section>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -3477,7 +3467,6 @@ function ProposalDetailModal({
 }) {
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [rejectionNote, setRejectionNote] = useState('');
-  const dialogRef = useDialogFocus({ onClose });
   const rejectionNoteWordCount = countWords(rejectionNote);
   const rejectionNoteTooLong = exceedsTextLimit(
     rejectionNote,
@@ -3497,19 +3486,17 @@ function ProposalDetailModal({
   };
 
   return (
-    <div className={styles.proposalModalOverlay} role="presentation" onMouseDown={onClose}>
-      <section
-        ref={dialogRef}
-        className={styles.proposalModal}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="proposal-modal-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <ModalShell
+      size="lg"
+      onClose={onClose}
+      busy={busy}
+      labelledBy="proposal-modal-title"
+      className={styles.proposalModal}
+    >
         <div className={styles.proposalPlanHeader}>
           <div>
-            <span className={styles.proposalCarrierLabel}>Carrier proposal #{proposal.id + 1}</span>
-            <strong id="proposal-modal-title" title={proposal.carrier}>{walletIdentityLabel(proposal.carrier, walletIdentities)}</strong>
+            <span id="proposal-modal-title" className={styles.proposalCarrierLabel}>Carrier proposal #{proposal.id + 1}</span>
+            <strong title={proposal.carrier}>{walletIdentityLabel(proposal.carrier, walletIdentities)}</strong>
             <span className={styles.proposalCreated}>Submitted {formatDate(proposal.createdAt)}</span>
             <CarrierReputationSummary carrier={proposal.carrier} onOpenProfile={onOpenCarrierReputation} />
           </div>
@@ -3517,7 +3504,7 @@ function ProposalDetailModal({
             {proposal.status !== 'Active' && (
               <Badge tone={proposalStatusTone(proposal.status)}>{proposal.status}</Badge>
             )}
-            <button type="button" className={styles.proposalModalClose} onClick={onClose} aria-label="Close proposal details">
+            <button type="button" className={styles.proposalModalClose} onClick={onClose} disabled={busy} aria-label="Close proposal details">
               <HiOutlineXMark aria-hidden="true" />
             </button>
           </div>
@@ -3622,8 +3609,7 @@ function ProposalDetailModal({
             )
           )}
         </div>
-      </section>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -4016,7 +4002,6 @@ export function ProofSubmitBox({ milestoneId, rejected, busy, onSubmit, reimburs
 }
 
 function ProofUploadProgressModal({ stage }) {
-  const dialogRef = useDialogFocus({ onClose: () => {} });
   const content = {
     'authorizing-proof': {
       title: 'Sign in to authorise encrypted upload',
@@ -4038,13 +4023,19 @@ function ProofUploadProgressModal({ stage }) {
 
   if (!content) return null;
   return (
-    <div className={styles.proofProgressScrim} role="presentation">
-      <section ref={dialogRef} className={styles.proofProgressModal} role="dialog" aria-modal="true" aria-labelledby="proof-progress-title" aria-describedby="proof-progress-description">
+    <ModalShell
+      size="sm"
+      onClose={() => {}}
+      busy
+      closeOnBackdrop={false}
+      labelledBy="proof-progress-title"
+      describedBy="proof-progress-description"
+      className={styles.proofProgressModal}
+    >
         <span className={styles.proofProgressSpinner} aria-hidden="true" />
         <h2 id="proof-progress-title">{content.title}</h2>
         <p id="proof-progress-description">{content.body}</p>
-      </section>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -4228,10 +4219,6 @@ export function ProofViewerModal({
   const parsedProof = parseProofUri(proofUri);
   const legacyImageUrl = parsedProof.kind === 'legacy' ? parsedProof.url : '';
   const gatewayKey = (gatewayBases || []).join('|');
-  const focusedDialogRef = useDialogFocus({
-    onClose,
-    initialFocusRef: closeRef,
-  });
 
   useEffect(() => {
     let active = true;
@@ -4315,19 +4302,13 @@ export function ProofViewerModal({
   };
 
   return (
-    <div
-      className={styles.proofViewerScrim}
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
+    <ModalShell
+      size="xl"
+      onClose={onClose}
+      labelledBy="proof-viewer-title"
+      initialFocusRef={closeRef}
+      className={styles.proofViewerDialog}
     >
-      <section
-        ref={focusedDialogRef}
-        className={styles.proofViewerDialog}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="proof-viewer-title"
-      >
         <header className={styles.proofViewerHeader}>
           <div>
             <span className={styles.proofCardLabel}>Photo proof</span>
@@ -4375,8 +4356,7 @@ export function ProofViewerModal({
           <span>Attempt {proofUris.length ? activeIndex + 1 : 0} of {proofUris.length}</span>
           {(legacyImageUrl || imageUrl) && <a href={legacyImageUrl || imageUrl} target="_blank" rel="noreferrer">Open full image</a>}
         </footer>
-      </section>
-    </div>
+    </ModalShell>
   );
 }
 

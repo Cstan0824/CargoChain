@@ -65,6 +65,7 @@ describe('Account', () => {
     expect(screen.queryByRole('button', { name: /recent activity/i })).toBeNull();
     expect(screen.getAllByText('0 ETH')).toHaveLength(1);
     expect(screen.getAllByText('0 C.')).toHaveLength(3);
+    expect(screen.queryByText(/Available ETH:/)).toBeNull();
     expect(screen.queryByRole('list', { name: 'Account roles' })).toBeNull();
     expect(screen.queryByText('Profile setup')).toBeNull();
     expect(screen.queryByText('Registered')).toBeNull();
@@ -189,6 +190,84 @@ describe('Account', () => {
     expect(provider.getBalance).toHaveBeenCalledTimes(2);
     expect(deliveryEscrow.getLockedEscrow).toHaveBeenCalledTimes(2);
     expect(mocks.loadPaymentHistory).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('continues refreshing balances while payment history is still pending', async () => {
+    vi.useFakeTimers();
+    let resolveHistory;
+    const pendingHistory = new Promise((resolve) => { resolveHistory = resolve; });
+    const provider = {
+      getBalance: vi.fn().mockResolvedValue(10n),
+      getBlockNumber: vi.fn().mockResolvedValue(1),
+    };
+    const cargoToken = {
+      balanceOf: vi.fn().mockResolvedValue(20n),
+    };
+    const deliveryEscrow = {
+      target: '0xescrow',
+      getLockedEscrow: vi.fn().mockResolvedValue({ totalLocked: 2n, activeRequestCount: 1n }),
+    };
+    mocks.wallet.provider = provider;
+    mocks.contracts.contracts = { cargoToken, deliveryEscrow };
+    mocks.loadPaymentHistory.mockReturnValue(pendingHistory);
+
+    render(<Account />);
+    await act(async () => { await Promise.resolve(); });
+    expect(provider.getBalance).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+      await Promise.resolve();
+    });
+    expect(provider.getBalance).toHaveBeenCalledTimes(2);
+    expect(cargoToken.balanceOf).toHaveBeenCalledTimes(2);
+    expect(deliveryEscrow.getLockedEscrow).toHaveBeenCalledTimes(2);
+
+    resolveHistory([]);
+    await act(async () => { await Promise.resolve(); });
+    vi.useRealTimers();
+  });
+
+  it('starts the ETH read before the contract map has finished validating', async () => {
+    const provider = { getBalance: vi.fn().mockResolvedValue(10n) };
+    mocks.wallet.provider = provider;
+    mocks.contracts.contracts = null;
+
+    render(<Account />);
+    await act(async () => { await Promise.resolve(); });
+
+    expect(provider.getBalance).toHaveBeenCalledWith(walletAddress);
+  });
+
+  it('advances the activity history block cursor instead of rescanning genesis', async () => {
+    vi.useFakeTimers();
+    const provider = {
+      getBalance: vi.fn().mockResolvedValue(10n),
+      getBlockNumber: vi.fn()
+        .mockResolvedValueOnce(10)
+        .mockResolvedValueOnce(12),
+    };
+    const cargoToken = { balanceOf: vi.fn().mockResolvedValue(20n) };
+    const deliveryEscrow = {
+      target: '0xescrow',
+      getLockedEscrow: vi.fn().mockResolvedValue({ totalLocked: 2n, activeRequestCount: 1n }),
+    };
+    mocks.wallet.provider = provider;
+    mocks.contracts.contracts = { cargoToken, deliveryEscrow };
+    mocks.loadPaymentHistory
+      .mockResolvedValueOnce([{ id: 'old', blockNumber: 10, logIndex: 0 }])
+      .mockResolvedValueOnce([{ id: 'new', blockNumber: 12, logIndex: 0 }]);
+
+    render(<Account />);
+    await act(async () => { await Promise.resolve(); });
+    expect(mocks.loadPaymentHistory).toHaveBeenNthCalledWith(1, expect.objectContaining({ fromBlock: 0, toBlock: 10 }));
+
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+      await Promise.resolve();
+    });
+    expect(mocks.loadPaymentHistory).toHaveBeenNthCalledWith(2, expect.objectContaining({ fromBlock: 11, toBlock: 12 }));
     vi.useRealTimers();
   });
 

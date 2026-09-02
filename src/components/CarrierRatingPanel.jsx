@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { HiOutlineArrowRight, HiOutlineStar, HiStar } from 'react-icons/hi2';
+import { HiOutlineArrowRight, HiOutlineStar, HiOutlineXMark, HiStar } from 'react-icons/hi2';
 import { Button } from './Button.jsx';
 import { useContracts } from '../hooks/useContracts.js';
 import { useToast } from '../hooks/useToast.js';
@@ -16,6 +16,7 @@ import {
   sendWalletContractTransaction,
 } from '../utils/walletTransaction.js';
 import { startTransactionToast } from '../utils/transactionToast.js';
+import { ModalShell } from './ModalShell.jsx';
 import styles from './CarrierRatingPanel.module.css';
 
 export function CarrierRatingPanel({ requestId, carrier, isShipper, status, onRatingPublished }) {
@@ -167,14 +168,18 @@ export function CarrierRatingPanel({ requestId, carrier, isShipper, status, onRa
       )}
 
       {modalOpen && (
-        <div className={styles.overlay} role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closeModal()}>
-          <section className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="carrier-rating-title">
+        <ModalShell
+          size="md"
+          onClose={closeModal}
+          busy={submitting}
+          labelledBy="carrier-rating-title"
+        >
             <header className={styles.modalHeader}>
               <div>
                 <span className={styles.kicker}>Completed request #{String(requestId).padStart(4, '0')}</span>
                 <h2 id="carrier-rating-title">Rate this carrier</h2>
               </div>
-              <button type="button" className={styles.closeButton} onClick={closeModal} disabled={submitting} aria-label="Close rating dialog">×</button>
+              <button type="button" className={styles.closeButton} onClick={closeModal} disabled={submitting} aria-label="Close rating dialog"><HiOutlineXMark aria-hidden="true" /></button>
             </header>
 
             <div className={styles.formBody}>
@@ -228,8 +233,7 @@ export function CarrierRatingPanel({ requestId, carrier, isShipper, status, onRa
             </div>
             <div className={styles.tagLimit}>Choose up to {MAX_REPUTATION_TAGS} tags across both groups.</div>
             {submitting && <div className={styles.transactionState} role="status">{stage === 'wallet' ? 'Review and approve the rating in MetaMask.' : 'Waiting for the rating transaction to confirm...'}</div>}
-          </section>
-        </div>
+        </ModalShell>
       )}
     </section>
   );

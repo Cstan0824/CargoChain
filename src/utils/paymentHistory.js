@@ -52,13 +52,15 @@ export async function loadPaymentHistory({
   provider,
   requestId = null,
   account = null,
+  fromBlock = 0,
+  toBlock = 'latest',
 }) {
   if (!contract) return [];
 
   const historyProvider = provider || contract.runner?.provider;
   const eventGroups = await Promise.all(
     PAYMENT_EVENTS.map(async (action) => {
-      const logs = await contract.queryFilter(action, 0, 'latest');
+      const logs = await contract.queryFilter(action, fromBlock, toBlock);
       return logs.map((log) => ({ action, log }));
     }),
   );

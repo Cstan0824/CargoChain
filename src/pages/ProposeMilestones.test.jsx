@@ -239,5 +239,6 @@ describe('active proposal replacement workflow', () => {
     expect(screen.queryAllByRole('button', { name: /^Add checkpoint/ })).toHaveLength(0);
     const title = screen.getByRole('heading', { name: 'Milestone payout plan' });
     expect(title.parentElement.querySelectorAll('p')).toHaveLength(0);
+    expect(screen.queryByText(/\/ 10 checkpoints/)).toBeNull();
   });
 });

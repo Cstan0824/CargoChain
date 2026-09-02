@@ -5,7 +5,7 @@ import {
   HiOutlineXMark,
 } from 'react-icons/hi2';
 import { Button } from './Button.jsx';
-import { useDialogFocus } from '../hooks/useDialogFocus.js';
+import { ModalShell } from './ModalShell.jsx';
 import styles from './ConfirmDialog.module.css';
 
 export function ConfirmDialog({
@@ -21,22 +21,16 @@ export function ConfirmDialog({
   const cancelButtonRef = useRef(null);
   const isDanger = tone === 'danger';
   const Icon = isDanger ? HiOutlineExclamationTriangle : HiOutlineInformationCircle;
-  const dialogRef = useDialogFocus({
-    onClose: onCancel,
-    initialFocusRef: isDanger ? cancelButtonRef : confirmButtonRef,
-  });
-
   return (
-    <div className={styles.scrim} onMouseDown={onCancel}>
-      <section
-        ref={dialogRef}
-        className={styles.dialog}
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="confirm-dialog-title"
-        aria-describedby="confirm-dialog-message"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <ModalShell
+      size="sm"
+      role="alertdialog"
+      labelledBy="confirm-dialog-title"
+      describedBy="confirm-dialog-message"
+      onClose={onCancel}
+      className={styles.dialog}
+      initialFocusRef={isDanger ? cancelButtonRef : confirmButtonRef}
+    >
         <div className={`${styles.iconWrap} ${isDanger ? styles.dangerIcon : styles.primaryIcon}`}>
           <Icon aria-hidden="true" />
         </div>
@@ -57,7 +51,6 @@ export function ConfirmDialog({
             {confirmLabel}
           </Button>
         </div>
-      </section>
-    </div>
+    </ModalShell>
   );
 }

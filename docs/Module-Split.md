@@ -60,6 +60,13 @@ Current primary routes:
 
 Frontend reads use the direct Ganache provider. Wallet writes use the shared transaction executor, which prepares transactions against Ganache and leaves MetaMask responsible for signing/broadcasting.
 
+The Account page keeps its ETH provider read independent from contract-map
+validation, refreshes CARGO and locked escrow in separate lanes, and scans
+payment events incrementally from the last observed block. A slow activity
+scan therefore cannot hold the wallet balances hostage. Dialog surfaces share
+the `ModalShell` overlay, focus trap, dismissal policy, sizing, and busy-state
+semantics; each workflow supplies only its content and actions.
+
 ## Shared hand-offs
 
 ```text

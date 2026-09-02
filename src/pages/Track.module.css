@@ -1494,7 +1494,7 @@
 }
 
 .proposalModal {
-  width: min(640px, 100%);
+  width: min(600px, 100%);
   max-height: calc(100vh - 32px);
   display: flex;
   flex-direction: column;
@@ -1505,7 +1505,7 @@
 }
 
 .proposalModal .proposalPlanHeader {
-  padding: var(--s-4) var(--s-5);
+  padding: var(--s-5);
   border-bottom: 1px solid var(--border-soft);
 }
 
@@ -1523,7 +1523,7 @@
   justify-content: center;
   flex-shrink: 0;
   border: 0;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-md);
   color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
@@ -1548,6 +1548,8 @@
 }
 
 .proposalModalBody {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: var(--s-4);
@@ -1711,6 +1713,15 @@
   font-weight: var(--fw-semibold);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.proposalModal .proposalCarrierLabel {
+  color: var(--primary);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  text-transform: none;
 }
 
 .proposalTrackLine {
@@ -2806,13 +2817,17 @@
   display: grid;
   place-items: center;
   border: 0;
-  border-radius: 50%;
+  border-radius: var(--r-md);
   color: var(--text-secondary);
   background: var(--bg-subtle);
   cursor: pointer;
+  transition-property: color, background-color, transform;
+  transition-duration: var(--dur-1);
+  transition-timing-function: var(--ease);
 }
 .amendmentConfirmHeader button:hover:not(:disabled) { color: var(--text-primary); background: var(--border-soft); }
 .amendmentConfirmHeader button:disabled { opacity: 0.5; cursor: not-allowed; }
+.amendmentConfirmHeader button:active:not(:disabled) { transform: scale(0.96); }
 .amendmentConfirmHeader button svg { width: 22px; height: 22px; }
 
 .amendmentConfirmRoute {
@@ -3385,7 +3400,7 @@
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: var(--r-sm);
+  border-radius: var(--r-md);
   color: var(--text-secondary);
   background: transparent;
   cursor: pointer;
