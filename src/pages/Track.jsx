@@ -2,7 +2,8 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { parseEther } from 'ethers';
+import { formatEther, parseEther } from 'ethers';
+import { quoteCargoFunding, sendCargoFundingTransaction } from '../utils/cargoFunding.js';
 import {
   HiOutlineArrowRight,
   HiOutlineArrowPath,
@@ -30,6 +31,8 @@ import { Badge } from '../components/Badge.jsx';
 import { Button } from '../components/Button.jsx';
 import { ChatButton } from '../components/chat/ChatButton.jsx';
 import { ConfirmDialog } from '../components/ConfirmDialog.jsx';
+import { BrandedModal } from '../components/BrandedModal.jsx';
+import { ModalShell } from '../components/ModalShell.jsx';
 import { CarrierRatingPanel } from '../components/CarrierRatingPanel.jsx';
 import { CarrierReputationSummary } from '../components/CarrierReputationSummary.jsx';
 import { CarrierReputationModal } from '../components/CarrierReputationModal.jsx';
@@ -39,9 +42,10 @@ import { useWallet } from '../hooks/useWallet.js';
 import { useUserProfile } from '../hooks/useUserProfile.js';
 import { useWalletIdentities, walletIdentityLabel } from '../hooks/useWalletIdentities.js';
 import { useConfirmDialog } from '../hooks/useConfirmDialog.js';
-import { useDialogFocus } from '../hooks/useDialogFocus.js';
+import { useChatAuth } from '../context/ChatAuthContext.jsx';
 import {
   formatDate,
+  formatCargo,
   formatEth,
   formatRemarks,
   hasRemarks,
@@ -49,9 +53,12 @@ import {
   requestStatus,
 } from '../utils/format.js';
 import styles from './Track.module.css';
-import {hashFile, uploadPhoto} from '../utils/upload.js';
+import { pinEncryptedProof, validateProofFile } from '../utils/upload.js';
+import { loadEncryptedProof } from '../lib/proofApiClient.js';
+import { getConfiguredGatewayBases, parseProofUri } from '../utils/proofUri.js';
 import {
   formatWalletTransactionError,
+  ensureTokenAllowance,
   sendWalletContractTransaction,
 } from '../utils/walletTransaction.js';
 import { startTransactionToast } from '../utils/transactionToast.js';
@@ -73,15 +80,22 @@ const MIN_CANCELLATION_LEAD_SECONDS = 60 * 60;
 const MIN_AMENDMENT_LEAD_SECONDS = 60 * 60;
 const MIN_DEADLINE_CHANGE_SECONDS = 15 * 60;
 const APPEND_MILESTONE_ID = (1n << 256n) - 1n;
+const PROOF_PROGRESS_STAGES = new Set([
+  'authorizing-proof',
+  'uploading-proof',
+  'confirming-proof',
+  'waiting-proof-confirmation',
+]);
 
 export function Track() {
   const { id: idParam } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
   const { contracts, deployError } = useContracts();
-  const { account, signer, provider, connect } = useWallet();
+  const { account, signer, provider, connect, walletChainId } = useWallet();
   const { show } = useToast();
   const { requireRegistration } = useUserProfile();
+  const { authenticateChat, getChatAccessToken } = useChatAuth();
   const [shipment, setShipment] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -89,8 +103,14 @@ export function Track() {
   const [actionStage, setActionStage] = useState('idle');
   const [refreshKey, setRefreshKey] = useState(0);
   const [proofViewerMilestone, setProofViewerMilestone] = useState(null);
+  const [proofViewerLoadingMilestoneId, setProofViewerLoadingMilestoneId] = useState(null);
   const [focusedAgreement, setFocusedAgreement] = useState(null);
   const [reputationCarrier, setReputationCarrier] = useState(null);
+  const [hasCarrierRating, setHasCarrierRating] = useState(false);
+  const [cargoBalance, setCargoBalance] = useState(null);
+  const [ethBalance, setEthBalance] = useState(null);
+  const [cargoTopUp, setCargoTopUp] = useState(null);
+  const [fundingReview, setFundingReview] = useState(null);
   const [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1000));
   const { confirm: confirmAction, confirmation } = useConfirmDialog();
   const amendmentSectionRef = useRef(null);
@@ -129,12 +149,21 @@ export function Track() {
   }, [location.search, shipment]);
 
   useEffect(() => {
-    if (!idParam || !contracts?.deliveryEscrow || !contracts?.lifecycleManager) {
+    if (!idParam) {
       setShipment(null);
+      setLoading(false);
+      return;
+    }
+
+    if (!contracts?.deliveryEscrow || !contracts?.lifecycleManager) {
+      setLoading(false);
       return;
     }
 
     let cancelled = false;
+    const hasCurrentShipment = Boolean(
+      shipment && String(shipment.id) === String(idParam),
+    );
     setLoading(true);
     setError(null);
 
@@ -150,8 +179,14 @@ export function Track() {
       })
       .catch((loadError) => {
         if (!cancelled) {
-          setShipment(null);
-          setError(loadError.shortMessage || loadError.reason || loadError.message);
+          const message = loadError.shortMessage || loadError.reason || loadError.message;
+          if (hasCurrentShipment) {
+            setError(null);
+            show(`Could not refresh the latest shipment status. ${message}`, 'error');
+          } else {
+            setShipment(null);
+            setError(message);
+          }
         }
       })
       .finally(() => {
@@ -190,6 +225,127 @@ export function Track() {
     navigate(`/shipments/${shipment.id}/propose${hasOwnActiveProposal ? '?edit=active' : ''}`);
   };
   const milestonesApproved = !['Open', 'PendingApproval'].includes(shipment?.status);
+  const canTipCarrier = Boolean(
+    isShipper
+      && shipment?.status === 'Completed'
+      && shipment?.tipAmount === 0n,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!isShipper || shipment?.status !== 'Completed' || !contracts?.reputationRegistry) {
+      setHasCarrierRating(false);
+      return undefined;
+    }
+
+    contracts.reputationRegistry.hasRated(BigInt(shipment.id))
+      .then((rated) => {
+        if (!cancelled) setHasCarrierRating(Boolean(rated));
+      })
+      .catch(() => {
+        if (!cancelled) setHasCarrierRating(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [contracts?.reputationRegistry, isShipper, refreshKey, shipment?.id, shipment?.status]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!account || !contracts?.cargoToken) {
+      setCargoBalance(null);
+      return undefined;
+    }
+
+    contracts.cargoToken.balanceOf(account)
+      .then((balance) => {
+        if (!cancelled) setCargoBalance(BigInt(balance));
+      })
+      .catch(() => {
+        if (!cancelled) setCargoBalance(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [account, contracts?.cargoToken, refreshKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!account || !provider) {
+      setEthBalance(null);
+      return undefined;
+    }
+
+    provider.getBalance(account)
+      .then((balance) => {
+        if (!cancelled) setEthBalance(BigInt(balance));
+      })
+      .catch(() => {
+        if (!cancelled) setEthBalance(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [account, provider, refreshKey]);
+
+  const openCargoTopUp = (requiredAmount = 0n) => {
+    const required = BigInt(requiredAmount || 0n);
+    const shortfall = cargoBalance != null && required > cargoBalance
+      ? required - cargoBalance
+      : 0n;
+    setCargoTopUp({ suggestedCargo: shortfall });
+  };
+
+  const completeCargoTopUp = async ({ ethWei }) => {
+    if (!contracts?.cargoToken || !signer || !provider || !account) return false;
+    if (ethBalance != null && ethWei >= ethBalance) {
+      show('Keep enough ETH available to pay the transaction gas.', 'warning');
+      return false;
+    }
+
+    setActionStage('topping-up-cargo');
+    let transactionToast;
+    try {
+      transactionToast = startTransactionToast({
+        wallet: 'Confirm the ETH top-up in MetaMask…',
+        submitted: 'Converting ETH to C.…',
+        success: 'C. wallet balance updated.',
+      });
+      const tx = await sendWalletContractTransaction({
+        contract: contracts.cargoToken,
+        method: 'deposit',
+        args: [],
+        overrides: { value: ethWei },
+        signer,
+        provider,
+      });
+      transactionToast.submitted();
+      const receipt = await tx.wait();
+      if (!receipt || receipt.status !== 1) throw new Error('The C. top-up was not confirmed.');
+      transactionToast.success();
+      setCargoTopUp(null);
+      setRefreshKey((current) => current + 1);
+      return true;
+    } catch (error) {
+      const message = formatWalletTransactionError(error, 'C. top-up could not be completed.');
+      if (transactionToast) transactionToast.error(message);
+      else show(message, 'error');
+      return false;
+    } finally {
+      setActionStage('idle');
+    }
+  };
+
+  const focusCarrierTip = () => {
+    const tipInput = document.getElementById('carrier-tip-amount');
+    if (!tipInput) return;
+    tipInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    window.setTimeout(() => tipInput.focus(), 350);
+  };
   const proposalHistory = (shipment?.proposals || []).filter(
     (proposal) => proposal.status !== 'Active',
   );
@@ -213,8 +369,73 @@ export function Track() {
   );
   const busy = actionStage !== 'idle';
 
+  const getProofAuthToken = async () => {
+    const existingToken = getChatAccessToken();
+    if (existingToken) return existingToken;
+    const authenticated = await authenticateChat();
+    const token = authenticated?.token || getChatAccessToken();
+    if (!token) throw new Error('Wallet sign-in did not return a CargoChain session.');
+    return token;
+  };
+
+  const openProofViewer = async (milestone) => {
+    const hasEncryptedProof = (milestone?.proofUris || []).some(
+      (proofUri) => typeof proofUri === 'string' && proofUri.startsWith('ipfs://'),
+    );
+    if (!hasEncryptedProof) {
+      setProofViewerMilestone({
+        ...milestone,
+        requestId: shipment?.id,
+        viewerAccount: account?.toLowerCase() || null,
+        accessToken: null,
+      });
+      return;
+    }
+    if (!account || (!isShipper && !isCarrier)) {
+      show('Only the request shipper or assigned carrier can view encrypted proof.', 'error');
+      return;
+    }
+    setProofViewerLoadingMilestoneId(milestone.milestoneId);
+    try {
+      const accessToken = await getProofAuthToken();
+      setProofViewerMilestone({
+        ...milestone,
+        requestId: shipment?.id,
+        viewerAccount: account.toLowerCase(),
+        accessToken,
+      });
+    } catch (authError) {
+      show(authError?.message || 'Wallet sign-in is required to view encrypted proof.', 'error');
+    } finally {
+      setProofViewerLoadingMilestoneId(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!proofViewerMilestone?.viewerAccount) return;
+    if (!account || proofViewerMilestone.viewerAccount !== account.toLowerCase()) {
+      setProofViewerMilestone(null);
+    }
+  }, [account, walletChainId]);
+
   const acceptProposal = async (proposalId) => {
     if (busy || !shipment || !signer || !contracts?.deliveryEscrow) return;
+    try {
+      const sender = await signer.getAddress();
+      const quote = await quoteCargoFunding({ contracts, method: 'approveAndFund', args: [BigInt(shipment.id), BigInt(proposalId)], sender });
+      const eligibleProofCount = shipment.proposals?.[proposalId]?.milestones?.length || 0;
+      setFundingReview({ proposalId, quote, eligibleProofCount, extraText: '' });
+    } catch (actionError) { show(formatActionError(actionError), 'error'); }
+  };
+
+  const confirmProposalFunding = async () => {
+    if (!fundingReview) return;
+    let extra = 0n;
+    try { extra = fundingReview.extraText.trim() ? parseEther(fundingReview.extraText.trim()) : 0n; } catch { show('Enter a valid extra reserve amount.', 'error'); return; }
+    if (extra < 0n) { show('Extra reserve cannot be negative.', 'error'); return; }
+    const proposalId = fundingReview.proposalId;
+    const selectedAllowance = fundingReview.quote.operational + extra;
+    setFundingReview(null);
     setActionStage('accepting');
     let transactionToast;
 
@@ -223,7 +444,6 @@ export function Track() {
       const latest = await contracts.deliveryEscrow.getRequest(BigInt(shipment.id));
       const latestStatus = requestStatus(latest.status ?? latest[9]);
       const latestShipper = latest.shipper ?? latest[1];
-      const proposedAmount = BigInt(latest.proposedAmount ?? latest[11] ?? 0n);
 
       if (activeAddress.toLowerCase() !== latestShipper.toLowerCase()) {
         throw new Error('Only the request shipper can accept this proposal.');
@@ -238,18 +458,18 @@ export function Track() {
       )) return;
 
       transactionToast = startTransactionToast({
-        wallet: 'Confirm proposal and escrow funding in MetaMask…',
+        wallet: 'Confirm CARGO allowance and escrow funding in MetaMask…',
         submitted: 'Funding shipment…',
         success: 'Proposal accepted and escrow funded.',
       });
-      const tx = await sendWalletContractTransaction({
-        contract: contracts.deliveryEscrow,
-        method: 'approveAndFund',
-        args: [BigInt(shipment.id), BigInt(proposalId)],
-        overrides: { value: proposedAmount },
+      const tx = await sendCargoFundingTransaction({
+        contracts,
+        method: 'approveAndFundWithAllowance',
+        args: [BigInt(shipment.id), BigInt(proposalId), selectedAllowance],
         signer,
         provider,
       });
+      if (!tx) { transactionToast.dismiss(); return; }
       transactionToast.submitted();
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) throw new Error('Approval was not confirmed.');
@@ -313,7 +533,7 @@ export function Track() {
     try {
       tipValue = parseEther(tipAmountEth.trim());
     } catch {
-      show('Enter a valid tip amount in ETH.', 'error');
+      show('Enter a valid tip amount in CARGO.', 'error');
       return false;
     }
     if (tipValue <= 0n) {
@@ -342,15 +562,21 @@ export function Track() {
       }
 
       transactionToast = startTransactionToast({
-        wallet: 'Confirm the completion tip in MetaMask…',
+        wallet: 'Confirm the CARGO allowance and completion tip in MetaMask…',
         submitted: 'Sending completion tip…',
         success: 'Completion tip sent.',
+      });
+      await ensureTokenAllowance({
+        token: contracts.cargoToken,
+        spender: contracts.deliveryEscrow.target,
+        amount: tipValue,
+        signer,
+        provider,
       });
       const tx = await sendWalletContractTransaction({
         contract: contracts.deliveryEscrow,
         method: 'tipCarrier',
-        args: [BigInt(shipment.id)],
-        overrides: { value: tipValue },
+        args: [BigInt(shipment.id), tipValue],
         signer,
         provider,
       });
@@ -358,6 +584,56 @@ export function Track() {
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) throw new Error('Tip transaction was not confirmed.');
 
+      transactionToast.success();
+      setRefreshKey((value) => value + 1);
+      return true;
+    } catch (actionError) {
+      const message = formatActionError(actionError);
+      if (transactionToast) transactionToast.error(message);
+      else show(message, 'error');
+      return false;
+    } finally {
+      setActionStage('idle');
+    }
+  };
+
+  const topUpOperationalAllowance = async (amountText) => {
+    if (busy || !shipment || !signer || !contracts?.deliveryEscrow || !isShipper) return false;
+    let amount;
+    try {
+      amount = parseEther(String(amountText).trim());
+    } catch {
+      show('Enter a valid CARGO reserve amount.', 'error');
+      return false;
+    }
+    if (amount <= 0n) {
+      show('Reserve amount must be greater than zero.', 'error');
+      return false;
+    }
+    setActionStage('topping-up-allowance');
+    let transactionToast;
+    try {
+      transactionToast = startTransactionToast({
+        wallet: 'Confirm the CARGO reserve allowance in MetaMask…',
+        submitted: 'Adding CARGO operational reserve…',
+        success: 'Operational reserve updated.',
+      });
+      await ensureTokenAllowance({
+        token: contracts.cargoToken,
+        spender: contracts.deliveryEscrow.target,
+        amount,
+        signer,
+        provider,
+      });
+      const tx = await sendWalletContractTransaction({
+        contract: contracts.deliveryEscrow,
+        method: 'topUpOperationalAllowance',
+        args: [BigInt(shipment.id), amount],
+        signer,
+        provider,
+      });
+      transactionToast.submitted();
+      await tx.wait();
       transactionToast.success();
       setRefreshKey((value) => value + 1);
       return true;
@@ -525,7 +801,7 @@ export function Track() {
   const acceptMutualCancellation = async (cancellationId) => {
     if (!await confirmAction({
       title: 'Accept shipment cancellation?',
-      message: `${formatEth(shipment.released)} already released remains with the carrier. ${formatEth(shipment.remaining)} remaining escrow will return to the shipper.`,
+      message: `${formatCargo(shipment.released)} already released remains with the carrier. ${formatCargo(shipment.remaining)} remaining escrow will return to the shipper.`,
       confirmLabel: 'Accept cancellation',
       tone: 'danger',
     })) return false;
@@ -573,11 +849,16 @@ export function Track() {
     successMessage: 'Cancellation request marked as expired.',
   });
 
+  const confirmFundingQuote = (quote) => quote.total === 0n || confirmAction({
+    title: 'Confirm CARGO funding',
+    message: `Delivery compensation: ${formatCargo(quote.compensation)}. Operational reserve: ${formatCargo(quote.operational)}. Response allowance: ${formatCargo(quote.response)}. Total approval: ${formatCargo(quote.total)}. Unused reserves are refundable.`,
+    confirmLabel: `Approve ${formatCargo(quote.total)}`,
+  });
+
   const sendAmendmentTransaction = async ({
     stage,
     method,
     args,
-    value = 0n,
     progressMessage,
     successMessage,
   }) => {
@@ -607,21 +888,26 @@ export function Track() {
         submitted: progressMessage.replace(/\.\.\.$/, '…'),
         success: successMessage,
       });
-      const tx = await sendWalletContractTransaction({
+      const needsFundingQuote = ['requestAmendment', 'requestAmendmentWithGasPolicy', 'acceptAmendment'].includes(method);
+      const tx = needsFundingQuote ? await sendCargoFundingTransaction({
+        contracts, method, args, signer, provider, confirmQuote: confirmFundingQuote,
+      }) : await sendWalletContractTransaction({
         contract: contracts.lifecycleManager,
         method,
         args,
-        overrides: value > 0n ? { value } : undefined,
         signer,
         provider,
       });
+      if (!tx) { transactionToast.dismiss(); return false; }
       transactionToast.submitted();
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) {
         throw new Error('The amendment transaction was not confirmed.');
       }
 
-      transactionToast.success();
+      const responseReimbursement = receiptEventAmount(receipt, contracts.lifecycleManager, 'AmendmentResponseReimbursed');
+      const responseRefund = receiptEventAmount(receipt, contracts.lifecycleManager, 'AmendmentResponseAllowanceRefunded');
+      transactionToast.success(`${successMessage}${responseReimbursement > 0n ? ` ${formatCargo(responseReimbursement)} response gas reimbursement paid.` : ''}${responseRefund > 0n ? ` ${formatCargo(responseRefund)} unused response allowance returned.` : ''}`);
       setRefreshKey((current) => current + 1);
       return true;
     } catch (actionError) {
@@ -641,6 +927,8 @@ export function Track() {
     existingFunding,
     newMilestones,
     additionalFunding,
+    gasPolicy = 0,
+    responseAllowance = 0n,
     directExtension,
   }) => {
     if (directExtension) {
@@ -655,7 +943,7 @@ export function Track() {
 
     return sendAmendmentTransaction({
       stage: 'requesting-amendment',
-      method: 'requestAmendment',
+      method: gasPolicy === 1 ? 'requestAmendmentWithGasPolicy' : 'requestAmendment',
       args: [
         BigInt(shipment.id),
         BigInt(proposedDeadline),
@@ -663,10 +951,10 @@ export function Track() {
         note,
         existingFunding,
         newMilestones,
+        ...(gasPolicy === 1 ? [gasPolicy, responseAllowance] : []),
       ],
-      value: isShipper ? additionalFunding : 0n,
       progressMessage: isShipper && additionalFunding > 0n
-        ? `Staging ${formatEth(additionalFunding)} with the amendment request...`
+        ? `Staging ${formatCargo(additionalFunding)} with the amendment request...`
         : 'Recording the amendment request on-chain...',
       successMessage: 'Amendment request sent.',
     });
@@ -677,17 +965,16 @@ export function Track() {
     if (!await confirmAction({
       title: 'Accept this agreement change?',
       message: shipperMustFund && amendment.additionalFunding > 0n
-        ? `${formatEth(amendment.additionalFunding)} will be added to escrow and the proposed agreement will take effect.`
+        ? `${formatCargo(amendment.additionalFunding)} will be added to escrow and the proposed agreement will take effect.`
         : 'The proposed deadline and milestone funding plan will replace the current agreement terms.',
       confirmLabel: shipperMustFund && amendment.additionalFunding > 0n
-        ? `Add ${formatEth(amendment.additionalFunding)} and accept`
+        ? `Add ${formatCargo(amendment.additionalFunding)} and accept`
         : 'Accept agreement change',
     })) return false;
     return sendAmendmentTransaction({
       stage: 'accepting-amendment',
       method: 'acceptAmendment',
       args: [BigInt(shipment.id), BigInt(amendment.id)],
-      value: shipperMustFund ? amendment.additionalFunding : 0n,
       progressMessage: 'Applying the agreed shipment amendment...',
       successMessage: 'Amendment accepted and applied.',
     });
@@ -725,7 +1012,7 @@ export function Track() {
 
     if (!await confirmAction({
       title: 'Claim remaining escrow?',
-      message: `${formatEth(shipment.remaining)} will be returned to the shipper wallet. This refund cannot be reversed.`,
+      message: `${formatCargo(shipment.remaining)} will be returned to the shipper wallet. This refund cannot be reversed.`,
       confirmLabel: 'Claim refund',
       tone: 'danger',
     })) return;
@@ -756,7 +1043,7 @@ export function Track() {
       transactionToast = startTransactionToast({
         wallet: 'Confirm the escrow refund in MetaMask…',
         submitted: 'Refunding remaining escrow…',
-        success: `${formatEth(latestRemaining)} refunded to the shipper wallet.`,
+        success: `${formatCargo(latestRemaining)} refunded to the shipper wallet.`,
       });
       const tx = await sendWalletContractTransaction({
         contract: contracts.deliveryEscrow,
@@ -768,8 +1055,9 @@ export function Track() {
       transactionToast.submitted();
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) throw new Error('Refund was not confirmed.');
-
-      transactionToast.success();
+      const escrowRefund = receiptEventAmount(receipt, contracts.deliveryEscrow, 'RefundIssued');
+      const reserveRefund = receiptEventAmount(receipt, contracts.deliveryEscrow, 'OperationalAllowanceRefunded');
+      transactionToast.success(`${formatCargo(escrowRefund || latestRemaining)} escrow refunded.${reserveRefund > 0n ? ` ${formatCargo(reserveRefund)} unused gas reserve returned.` : ''}`);
       setRefreshKey((value) => value + 1);
     } catch (actionError) {
       const message = formatActionError(actionError);
@@ -802,7 +1090,6 @@ export function Track() {
       return false;
     }
 
-    setActionStage('submitting-proof');
     let transactionToast;
 
     try {
@@ -812,9 +1099,21 @@ export function Track() {
         activeSignerAddress,
       )) return false;
 
-      const hash = await hashFile(file);
-      const uploadResult = await uploadPhoto(file, hash, shipment.id, milestoneId);
-      const proofReference = `${uploadResult.url}?sha256=${encodeURIComponent(hash)}`;
+      setActionStage('authorizing-proof');
+      const accessToken = await getProofAuthToken();
+      setActionStage('uploading-proof');
+      const uploadResult = await pinEncryptedProof(file, {
+        requestId: shipment.id,
+        milestoneId,
+        token: accessToken,
+        onStage: (stage) => {
+          if (stage === 'encrypting' || stage === 'uploading' || stage === 'finalizing') {
+            setActionStage('uploading-proof');
+          }
+        },
+      });
+      const proofReference = uploadResult.proofUri;
+      setActionStage('confirming-proof');
       transactionToast = startTransactionToast({
         wallet: 'Confirm proof submission in MetaMask…',
         submitted: 'Submitting photo proof…',
@@ -828,10 +1127,13 @@ export function Track() {
         provider,
       });
       transactionToast.submitted();
+      setActionStage('waiting-proof-confirmation');
       const receipt = await tx.wait();
       if (!receipt || receipt.status !== 1) throw new Error('Proof submission was not confirmed.');
-      
-      transactionToast.success();
+      const reimbursement = receiptEventAmount(receipt, contracts.deliveryEscrow, 'OperationalAllowanceReimbursed');
+      transactionToast.success(reimbursement > 0n
+        ? `Photo proof submitted. You received ${formatCargo(reimbursement)} gas reimbursement.`
+        : 'Photo proof submitted. No gas reimbursement was paid for this submission.');
       setRefreshKey((value) => value + 1);
       return true;
     } catch (actionError) {
@@ -862,8 +1164,8 @@ export function Track() {
       : 0n;
     if (approve && !await confirmAction({
       title: 'Release checkpoint payment?',
-      message: `Approving “${milestone?.name || 'this checkpoint'}” releases ${formatEth(payout)} to ${walletIdentityLabel(shipment.carrier, walletIdentities)}.`,
-      confirmLabel: `Approve & release ${formatEth(payout)}`,
+      message: `Approving “${milestone?.name || 'this checkpoint'}” releases ${formatCargo(payout)} to ${walletIdentityLabel(shipment.carrier, walletIdentities)}.`,
+      confirmLabel: `Approve & release ${formatCargo(payout)}`,
     })) return;
 
     setActionStage(
@@ -897,6 +1199,7 @@ export function Track() {
           approve
             ? ''
             : rejectionReason.trim(),
+          BigInt(milestone.proofSubmissionNumber),
         ],
         signer,
         provider,
@@ -924,7 +1227,41 @@ export function Track() {
     }
   };
 
-  if (loading) {
+  const withdrawMilestoneProof = async (milestoneId) => {
+    if (busy || !shipment || !signer || !contracts?.deliveryEscrow || !isCarrier) return false;
+    setActionStage('withdrawing-proof');
+    let transactionToast;
+    try {
+      transactionToast = startTransactionToast({
+        wallet: 'Confirm proof withdrawal in MetaMask…',
+        submitted: 'Withdrawing photo proof…',
+        success: 'Photo proof withdrawn.',
+      });
+      const tx = await sendWalletContractTransaction({
+        contract: contracts.deliveryEscrow,
+        method: 'withdrawProof',
+        args: [BigInt(shipment.id), BigInt(milestoneId)],
+        signer,
+        provider,
+      });
+      transactionToast.submitted();
+      await tx.wait();
+      transactionToast.success();
+      setRefreshKey((value) => value + 1);
+      return true;
+    } catch (actionError) {
+      const message = formatActionError(actionError);
+      if (transactionToast) transactionToast.error(message);
+      else show(message, 'error');
+      return false;
+    } finally {
+      setActionStage('idle');
+    }
+  };
+
+  const loadView = shipmentLoadView({ loading, shipment, error, deployError });
+
+  if (loadView === 'loading') {
     return (
       <div className={styles.page}>
         <Topbar title={`Shipment #${String(idParam || '').padStart(4, '0')}`} />
@@ -933,7 +1270,7 @@ export function Track() {
     );
   }
 
-  if (deployError || error || !shipment) {
+  if (loadView !== 'ready') {
     return (
       <div className={styles.page}>
         <Topbar title={`Shipment #${String(idParam || '').padStart(4, '0')}`} />
@@ -963,6 +1300,21 @@ export function Track() {
     account,
     shipment.shipper,
   );
+  const isCompletedPresentation = detailPresentation.currentStage === 'completed';
+  const hasCompletionTip = (shipment.tipAmount ?? 0n) > 0n;
+  const hasFinishedCompletionFollowUp = hasCarrierRating && hasCompletionTip;
+  const showNextActionCard = !isCompletedPresentation
+    || (isShipper && !hasFinishedCompletionFollowUp);
+  let nextActionText = detailPresentation.requiredAction || detailPresentation.nextStep;
+  if (isCompletedPresentation && isShipper) {
+    if (hasCarrierRating) {
+      nextActionText = 'You rated the carrier. Send an optional tip to thank the carrier.';
+    } else if (hasCompletionTip) {
+      nextActionText = 'You sent the carrier a tip. Share your experience with a rating.';
+    } else {
+      nextActionText = 'Share your experience with a rating, or send an optional tip to thank the carrier.';
+    }
+  }
 
   return (
     <div className={styles.page}>
@@ -989,13 +1341,15 @@ export function Track() {
           )}
         </div>
 
-        <div className={styles.nextActionCard} role="status">
-          <span className={styles.nextActionIcon} aria-hidden="true"><HiOutlineArrowRight /></span>
-          <div>
-            <span className={styles.nextActionKicker}>Next action</span>
-            <strong>{detailPresentation.requiredAction || detailPresentation.nextStep}</strong>
+        {showNextActionCard && (
+          <div className={styles.nextActionCard} role="status">
+            <span className={styles.nextActionIcon} aria-hidden="true"><HiOutlineArrowRight /></span>
+            <div>
+              <span className={styles.nextActionKicker}>Next action</span>
+              <strong>{nextActionText}</strong>
+            </div>
           </div>
-        </div>
+        )}
 
         <ol className={styles.lifecycle} aria-label="Shipment lifecycle">
           {detailPresentation.lifecycle.map((stage, index) => (
@@ -1009,7 +1363,7 @@ export function Track() {
         <dl className={styles.detailFacts}>
           <DetailFact label="Created" value={formatDate(shipment.createdAt)} />
           <DetailFact label="Deadline" value={formatDate(shipment.deadline)} />
-          <DetailFact label={shipment.escrow > 0n ? 'Escrow' : 'Planned payment'} value={formatEth(displayedValue)} />
+          <DetailFact label={shipment.escrow > 0n ? 'Escrow' : 'Planned payment'} value={formatCargo(displayedValue)} />
           <DetailFact label="Shipper" value={walletIdentityLabel(shipment.shipper, walletIdentities)} title={shipment.shipper} />
           <DetailFact
             label="Carrier"
@@ -1057,9 +1411,9 @@ export function Track() {
                   <h2>Checkpoints</h2>
                 </div>
                 <div className={styles.checkpointPaymentSummary} aria-label="Escrow summary">
-                  <PaymentMetric label="Escrow" value={formatEth(shipment.escrow)} />
-                  <PaymentMetric label="Released" value={formatEth(shipment.released)} />
-                  <PaymentMetric label="Remaining" value={formatEth(shipment.remaining)} />
+                  <PaymentMetric label="Escrow" value={formatCargo(shipment.escrow)} />
+                  <PaymentMetric label="Released" value={formatCargo(shipment.released)} />
+                  <PaymentMetric label="Remaining" value={formatCargo(shipment.remaining)} />
                 </div>
               </div>
 
@@ -1069,16 +1423,22 @@ export function Track() {
                 selectedIndex={selectedIndex}
                 onSelect={setSelectedIndex}
                 walletIdentities={walletIdentities}
-                onViewProof={setProofViewerMilestone}
+                onViewProof={openProofViewer}
+                proofViewerLoadingMilestoneId={proofViewerLoadingMilestoneId}
                 canVerify={isShipper}
                 canSubmitProof={proofSubmissionOpen}
                 busy={busy}
+                actionStage={actionStage}
                 onVerify={verifyMilestone}
                 onSubmitProof={submitMilestoneProof}
+                onWithdrawProof={withdrawMilestoneProof}
                 ratingRequestId={shipment.id}
                 ratingCarrier={shipment.carrier}
                 ratingIsShipper={isShipper}
                 ratingStatus={shipment.status}
+                onRatingPublished={() => setHasCarrierRating(true)}
+                canTipCarrier={canTipCarrier}
+                onFocusTip={focusCarrierTip}
               />
             </Card>
           )}
@@ -1108,6 +1468,11 @@ export function Track() {
             busy={busy}
             actionStage={actionStage}
             onTip={sendCarrierTip}
+            onTopUp={topUpOperationalAllowance}
+            account={account}
+            cargoToken={contracts?.cargoToken}
+            cargoBalance={cargoBalance}
+            onTopUpCargo={openCargoTopUp}
           />
         </Card>
       )}
@@ -1141,6 +1506,8 @@ export function Track() {
             shipment={shipment}
             account={account}
             isShipper={isShipper}
+            cargoBalance={cargoBalance}
+            onTopUpCargo={openCargoTopUp}
             isParticipant={isShipper || isCarrier}
             busy={busy}
             actionStage={actionStage}
@@ -1193,7 +1560,7 @@ export function Track() {
             </h2>
             <p>
               {canClaimRefund
-                ? `${formatEth(shipment.remaining)} remains available to refund.`
+                ? `${formatCargo(shipment.remaining)} remains available to refund.`
                 : 'Cancellation is available until a proposal is approved and funded.'}
             </p>
           </div>
@@ -1216,12 +1583,51 @@ export function Track() {
         <ProofViewerModal
           milestone={proofViewerMilestone}
           onClose={() => setProofViewerMilestone(null)}
+          requestId={proofViewerMilestone.requestId}
+          accessToken={proofViewerMilestone.accessToken}
+          gatewayBases={getConfiguredGatewayBases()}
         />
       )}
       {reputationCarrier && (
         <CarrierReputationModal
           carrier={reputationCarrier}
           onClose={() => setReputationCarrier(null)}
+        />
+      )}
+      {fundingReview && (
+        <BrandedModal title="Fund shipment" description="Review delivery compensation and the refundable carrier gas reserve." Icon={HiOutlineCreditCard} onClose={() => setFundingReview(null)} busy={busy} footer={<><Button variant="secondary" onClick={() => setFundingReview(null)} disabled={busy}>Cancel</Button><Button onClick={confirmProposalFunding} disabled={busy}>{busy ? 'Funding…' : `Fund ${formatCargo(fundingReview.quote.total + parseOptionalCargo(fundingReview.extraText))}`}</Button></>}>
+          <div className={styles.fundingBreakdown}>
+            <PaymentRow label="Delivery compensation" value={formatCargo(fundingReview.quote.compensation)} />
+            <div className={styles.fundingReserveCalculation}>
+              <span>Operational gas reserve</span>
+              <strong>
+                {fundingReview.eligibleProofCount > 0
+                  ? `${fundingReview.eligibleProofCount} eligible proof submission${fundingReview.eligibleProofCount === 1 ? '' : 's'} × ${formatCargo(fundingReview.quote.operational / BigInt(fundingReview.eligibleProofCount))} minimum each = ${formatCargo(fundingReview.quote.operational)}`
+                  : formatCargo(fundingReview.quote.operational)}
+              </strong>
+            </div>
+            <label className={styles.reserveInputLabel} htmlFor="extra-initial-reserve">Extra reserve <span>Optional</span></label>
+            <div className={styles.tipInputWrap}><input id="extra-initial-reserve" inputMode="decimal" value={fundingReview.extraText} onChange={(event) => setFundingReview((current) => ({ ...current, extraText: event.target.value }))} placeholder="0.00" /><span>C.</span></div>
+            <AvailableCargoBalance
+              balance={cargoBalance}
+              requiredAmount={fundingReview.quote.total + parseOptionalCargo(fundingReview.extraText)}
+              onTopUp={openCargoTopUp}
+            />
+            <PaymentRow label="Total to fund" value={formatCargo(fundingReview.quote.total + parseOptionalCargo(fundingReview.extraText))} />
+          </div>
+          <p className={styles.fundingExplanation}>The reserve is separate from milestone compensation and covers eligible carrier proof-submission gas. Unused reserve returns to you when the shipment settles.</p>
+          <p className={styles.fundingExplanation}>MetaMask may request token approval first. Approval grants permission; the following funding transaction transfers the tokens.</p>
+        </BrandedModal>
+      )}
+      {PROOF_PROGRESS_STAGES.has(actionStage) && <ProofUploadProgressModal stage={actionStage} />}
+      {cargoTopUp && (
+        <CargoTopUpModal
+          suggestedCargo={cargoTopUp.suggestedCargo}
+          cargoBalance={cargoBalance}
+          ethBalance={ethBalance}
+          busy={busy}
+          onClose={() => !busy && setCargoTopUp(null)}
+          onConfirm={completeCargoTopUp}
         />
       )}
       {confirmation && <ConfirmDialog {...confirmation} />}
@@ -1234,6 +1640,8 @@ function AmendmentPanel({
   shipment,
   account,
   isShipper,
+  cargoBalance,
+  onTopUpCargo,
   isParticipant,
   busy,
   actionStage,
@@ -1257,6 +1665,8 @@ function AmendmentPanel({
   const [responseDeadline, setResponseDeadline] = useState(() => (
     suggestedAmendmentResponseDeadline(shipment.deadline)
   ));
+  const [gasPolicy, setGasPolicy] = useState(0);
+  const [responseAllowance, setResponseAllowance] = useState('');
   const [existingAmounts, setExistingAmounts] = useState({});
   const [newMilestones, setNewMilestones] = useState([]);
   const [draggedNewMilestone, setDraggedNewMilestone] = useState(null);
@@ -1281,12 +1691,15 @@ function AmendmentPanel({
   const firstUnpaidIndex = shipment.milestones.findIndex(
     (milestone) => milestone.status !== 'Paid',
   );
+  const milestoneLimitReached = shipment.milestones.length + newMilestones.length >= 20;
 
   const resetForm = () => {
     setNote('');
     setChangeDeadline(false);
     setProposedDeadline(suggestedExtendedDeadline(shipment.deadline));
     setResponseDeadline(suggestedAmendmentResponseDeadline(shipment.deadline));
+    setGasPolicy(0);
+    setResponseAllowance('');
     setExistingAmounts({});
     setNewMilestones([]);
     setDraggedNewMilestone(null);
@@ -1298,7 +1711,7 @@ function AmendmentPanel({
   };
 
   const addNewMilestone = () => {
-    if (firstUnpaidIndex < 0) return;
+    if (firstUnpaidIndex < 0 || milestoneLimitReached) return;
     setFundingPlanOpen(true);
     setNewMilestones((current) => [...current, {
       key: `${Date.now()}-${current.length}`,
@@ -1448,12 +1861,18 @@ function AmendmentPanel({
       }).sort((a, b) => (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
       const additionalFunding = [...existingFunding, ...additions]
         .reduce((total, allocation) => total + allocation[allocation.length - 1], 0n);
+      const responseAllowanceValue = gasPolicy === 1
+        ? parsePositiveEth(responseAllowance)
+        : 0n;
+      if (gasPolicy === 1 && responseAllowanceValue === 0n) {
+        throw new Error('Enter a CARGO response allowance or choose Each Pays Own.');
+      }
 
       if (additionalFunding > 0n && additionalFunding < MIN_ADDITIONAL_FUNDING_WEI) {
-        throw new Error('New amendment funding must total at least 0.01 ETH.');
+        throw new Error('New amendment funding must total at least 0.01 C.');
       }
       if (deadline < shipment.deadline && additionalFunding < MIN_ADDITIONAL_FUNDING_WEI) {
-        throw new Error('A shorter deadline requires at least 0.01 ETH of new funding.');
+        throw new Error('A shorter deadline requires at least 0.01 C. of new funding.');
       }
       if (deadline === shipment.deadline && additionalFunding === 0n) {
         throw new Error('Change the deadline or add new escrow funding.');
@@ -1482,6 +1901,8 @@ function AmendmentPanel({
         existingFunding,
         newMilestones: additions,
         additionalFunding,
+        gasPolicy,
+        responseAllowance: responseAllowanceValue,
         directExtension,
       });
     } catch (error) {
@@ -1516,7 +1937,20 @@ function AmendmentPanel({
           onDrop={(event) => dropOnNewMilestone(event, newMilestone.key)}
           onDragEnd={finishNewMilestoneDrag}
         >
-          <div className={styles.amendmentCardKicker}>New funded milestone</div>
+          <div className={styles.amendmentCardKicker}>
+            <span>New funded milestone</span>
+            <button
+              type="button"
+              className={styles.amendmentRemoveButton}
+              onClick={() => setNewMilestones((current) => current.filter(
+                (entry) => entry.key !== newMilestone.key,
+              ))}
+              aria-label={`Remove ${newMilestone.name || 'new milestone'}`}
+              title="Remove milestone"
+            >
+              <HiOutlineTrash />
+            </button>
+          </div>
           <div className={styles.amendmentCardFields}>
             <label>
               <span>Milestone name</span>
@@ -1531,7 +1965,7 @@ function AmendmentPanel({
               />
             </label>
             <label>
-              <span>Funded ETH</span>
+              <span>Funded CARGO</span>
               <div className={styles.amendmentEthInput}>
                 <input
                   type="number"
@@ -1546,19 +1980,18 @@ function AmendmentPanel({
                   ))}
                   placeholder="0.00"
                 />
-                <span>ETH</span>
+                <span>C.</span>
               </div>
+              {isShipper ? (
+                <AvailableCargoBalance
+                  balance={cargoBalance}
+                  requiredAmount={parseOptionalCargo(newMilestone.amount)}
+                  onTopUp={onTopUpCargo}
+                />
+              ) : (
+                <span className={styles.availableBalance}>The shipper funds this if accepted.</span>
+              )}
             </label>
-            <button
-              type="button"
-              className={styles.amendmentRemoveButton}
-              onClick={() => setNewMilestones((current) => current.filter(
-                (entry) => entry.key !== newMilestone.key,
-              ))}
-              aria-label={`Remove ${newMilestone.name || 'new milestone'}`}
-            >
-              <HiOutlineTrash />
-            </button>
           </div>
           <small className={styles.amendmentPlacementNote}>{placementLabel}</small>
         </div>
@@ -1599,13 +2032,18 @@ function AmendmentPanel({
             </div>
             <div>
               <span>New escrow</span>
-              <strong>{formatEth(pending.additionalFunding)}</strong>
+              <strong>{formatCargo(pending.additionalFunding)}</strong>
             </div>
             <div>
               <span>Answer before</span>
               <strong>{formatDate(pending.responseDeadline)}</strong>
             </div>
+            {!pending.directExtension && <div><span>Response gas</span><strong>{pending.gasPolicy === 1 ? 'Requester covers response' : 'Each pays own'}</strong></div>}
+            {pending.gasPolicy === 1 && <div><span>Response allowance</span><strong>{formatCargo(pending.responseAllowance)}</strong></div>}
           </div>
+          {!pending.directExtension && <p className={styles.amendmentPolicyExplanation}>{pending.gasPolicy === 1
+            ? 'The responder pays ETH upfront and receives capped CARGO reimbursement after a successful acceptance or rejection. Unused allowance returns to the requester.'
+            : 'The requester pays submission gas and the responder pays their own acceptance or rejection gas. No response reimbursement is funded.'}</p>}
           <blockquote className={styles.amendmentNote}>{pending.requesterNote}</blockquote>
           <AmendmentAllocations amendment={pending} milestones={shipment.milestones} />
 
@@ -1705,6 +2143,39 @@ function AmendmentPanel({
             </label>
           </div>
 
+            <div className={styles.amendmentFormGrid}>
+              <label>
+              <span>Who pays the response gas?</span>
+              <select value={gasPolicy} onChange={(event) => setGasPolicy(Number(event.target.value))}>
+                <option value={0}>Each pays own</option>
+                <option value={1}>Requester covers response</option>
+              </select>
+              <small>{gasPolicy === 0
+                ? 'You pay gas to submit this change. The other party pays gas to accept or reject it; neither response is reimbursed.'
+                : 'You pay submission gas and fund a separate CARGO allowance. The responder pays ETH upfront, then receives capped CARGO reimbursement for accepting or rejecting.'}</small>
+            </label>
+            {gasPolicy === 1 && (
+              <label>
+                <span>Response allowance (C.)</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  value={responseAllowance}
+                  onChange={(event) => setResponseAllowance(event.target.value)}
+                  placeholder="Minimum calculated on-chain"
+                />
+                <AvailableCargoBalance
+                  balance={cargoBalance}
+                  requiredAmount={parseOptionalCargo(responseAllowance)}
+                  onTopUp={onTopUpCargo}
+                />
+                <small>This is a refundable budget, not a fixed fee. It must meet the contract minimum; unused allowance returns to you and reimbursement may not cover the full network fee.</small>
+              </label>
+            )}
+          </div>
+
           <label className={styles.amendmentNoteField}>
             <span>Reason for change</span>
             <textarea
@@ -1734,7 +2205,7 @@ function AmendmentPanel({
                 </h3>
                 <p>
                   {fundingPlanOpen
-                    ? 'Add ETH on top of unpaid payouts, insert a funded checkpoint, or append a new final checkpoint.'
+                    ? 'Add CARGO on top of unpaid payouts, insert a funded checkpoint, or append a new final checkpoint.'
                     : 'Expand to review existing allocations or add newly funded milestones.'}
                 </p>
               </div>
@@ -1743,10 +2214,11 @@ function AmendmentPanel({
                   type="button"
                   className={styles.amendmentAddButton}
                   onClick={addNewMilestone}
-                  disabled={firstUnpaidIndex < 0}
+                  disabled={firstUnpaidIndex < 0 || milestoneLimitReached}
                 >
                   <HiOutlinePlus /> Add funded milestone
                 </button>
+                <span className={styles.amendmentLimit}>{shipment.milestones.length + newMilestones.length} / 20 total checkpoints{milestoneLimitReached ? ' · Maximum reached' : ''}</span>
                 <button
                   type="button"
                   className={styles.amendmentEditorChevron}
@@ -1829,20 +2301,29 @@ function AmendmentPanel({
                                     disabled={milestone.status === 'Paid'}
                                     placeholder={milestone.status === 'Paid' ? 'Paid' : '0.00'}
                                   />
-                                  <span>ETH</span>
+                                  <span>C.</span>
                                 </div>
+                                {milestone.status !== 'Paid' && (isShipper ? (
+                                  <AvailableCargoBalance
+                                    balance={cargoBalance}
+                                    requiredAmount={parseOptionalCargo(existingAmounts[milestone.milestoneId])}
+                                    onTopUp={onTopUpCargo}
+                                  />
+                                ) : (
+                                  <span className={styles.availableBalance}>The shipper funds this if accepted.</span>
+                                ))}
                               </label>
                             </div>
                             <div className={styles.amendmentFundingEquation}>
                               {milestone.status === 'Paid' ? (
-                                <strong>{formatEth(oldFunding)}</strong>
+                                <strong>{formatCargo(oldFunding)}</strong>
                               ) : (
                                 <>
-                                  <span>{formatEth(oldFunding)}</span>
+                                  <span>{formatCargo(oldFunding)}</span>
                                   <span aria-hidden="true">+</span>
-                                  <span>{formatEth(newFunding)}</span>
+                                  <span>{formatCargo(newFunding)}</span>
                                   <span aria-hidden="true">=</span>
-                                  <strong>{formatEth(combinedFunding)}</strong>
+                                  <strong>{formatCargo(combinedFunding)}</strong>
                                 </>
                               )}
                             </div>
@@ -1873,7 +2354,7 @@ function AmendmentPanel({
                   type="button"
                   className={styles.amendmentBottomAddButton}
                   onClick={addNewMilestone}
-                  disabled={firstUnpaidIndex < 0}
+                  disabled={firstUnpaidIndex < 0 || milestoneLimitReached}
                 >
                   <HiOutlinePlus aria-hidden="true" /> Add funded milestone
                 </button>
@@ -1983,13 +2464,13 @@ function AmendmentAllocations({ amendment, milestones }) {
       {amendment.existingFunding.map((allocation) => (
         <div key={`existing-${allocation.milestoneId}`}>
           <span>Extra for {milestoneReferenceLabel(allocation.milestoneId, milestones)}</span>
-          <strong>+{formatEth(allocation.amount)}</strong>
+          <strong>+{formatCargo(allocation.amount)}</strong>
         </div>
       ))}
       {amendment.newMilestones.map((milestone, index) => (
         <div key={`new-${index}-${milestone.name}`}>
           <span>New: {milestone.name} · {insertionReferenceLabel(milestone.insertBeforeMilestoneId, milestones)}</span>
-          <strong>{formatEth(milestone.amount)}</strong>
+          <strong>{formatCargo(milestone.amount)}</strong>
         </div>
       ))}
     </div>
@@ -2023,7 +2504,7 @@ function AmendmentChangeSummary({ amendment, milestones }) {
       {amendment.existingFunding.map((allocation) => (
         <li key={`history-existing-${allocation.milestoneId}`}>
           <span>{milestoneReferenceLabel(allocation.milestoneId, milestones)} funding increased</span>
-          <strong>+{formatEth(allocation.amount)}</strong>
+          <strong>+{formatCargo(allocation.amount)}</strong>
         </li>
       ))}
       {amendment.newMilestones.map((milestone, index) => (
@@ -2031,7 +2512,7 @@ function AmendmentChangeSummary({ amendment, milestones }) {
           <span>
             New milestone · {insertionReferenceLabel(milestone.insertBeforeMilestoneId, milestones)}
           </span>
-          <strong>{milestone.name} · {formatEth(milestone.amount)}</strong>
+          <strong>{milestone.name} · {formatCargo(milestone.amount)}</strong>
         </li>
       ))}
     </ul>
@@ -2047,14 +2528,6 @@ function AmendmentConfirmationModal({
   onClose,
   onConfirm,
 }) {
-  useEffect(() => {
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape' && !busy) onClose();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [busy, onClose]);
-
   const existingFunding = new Map(
     draft.existingFunding.map(([milestoneId, amount]) => [Number(milestoneId), amount]),
   );
@@ -2092,14 +2565,13 @@ function AmendmentConfirmationModal({
   const resultingEscrow = shipment.escrow + draft.additionalFunding;
 
   return (
-    <div className={styles.amendmentConfirmScrim} onMouseDown={() => !busy && onClose()}>
-      <section
-        className={styles.amendmentConfirmDialog}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="amendment-confirm-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <ModalShell
+      size="xl"
+      onClose={onClose}
+      busy={busy}
+      labelledBy="amendment-confirm-title"
+      className={styles.amendmentConfirmDialog}
+    >
         <header className={styles.amendmentConfirmHeader}>
           <div>
             <span>Final review</span>
@@ -2143,14 +2615,20 @@ function AmendmentConfirmationModal({
         </blockquote>
         <div className={styles.amendmentConfirmFunding}>
           <span>Additional escrow required</span>
-          <strong>{formatEth(draft.additionalFunding)}</strong>
+          <strong>{formatCargo(draft.additionalFunding)}</strong>
         </div>
+        {draft.gasPolicy === 1 && (
+          <div className={styles.amendmentConfirmFunding}>
+            <span>Response allowance</span>
+            <strong>{formatCargo(draft.responseAllowance)}</strong>
+          </div>
+        )}
         <p className={styles.amendmentConfirmWarning}>
           {draft.directExtension
             ? 'This deadline-only extension is applied immediately by the shipper.'
             : isShipper
-              ? 'The new ETH is staged with this request and only enters escrow if the carrier accepts.'
-              : 'If the shipper accepts, they must fund the new ETH allocation in the acceptance transaction.'}
+              ? 'The new CARGO is staged with this request and only enters escrow if the carrier accepts.'
+              : 'If the shipper accepts, they must fund the new CARGO allocation in the acceptance transaction.'}
         </p>
 
         <footer className={styles.amendmentConfirmFooter}>
@@ -2163,8 +2641,7 @@ function AmendmentConfirmationModal({
                 : 'Confirm agreement change'}
           </Button>
         </footer>
-      </section>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -2177,7 +2654,7 @@ function AgreementSnapshot({ title, deadline, escrow, milestones, changed = fals
       </div>
       <dl>
         <div><dt>Deadline</dt><dd>{formatDate(deadline)}</dd></div>
-        <div><dt>Funded escrow</dt><dd>{formatEth(escrow)}</dd></div>
+        <div><dt>Funded escrow</dt><dd>{formatCargo(escrow)}</dd></div>
       </dl>
       <ol className={styles.agreementSnapshotMilestones}>
         {milestones.map((milestone, index) => (
@@ -2186,8 +2663,8 @@ function AgreementSnapshot({ title, deadline, escrow, milestones, changed = fals
             <div>
               <strong>{milestone.name}</strong>
               <small>
-                {formatEth(milestone.amount)}
-                {milestone.isNew ? ' · New funded milestone' : milestone.added > 0n ? ` · +${formatEth(milestone.added)}` : ''}
+                {formatCargo(milestone.amount)}
+                {milestone.isNew ? ' · New funded milestone' : milestone.added > 0n ? ` · +${formatCargo(milestone.added)}` : ''}
               </small>
             </div>
           </li>
@@ -2323,13 +2800,13 @@ function CancellationPanel({
           <div className={styles.cancellationSettlement}>
             <div>
               <span>Already released</span>
-              <strong>{formatEth(shipment.released)}</strong>
+              <strong>{formatCargo(shipment.released)}</strong>
               <small>Remains with carrier</small>
             </div>
             <HiOutlineArrowRight aria-hidden="true" />
             <div>
               <span>Remaining escrow</span>
-              <strong>{formatEth(shipment.remaining)}</strong>
+              <strong>{formatCargo(shipment.remaining)}</strong>
               <small>Returns to shipper if accepted</small>
             </div>
           </div>
@@ -2990,7 +3467,6 @@ function ProposalDetailModal({
 }) {
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [rejectionNote, setRejectionNote] = useState('');
-  const dialogRef = useDialogFocus({ onClose });
   const rejectionNoteWordCount = countWords(rejectionNote);
   const rejectionNoteTooLong = exceedsTextLimit(
     rejectionNote,
@@ -3010,19 +3486,17 @@ function ProposalDetailModal({
   };
 
   return (
-    <div className={styles.proposalModalOverlay} role="presentation" onMouseDown={onClose}>
-      <section
-        ref={dialogRef}
-        className={styles.proposalModal}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="proposal-modal-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <ModalShell
+      size="lg"
+      onClose={onClose}
+      busy={busy}
+      labelledBy="proposal-modal-title"
+      className={styles.proposalModal}
+    >
         <div className={styles.proposalPlanHeader}>
           <div>
-            <span className={styles.proposalCarrierLabel}>Carrier proposal #{proposal.id + 1}</span>
-            <strong id="proposal-modal-title" title={proposal.carrier}>{walletIdentityLabel(proposal.carrier, walletIdentities)}</strong>
+            <span id="proposal-modal-title" className={styles.proposalCarrierLabel}>Carrier proposal #{proposal.id + 1}</span>
+            <strong title={proposal.carrier}>{walletIdentityLabel(proposal.carrier, walletIdentities)}</strong>
             <span className={styles.proposalCreated}>Submitted {formatDate(proposal.createdAt)}</span>
             <CarrierReputationSummary carrier={proposal.carrier} onOpenProfile={onOpenCarrierReputation} />
           </div>
@@ -3030,7 +3504,7 @@ function ProposalDetailModal({
             {proposal.status !== 'Active' && (
               <Badge tone={proposalStatusTone(proposal.status)}>{proposal.status}</Badge>
             )}
-            <button type="button" className={styles.proposalModalClose} onClick={onClose} aria-label="Close proposal details">
+            <button type="button" className={styles.proposalModalClose} onClick={onClose} disabled={busy} aria-label="Close proposal details">
               <HiOutlineXMark aria-hidden="true" />
             </button>
           </div>
@@ -3044,7 +3518,7 @@ function ProposalDetailModal({
             </div>
             <div className={styles.proposalMetricTile}>
               <span>Planned escrow</span>
-              <strong>{formatEth(proposedAmount)}</strong>
+              <strong>{formatCargo(proposedAmount)}</strong>
             </div>
           </div>
           <ol className={styles.proposalSteps}>
@@ -3057,7 +3531,7 @@ function ProposalDetailModal({
                   </div>
                   <div className={styles.proposalStepMeta}>
                     <span>{milestone.payoutPercentage}% of payment</span>
-                    <strong>{formatEth(calculateProposedPayout(
+                    <strong>{formatCargo(calculateProposedPayout(
                       proposedAmount,
                       milestone.payoutPercentage,
                       index,
@@ -3135,8 +3609,7 @@ function ProposalDetailModal({
             )
           )}
         </div>
-      </section>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -3147,15 +3620,21 @@ function TimelinePanel({
   onSelect,
   walletIdentities,
   onViewProof,
+  proofViewerLoadingMilestoneId,
   canVerify,
   busy,
+  actionStage,
   onVerify,
   canSubmitProof,
   onSubmitProof,
+  onWithdrawProof,
   ratingRequestId,
   ratingCarrier,
   ratingIsShipper,
   ratingStatus,
+  onRatingPublished,
+  canTipCarrier,
+  onFocusTip,
 }) {
   const selectedEvent = events[selectedIndex] || events[0];
   const selectedMilestone = selectedEvent.milestoneId == null
@@ -3206,7 +3685,7 @@ function TimelinePanel({
                       {eventMilestone && (
                         <span className={styles.tlEscrowAllocation}>
                           <span>Escrow allocation</span>
-                          <strong>{formatEth(milestoneEscrowAllocation(eventMilestone))}</strong>
+                          <strong>{formatCargo(milestoneEscrowAllocation(eventMilestone))}</strong>
                           <small>
                             {eventMilestone.addedByAmendment
                               ? 'Amendment funded'
@@ -3222,12 +3701,26 @@ function TimelinePanel({
           </ol>
         </div>
         {ratingRequestId && ratingCarrier && ratingStatus === 'Completed' && (
-          <CarrierRatingPanel
-            requestId={ratingRequestId}
-            carrier={ratingCarrier}
-            isShipper={ratingIsShipper}
-            status={ratingStatus}
-          />
+          <>
+            <CarrierRatingPanel
+              requestId={ratingRequestId}
+              carrier={ratingCarrier}
+              isShipper={ratingIsShipper}
+              status={ratingStatus}
+              onRatingPublished={onRatingPublished}
+            />
+            {canTipCarrier && (
+              <section className={styles.tipTimelineCta} aria-labelledby="carrier-tip-cta-title">
+                <span className={styles.tipTimelineIcon} aria-hidden="true"><HiOutlineGift /></span>
+                <div>
+                  <span className={styles.tipTimelineKicker}>Delivery complete</span>
+                  <strong id="carrier-tip-cta-title">Thank the carrier</strong>
+                  <p>Send one optional tip directly to the carrier.</p>
+                </div>
+                <Button onClick={onFocusTip}>Add a tip <HiOutlineArrowRight aria-hidden="true" /></Button>
+              </section>
+            )}
+          </>
         )}
       </div>
 
@@ -3267,16 +3760,18 @@ function TimelinePanel({
                 <div className={styles.sidebarCheckpointAmount}>
                   <span>{checkpointPaymentState(selectedMilestone.status)}</span>
                   <strong>
-                    {formatEth(
+                    {formatCargo(
                       selectedMilestone.payoutAmount
                         + selectedMilestone.additionalPayoutAmount,
                     )}
                   </strong>
                 </div>
-                <p className={styles.sidebarCheckpointUpdate}>
-                  {firstMeaningfulRemark(selectedMilestone.remark, selectedMilestone.rejectionReason)
-                    || milestoneDescription(selectedMilestone.status)}
-                </p>
+                {selectedMilestone.status !== 'Paid' && (
+                  <p className={styles.sidebarCheckpointUpdate}>
+                    {firstMeaningfulRemark(selectedMilestone.remark, selectedMilestone.rejectionReason)
+                      || milestoneDescription(selectedMilestone.status)}
+                  </p>
+                )}
               </section>
             ) : (
               <div className={styles.sidebarField}>
@@ -3302,9 +3797,10 @@ function TimelinePanel({
                 <Button
                   variant="secondary"
                   size="sm"
+                  disabled={busy || proofViewerLoadingMilestoneId === selectedMilestone.milestoneId}
                   onClick={() => onViewProof(selectedMilestone)}
                 >
-                  Review photo proof
+                  {proofViewerLoadingMilestoneId === selectedMilestone.milestoneId ? 'Authorising proof…' : 'Review photo proof'}
                 </Button>
               </div>
             )}
@@ -3316,13 +3812,14 @@ function TimelinePanel({
                   rejected={selectedEvent.status === 'rejected'}
                   busy={busy}
                   onSubmit={onSubmitProof}
+                  reimbursed={Boolean(selectedMilestone?.proofSubmissionReimbursed)}
                 />
               )}
             {selectedEvent.status === 'pending' && canVerify && (
               <div className={styles.sidebarVerifyPanel}>
                 <span className={styles.sidebarLabel}>Shipper verification required</span>
                 <p className={styles.sidebarVerifyHint}>
-                  Approve to release {formatEth(
+                  Approve to release {formatCargo(
                     selectedMilestone
                       ? selectedMilestone.payoutAmount + selectedMilestone.additionalPayoutAmount
                       : 0n,
@@ -3347,41 +3844,65 @@ function TimelinePanel({
                   </div>
                 )}
                 <div className={styles.actionRow}>
-                  <Button
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => onVerify(selectedEvent.milestoneId, true)}
-                  >
-                    Approve proof & release
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="danger"
-                    disabled={busy || (showProofRejectForm && !proofRejectionReason.trim())}
-                    onClick={() => {
-                      if (!showProofRejectForm) {
-                        setShowProofRejectForm(true);
-                        return;
-                      }
-                      onVerify(selectedEvent.milestoneId, false, proofRejectionReason);
-                    }}
-                  >
-                    {showProofRejectForm ? 'Confirm rejection' : 'Reject proof'}
-                  </Button>
-                  {showProofRejectForm && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={busy}
-                      onClick={() => {
-                        setShowProofRejectForm(false);
-                        setProofRejectionReason('');
-                      }}
-                    >
-                      Keep reviewing
-                    </Button>
+                  {showProofRejectForm ? (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="softNeutral"
+                        disabled={busy}
+                        onClick={() => {
+                          setShowProofRejectForm(false);
+                          setProofRejectionReason('');
+                        }}
+                      >
+                        Keep reviewing
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        disabled={busy || !proofRejectionReason.trim()}
+                        onClick={() => onVerify(selectedEvent.milestoneId, false, proofRejectionReason)}
+                      >
+                        Reject proof
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => onVerify(selectedEvent.milestoneId, true)}
+                      >
+                        Approve proof & release
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="softDanger"
+                        disabled={busy}
+                        onClick={() => setShowProofRejectForm(true)}
+                      >
+                        Request correction
+                      </Button>
+                    </>
                   )}
                 </div>
+              </div>
+            )}
+            {selectedEvent.status === 'pending' && canSubmitProof && hasPhotoProof && (
+              <div className={styles.sidebarVerifyPanel}>
+                <span className={styles.sidebarLabel}>Proof submitted</span>
+                <p className={styles.sidebarVerifyHint}>Withdraw this proof before shipper review if you need to replace the image.</p>
+                <p className={styles.proofLimitText}>{selectedMilestone.proofWithdrawalsThisRound} of 5 withdrawals used this review round.</p>
+                {selectedMilestone.proofWithdrawalsThisRound === 4 && <p className={styles.reserveWarning}>This is your last withdrawal until the shipper rejects a submitted proof.</p>}
+                {selectedMilestone.proofWithdrawalsThisRound >= 5 && <p className={styles.reserveWarning}>Withdrawal limit reached. The shipper can still review this submitted proof.</p>}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={busy || selectedMilestone.proofWithdrawalsThisRound >= 5}
+                  onClick={() => onWithdrawProof(selectedMilestone.milestoneId)}
+                >
+                  {busy && actionStage === 'withdrawing-proof' ? 'Withdrawing…' : 'Withdraw proof'}
+                </Button>
               </div>
             )}
             {(selectedEvent.status === 'verified' || selectedEvent.status === 'paid') && (
@@ -3397,7 +3918,7 @@ function TimelinePanel({
   );
 }
 
-function ProofSubmitBox({ milestoneId, rejected, busy, onSubmit }) {
+export function ProofSubmitBox({ milestoneId, rejected, busy, onSubmit, reimbursed = false }) {
   const [selectedFile, setSelectedFile] = useState(null);
   const [fileError, setFileError] = useState('');
   const [remark, setRemark] = useState('');
@@ -3432,31 +3953,28 @@ function ProofSubmitBox({ milestoneId, rejected, busy, onSubmit }) {
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
-
   return (
     <div className={`${styles.sidebarVerifyPanel} ${styles.proofSubmitPanel}`}>
       <span className={styles.sidebarLabel}>
         {rejected ? 'Resubmit proof for this milestone' : 'Carrier checkpoint update'}
       </span>
-      <p className={styles.proofUploadHint}>Add a clear JPEG, PNG, or WebP photo. Maximum 2 MB.</p>
       <label htmlFor={fileInputId} className={styles.proofDropzone}>
         <HiOutlinePhoto className={styles.proofDropzoneIcon} aria-hidden="true" />
         <span>{selectedFile ? 'Replace photo' : 'Choose photo proof'}</span>
-        <small>{selectedFile ? selectedFile.name : 'Use a well-lit image where the package is visible.'}</small>
+        <small id={`${fileInputId}-hint`}>{selectedFile ? selectedFile.name : 'Use a well-lit image where the package is visible. JPEG, PNG, WebP, GIF, AVIF, or BMP · maximum 2 MB.'}</small>
         <input
           ref={fileInputRef}
           id={fileInputId}
           className={styles.proofFileInput}
           type="file"
-          accept="image/jpeg,image/png,image/webp"
+          accept="image/jpeg,image/png,image/webp,image/gif,image/avif,image/bmp"
           disabled={busy}
           onChange={(event) => chooseFile(event.target.files?.[0])}
           aria-describedby={`${fileInputId}-hint`}
         />
       </label>
-      <span id={`${fileInputId}-hint`} className={styles.proofUploadHint}>JPEG, PNG, or WebP · max 2 MB</span>
       {fileError && <span className={styles.proofUploadError} role="alert">{fileError}</span>}
-      {previewUrl && (
+      {previewUrl && selectedFile && (
         <div className={styles.proofPreview}>
           <img src={previewUrl} alt={`Preview of ${selectedFile.name}`} />
           <span>{Math.ceil(selectedFile.size / 1024)} KB ready to submit</span>
@@ -3474,9 +3992,50 @@ function ProofSubmitBox({ milestoneId, rejected, busy, onSubmit }) {
         />
       </div>
       <Button size="sm" disabled={busy || !selectedFile || Boolean(fileError)} onClick={handleSubmit}>
-        {busy ? 'Submitting photo proof…' : rejected ? 'Resubmit photo proof' : 'Submit photo proof'}
+        {rejected ? 'Resubmit photo proof' : 'Submit photo proof'}
       </Button>
+      <p className={styles.proofReimbursementNote}>{reimbursed
+        ? 'Gas-reimbursement already used'
+        : 'Eligible for gas-reimbursement'}</p>
     </div>
+  );
+}
+
+function ProofUploadProgressModal({ stage }) {
+  const content = {
+    'authorizing-proof': {
+      title: 'Sign in to authorise encrypted upload',
+      body: 'Confirm the wallet signature in MetaMask. No gas fee is charged.',
+    },
+    'uploading-proof': {
+      title: 'Encrypting and uploading proof',
+      body: 'Your image is encrypted before upload. Keep this page open.',
+    },
+    'confirming-proof': {
+      title: 'Confirm proof transaction in MetaMask',
+      body: 'Upload complete. Confirm the on-chain proof submission.',
+    },
+    'waiting-proof-confirmation': {
+      title: 'Waiting for on-chain confirmation',
+      body: 'Your proof has been submitted to the network.',
+    },
+  }[stage];
+
+  if (!content) return null;
+  return (
+    <ModalShell
+      size="sm"
+      onClose={() => {}}
+      busy
+      closeOnBackdrop={false}
+      labelledBy="proof-progress-title"
+      describedBy="proof-progress-description"
+      className={styles.proofProgressModal}
+    >
+        <span className={styles.proofProgressSpinner} aria-hidden="true" />
+        <h2 id="proof-progress-title">{content.title}</h2>
+        <p id="proof-progress-description">{content.body}</p>
+    </ModalShell>
   );
 }
 
@@ -3524,19 +4083,17 @@ function ProofImageCard({
 }) {
   const [imageFailed, setImageFailed] = useState(false);
   const [copied, setCopied] = useState(false);
-
-  const imageUrl = new URL(
-    proofUri,
-    window.location.origin,
-  ).href;
-
-  const parsedUrl = new URL(
-    proofUri,
-    window.location.origin,
-  );
-
-  const proofHash =
-    parsedUrl.searchParams.get('sha256') || '';
+  const parsedProof = parseProofUri(proofUri);
+  const imageUrl = parsedProof.kind === 'legacy' ? parsedProof.url : '';
+  const proofHash = parsedProof.kind === 'ipfs'
+    ? parsedProof.plaintextSha256
+    : (() => {
+      try {
+        return new URL(imageUrl).searchParams.get('sha256') || '';
+      } catch {
+        return '';
+      }
+    })();
 
   const copyHash = async () => {
     if (!proofHash) return;
@@ -3556,7 +4113,7 @@ function ProofImageCard({
   return (
     <article className={styles.proofCard}>
       <div className={styles.proofImageWrap}>
-        {!imageFailed ? (
+        {imageUrl && !imageFailed ? (
           <img
             src={imageUrl}
             alt={`Proof ${proofIndex + 1} for ${milestone.name}`}
@@ -3566,7 +4123,9 @@ function ProofImageCard({
         ) : (
           <div className={styles.proofImageError}>
             <HiOutlineExclamationCircle aria-hidden="true" />
-            <span>Photo could not be loaded</span>
+            <span>{parsedProof.kind === 'ipfs'
+              ? 'Encrypted proof — open Review photo proof'
+              : 'Photo could not be loaded'}</span>
           </div>
         )}
 
@@ -3615,14 +4174,16 @@ function ProofImageCard({
         )}
 
         <div className={styles.proofActions}>
-          <a
-            href={imageUrl}
-            target="_blank"
-            rel="noreferrer"
-            className={styles.proofActionLink}
-          >
-            View full image
-          </a>
+          {imageUrl && (
+            <a
+              href={imageUrl}
+              target="_blank"
+              rel="noreferrer"
+              className={styles.proofActionLink}
+            >
+              View full image
+            </a>
+          )}
 
           {proofHash && (
             <button
@@ -3639,19 +4200,83 @@ function ProofImageCard({
   );
 }
 
-export function ProofViewerModal({ milestone, onClose }) {
+export function ProofViewerModal({
+  milestone,
+  onClose,
+  requestId,
+  accessToken,
+  gatewayBases,
+}) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [imageFailed, setImageFailed] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
+  const [imageUrl, setImageUrl] = useState('');
+  const [imageError, setImageError] = useState('');
   const closeRef = useRef(null);
   const proofUris = milestone.proofUris || [];
   const hasMultipleProofs = proofUris.length > 1;
   const proofUri = proofUris[activeIndex];
-  const imageUrl = safeProofUrl(proofUri);
-  const focusedDialogRef = useDialogFocus({
-    onClose,
-    initialFocusRef: closeRef,
-  });
+  const parsedProof = parseProofUri(proofUri);
+  const legacyImageUrl = parsedProof.kind === 'legacy' ? parsedProof.url : '';
+  const gatewayKey = (gatewayBases || []).join('|');
+
+  useEffect(() => {
+    let active = true;
+    let cleanup = null;
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    setImageFailed(false);
+    setImageError('');
+    setImageUrl('');
+
+    if (!proofUri) {
+      setImageLoading(false);
+      return () => controller?.abort();
+    }
+    if (parsedProof.kind === 'legacy') {
+      setImageLoading(true);
+      return () => controller?.abort();
+    }
+    if (parsedProof.kind !== 'ipfs') {
+      setImageLoading(false);
+      setImageFailed(true);
+      setImageError(parsedProof.error || 'This proof reference is invalid.');
+      return () => controller?.abort();
+    }
+    if (!requestId || !accessToken) {
+      setImageLoading(false);
+      setImageFailed(true);
+      setImageError('Wallet sign-in is required to view this encrypted proof.');
+      return () => controller?.abort();
+    }
+
+    setImageLoading(true);
+    loadEncryptedProof(proofUri, {
+      requestId,
+      milestoneId: milestone.milestoneId,
+      token: accessToken,
+      gatewayBases,
+      signal: controller?.signal,
+    }).then((result) => {
+      if (!active) {
+        result.cleanup();
+        return;
+      }
+      cleanup = result.cleanup;
+      setImageUrl(result.objectUrl);
+      setImageLoading(false);
+    }).catch((error) => {
+      if (!active || error?.name === 'AbortError') return;
+      setImageLoading(false);
+      setImageFailed(true);
+      setImageError(error?.message || 'Encrypted proof could not be loaded.');
+    });
+
+    return () => {
+      active = false;
+      controller?.abort();
+      cleanup?.();
+    };
+  }, [proofUri, requestId, accessToken, milestone.milestoneId, gatewayKey]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -3677,19 +4302,13 @@ export function ProofViewerModal({ milestone, onClose }) {
   };
 
   return (
-    <div
-      className={styles.proofViewerScrim}
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
+    <ModalShell
+      size="xl"
+      onClose={onClose}
+      labelledBy="proof-viewer-title"
+      initialFocusRef={closeRef}
+      className={styles.proofViewerDialog}
     >
-      <section
-        ref={focusedDialogRef}
-        className={styles.proofViewerDialog}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="proof-viewer-title"
-      >
         <header className={styles.proofViewerHeader}>
           <div>
             <span className={styles.proofCardLabel}>Photo proof</span>
@@ -3701,12 +4320,12 @@ export function ProofViewerModal({ milestone, onClose }) {
         </header>
 
         <div className={styles.proofViewerBody}>
-          {imageLoading && imageUrl && !imageFailed && (
+          {imageLoading && !imageFailed && (
             <div className={styles.proofViewerLoading} role="status">Loading photo proof…</div>
           )}
-          {imageUrl && !imageFailed ? (
+          {(legacyImageUrl || imageUrl) && !imageFailed ? (
             <img
-              src={imageUrl}
+              src={legacyImageUrl || imageUrl}
               alt={`Photo proof attempt ${activeIndex + 1} for ${milestone.name}`}
               className={styles.proofViewerImage}
               onLoad={() => setImageLoading(false)}
@@ -3715,12 +4334,12 @@ export function ProofViewerModal({ milestone, onClose }) {
                 setImageFailed(true);
               }}
             />
-          ) : (
+          ) : !imageLoading ? (
             <div className={styles.proofViewerError}>
               <HiOutlineExclamationCircle aria-hidden="true" />
-              <span>{proofUris.length ? 'Photo could not be loaded' : 'No photo proof is available'}</span>
+              <span>{proofUris.length ? (imageError || 'Photo could not be loaded') : 'No photo proof is available'}</span>
             </div>
-          )}
+          ) : null}
           {hasMultipleProofs && (
             <>
               <button type="button" className={`${styles.proofViewerNav} ${styles.proofViewerPrev}`} onClick={() => move(-1)} aria-label="Previous proof">
@@ -3735,10 +4354,9 @@ export function ProofViewerModal({ milestone, onClose }) {
 
         <footer className={styles.proofViewerFooter}>
           <span>Attempt {proofUris.length ? activeIndex + 1 : 0} of {proofUris.length}</span>
-          {imageUrl && <a href={imageUrl} target="_blank" rel="noreferrer">Open full image</a>}
+          {(legacyImageUrl || imageUrl) && <a href={legacyImageUrl || imageUrl} target="_blank" rel="noreferrer">Open full image</a>}
         </footer>
-      </section>
-    </div>
+    </ModalShell>
   );
 }
 
@@ -3748,8 +4366,16 @@ function EscrowActivityPanel({
   busy,
   actionStage,
   onTip,
+  onTopUp,
+  account,
+  cargoToken,
+  cargoBalance,
+  onTopUpCargo,
 }) {
   const [tipAmountEth, setTipAmountEth] = useState('');
+  const [topUpAmount, setTopUpAmount] = useState('');
+  const [topUpOpen, setTopUpOpen] = useState(false);
+  const [topUpBalance, setTopUpBalance] = useState(null);
   const tipInputRef = useRef(null);
   const canTip = isShipper && shipment.status === 'Completed' && shipment.tipAmount === 0n;
   const amendmentFunding = shipment.escrow > shipment.proposedAmount
@@ -3761,34 +4387,54 @@ function EscrowActivityPanel({
     const sent = await onTip(tipAmountEth);
     if (sent) setTipAmountEth('');
   };
+  const openTopUp = async () => {
+    setTopUpOpen(true);
+    setTopUpBalance(null);
+    if (cargoToken && account) {
+      try { setTopUpBalance(BigInt(await cargoToken.balanceOf(account))); } catch { setTopUpBalance(null); }
+    }
+  };
+  const eligibleProofs = shipment.milestones.filter((milestone) => !milestone.proofSubmissionReimbursed && milestone.status !== 'Paid').length;
+  const topUpValue = parseOptionalCargo(topUpAmount);
 
   return (
     <div className={styles.paymentsPanel}>
-      <div className={styles.paymentsHeader}>
-        <HiOutlineCreditCard className={styles.paymentsHeaderIcon} aria-hidden="true" />
+      <details className={styles.escrowDisclosure}>
+      <summary className={styles.paymentsHeader}>
         <div>
           <div className={styles.paymentsHeaderTitle}>Escrow activity</div>
           <div className={styles.paymentsHeaderBody}>
-            {shipment.escrow > 0n
-              ? amendmentFunding > 0n
-                ? `${formatEth(shipment.escrow)} is funded, including ${formatEth(amendmentFunding)} added through agreement changes.`
-                : `${formatEth(shipment.escrow)} was locked after proposal approval.`
-              : `${formatEth(shipment.proposedAmount)} is planned but not funded yet.`}
+            {escrowActivitySummary(shipment)}
           </div>
         </div>
-      </div>
+        <HiOutlineChevronRight className={styles.escrowChevron} aria-hidden="true" />
+      </summary>
+      <div className={styles.escrowDisclosureBody}>
       <PaymentRow
         label={shipment.escrow > 0n ? 'Original escrow' : 'Planned payment'}
-        value={formatEth(shipment.proposedAmount)}
+        value={formatCargo(shipment.proposedAmount)}
       />
-      <PaymentRow label="Added through amendments" value={formatEth(amendmentFunding)} />
-      <PaymentRow label="Current funded escrow" value={formatEth(shipment.escrow)} />
-      <PaymentRow label="Released so far" value={formatEth(shipment.released)} />
-      <PaymentRow label="Refunded" value={formatEth(shipment.refunded)} />
-      <PaymentRow label="Remaining escrow" value={formatEth(shipment.remaining)} />
-      {shipment.tipAmount > 0n && (
-        <PaymentRow label="Completion tip" value={formatEth(shipment.tipAmount)} />
+      {amendmentFunding > 0n && <PaymentRow label="Added through amendments" value={formatCargo(amendmentFunding)} />}
+      <PaymentRow label="Current funded escrow" value={formatCargo(shipment.escrow)} />
+      <PaymentRow label="Released so far" value={formatCargo(shipment.released)} />
+      {shipment.refunded > 0n && <PaymentRow label="Refunded" value={formatCargo(shipment.refunded)} />}
+      <PaymentRow label="Remaining escrow" value={formatCargo(shipment.remaining)} />
+      {shipment.operationalAllowance > 0n && (
+        <>
+          <PaymentRow label="Reserve funded" value={formatCargo(shipment.operationalAllowance)} />
+          <PaymentRow label="Gas reimbursed to carrier" value={formatCargo(shipment.operationalReimbursed)} />
+          <PaymentRow label="Returned to shipper" value={formatCargo(shipment.operationalReturned)} />
+          <PaymentRow label="Reserve remaining" value={formatCargo(shipment.operationalRemaining)} />
+        </>
       )}
+      {isShipper && ['Funded', 'InProgress'].includes(shipment.status) && (
+        <Button size="sm" variant="secondary" onClick={openTopUp} disabled={busy}>Add reserve</Button>
+      )}
+      {shipment.tipAmount > 0n && (
+        <PaymentRow label="Completion tip" value={formatCargo(shipment.tipAmount)} />
+      )}
+      </div>
+      </details>
 
       {(canTip || shipment.tipAmount > 0n) && (
         <section
@@ -3804,15 +4450,21 @@ function EscrowActivityPanel({
             <div className={styles.tipCardHeading}>
               <div>
                 <h3 id="carrier-tip-title">
-                  {shipment.tipAmount > 0n ? 'Carrier thanked' : 'Thank the carrier'}
+                  {shipment.tipAmount > 0n
+                    ? isShipper ? 'Carrier thanked' : 'Shipper tipped'
+                    : 'Thank the carrier'}
                 </h3>
                 <p>
                   {shipment.tipAmount > 0n
-                    ? `${formatEth(shipment.tipAmount)} was sent directly to the carrier.`
+                    ? isShipper
+                      ? `${formatCargo(shipment.tipAmount)} was sent directly to the carrier.`
+                      : `${formatCargo(shipment.tipAmount)} was tipped directly by the shipper.`
                     : 'Send one optional tip directly to the carrier after successful delivery.'}
                 </p>
               </div>
-              {shipment.tipAmount > 0n && <Badge tone="success">Tip sent</Badge>}
+              {shipment.tipAmount > 0n && (
+                <Badge tone="success">{isShipper ? 'Tip sent' : 'Tip received'}</Badge>
+              )}
             </div>
             {canTip && (
               <form className={styles.tipForm} onSubmit={submitTip}>
@@ -3830,12 +4482,17 @@ function EscrowActivityPanel({
                       aria-describedby="carrier-tip-help"
                       disabled={busy}
                     />
-                    <span>ETH</span>
+                    <span>C.</span>
                   </div>
                   <Button type="submit" disabled={busy || !tipAmountEth.trim()}>
                     {actionStage === 'tipping' ? 'Sending tip...' : 'Send one-time tip'}
                   </Button>
                 </div>
+                <AvailableCargoBalance
+                  balance={cargoBalance}
+                  requiredAmount={parseOptionalCargo(tipAmountEth)}
+                  onTopUp={onTopUpCargo}
+                />
                 <p id="carrier-tip-help" className={styles.tipHelp}>
                   This is a separate, irreversible wallet payment and does not enter escrow.
                 </p>
@@ -3843,6 +4500,28 @@ function EscrowActivityPanel({
             )}
           </div>
         </section>
+      )}
+      {topUpOpen && (
+        <BrandedModal title="Add gas reserve" description="Add refundable CARGO coverage for future eligible proof submissions." Icon={HiOutlineCreditCard} onClose={() => !busy && setTopUpOpen(false)} busy={busy} footer={<><Button variant="secondary" onClick={() => setTopUpOpen(false)} disabled={busy}>Cancel</Button><Button onClick={async () => { const added = await onTopUp(topUpAmount); if (added) { setTopUpAmount(''); setTopUpOpen(false); } }} disabled={busy || topUpValue <= 0n}>{actionStage === 'topping-up-allowance' ? 'Adding…' : 'Confirm top-up'}</Button></>}>
+          <div className={styles.reserveReferenceGrid}>
+            <PaymentRow label="Reserve funded" value={formatCargo(shipment.operationalAllowance)} />
+            <PaymentRow label="Gas reimbursed to carrier" value={formatCargo(shipment.operationalReimbursed)} />
+            <PaymentRow label="Returned to shipper" value={formatCargo(shipment.operationalReturned)} />
+            <PaymentRow label="Reserve remaining" value={formatCargo(shipment.operationalRemaining)} />
+            <PaymentRow label="Eligible proofs remaining" value={String(eligibleProofs)} />
+            <PaymentRow label="Available CARGO" value={topUpBalance == null ? 'Unavailable' : formatCargo(topUpBalance)} />
+          </div>
+          <label className={styles.reserveInputLabel} htmlFor="operational-reserve-amount">Additional reserve</label>
+          <div className={styles.tipInputWrap}><input id="operational-reserve-amount" inputMode="decimal" value={topUpAmount} onChange={(event) => setTopUpAmount(event.target.value)} placeholder="0.00" disabled={busy} /><span>C.</span></div>
+          <AvailableCargoBalance
+            balance={topUpBalance ?? cargoBalance}
+            requiredAmount={topUpValue}
+            onTopUp={onTopUpCargo}
+          />
+          <PaymentRow label="Reserve after top-up" value={formatCargo(shipment.operationalRemaining + topUpValue)} />
+          {shipment.amendments.some((amendment) => amendment.status === 'Pending') && <p className={styles.reserveWarning}>Increasing gas coverage makes the current pending amendment stale. Withdraw it and submit a fresh quote after this top-up.</p>}
+          <p className={styles.fundingExplanation}>This reserve does not increase milestone compensation. Unused funds return to the shipper when the shipment settles.</p>
+        </BrandedModal>
       )}
     </div>
   );
@@ -3855,6 +4534,160 @@ function PaymentRow({ label, value }) {
       <div className={styles.paymentValue}>{value}</div>
     </div>
   );
+}
+
+function AvailableCargoBalance({ balance, requiredAmount = 0n, onTopUp }) {
+  const required = BigInt(requiredAmount || 0n);
+  const shortfall = balance != null && required > balance ? required - balance : 0n;
+  return (
+    <span className={styles.availableBalance}>
+      {shortfall > 0n ? (
+        <span className={styles.shortfallNote}>Need {formatCargo(shortfall)} more</span>
+      ) : balance == null ? 'Available C.: Loading…' : `Available C.: ${formatCargo(balance)}`}
+      {shortfall > 0n && onTopUp && (
+        <button type="button" className={styles.inlineTopUpButton} onClick={() => onTopUp(required)}>
+          Top up
+        </button>
+      )}
+    </span>
+  );
+}
+
+function CargoTopUpModal({
+  suggestedCargo,
+  cargoBalance,
+  ethBalance,
+  busy,
+  onClose,
+  onConfirm,
+}) {
+  const suggestedIsConvertible = suggestedCargo > 0n && suggestedCargo % 10_000n === 0n;
+  const [cargoText, setCargoText] = useState(() => (
+    suggestedIsConvertible ? formatEditableAmount(suggestedCargo) : ''
+  ));
+  const [ethText, setEthText] = useState(() => (
+    suggestedIsConvertible ? formatEditableAmount(suggestedCargo / 10_000n) : ''
+  ));
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const convertible = suggestedCargo > 0n && suggestedCargo % 10_000n === 0n;
+    setCargoText(convertible ? formatEditableAmount(suggestedCargo) : '');
+    setEthText(convertible ? formatEditableAmount(suggestedCargo / 10_000n) : '');
+    setError('');
+  }, [suggestedCargo]);
+
+  const updateFromCargo = (value) => {
+    setCargoText(value);
+    setError('');
+    if (!value.trim()) {
+      setEthText('');
+      return;
+    }
+    try {
+      const cargoWei = parseEther(value.trim());
+      if (cargoWei <= 0n || cargoWei % 10_000n !== 0n) throw new Error();
+      setEthText(formatEditableAmount(cargoWei / 10_000n));
+    } catch {
+      setEthText('');
+      setError('Enter a positive C. amount that converts exactly at the fixed rate.');
+    }
+  };
+
+  const updateFromEth = (value) => {
+    setEthText(value);
+    setError('');
+    if (!value.trim()) {
+      setCargoText('');
+      return;
+    }
+    try {
+      const ethWei = parseEther(value.trim());
+      if (ethWei <= 0n) throw new Error();
+      setCargoText(formatEditableAmount(ethWei * 10_000n));
+    } catch {
+      setCargoText('');
+      setError('Enter a positive ETH amount.');
+    }
+  };
+
+  const confirm = async () => {
+    try {
+      const ethWei = parseEther(ethText.trim());
+      const cargoWei = parseEther(cargoText.trim());
+      if (ethWei <= 0n || cargoWei <= 0n || cargoWei !== ethWei * 10_000n) throw new Error();
+      if (ethBalance != null && ethWei >= ethBalance) {
+        setError('Keep enough ETH available to pay the transaction gas.');
+        return;
+      }
+      await onConfirm({ ethWei, cargoWei });
+    } catch {
+      setError('Enter a positive amount to continue.');
+    }
+  };
+
+  return (
+    <BrandedModal
+      title="Top up C."
+      description="Add C. without leaving your current shipment form."
+      Icon={HiOutlineCreditCard}
+      onClose={onClose}
+      busy={busy}
+      footer={(
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button onClick={confirm} disabled={busy || !cargoText || !ethText}>
+            {busy ? 'Topping up…' : 'Confirm top-up'}
+          </Button>
+        </>
+      )}
+    >
+      <div className={styles.cargoTopUpForm}>
+        <label htmlFor="inline-cargo-top-up-amount">CARGO you receive</label>
+        <div className={styles.tipInputWrap}>
+          <input id="inline-cargo-top-up-amount" inputMode="decimal" value={cargoText} onChange={(event) => updateFromCargo(event.target.value)} placeholder="0.00" disabled={busy} />
+          <span>C.</span>
+        </div>
+        <span className={styles.availableBalance}>
+          {cargoBalance == null ? 'C. balance: Loading…' : `C. balance: ${formatCargo(cargoBalance)}`}
+        </span>
+        <span className={styles.cargoTopUpExchange} aria-hidden="true">↓</span>
+        <label htmlFor="inline-eth-top-up-amount">ETH you pay</label>
+        <div className={styles.tipInputWrap}>
+          <input id="inline-eth-top-up-amount" inputMode="decimal" value={ethText} onChange={(event) => updateFromEth(event.target.value)} placeholder="0.00" disabled={busy} />
+          <span>ETH</span>
+        </div>
+        <span className={styles.availableBalance}>
+          {ethBalance == null ? 'Available ETH: Loading…' : `Available ETH: ${formatEth(ethBalance)}`}
+        </span>
+        {error && <span className={styles.cargoTopUpError} role="alert">{error}</span>}
+      </div>
+      <p className={styles.cargoTopUpRate}>Fixed rate: 1 ETH = 10,000 C. Network gas is paid separately in ETH.</p>
+    </BrandedModal>
+  );
+}
+
+function escrowActivitySummary(shipment) {
+  if (shipment.escrow <= 0n) return `${formatCargo(shipment.proposedAmount)} is planned but not funded yet.`;
+  return `${formatCargo(shipment.remaining)} locked · ${formatCargo(shipment.released)} distributed · ${formatCargo(shipment.operationalRemaining)} reserved · ${formatCargo(shipment.operationalReimbursed)} gas reimbursed.`;
+}
+
+function parseOptionalCargo(value) {
+  try { return String(value || '').trim() ? parseEther(String(value).trim()) : 0n; } catch { return 0n; }
+}
+
+function formatEditableAmount(value) {
+  return formatEther(value).replace(/\.0$/, '');
+}
+
+function receiptEventAmount(receipt, contract, eventName) {
+  for (const log of receipt?.logs || []) {
+    try {
+      const parsed = contract.interface.parseLog(log);
+      if (parsed?.name === eventName) return BigInt(parsed.args?.amount ?? 0n);
+    } catch { /* Log belongs to another contract. */ }
+  }
+  return 0n;
 }
 
 function lifecycleStateClass(state) {
@@ -3873,24 +4706,15 @@ export function visibleOpenProposalsFor(proposals = [], account = '', shipper = 
   ));
 }
 
-export function proofFileError(file) {
-  if (!file) return 'Choose a photo proof file.';
-  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-    return 'Invalid file type. Please choose a JPEG, PNG, or WebP image.';
-  }
-  if (file.size > 2 * 1024 * 1024) {
-    return 'File size exceeds 2 MB. Choose a smaller image.';
-  }
-  return '';
+export function shipmentLoadView({ loading, shipment, error, deployError } = {}) {
+  if (loading && !shipment) return 'loading';
+  if (shipment) return 'ready';
+  if (deployError || error) return 'error';
+  return 'empty';
 }
 
-function safeProofUrl(proofUri) {
-  if (!proofUri || typeof proofUri !== 'string') return '';
-  try {
-    return new URL(proofUri, window.location.origin).href;
-  } catch {
-    return '';
-  }
+export function proofFileError(file) {
+  return validateProofFile(file);
 }
 
 async function loadShipment(deliveryEscrow, lifecycleManager, idParam) {
@@ -3901,16 +4725,26 @@ async function loadShipment(deliveryEscrow, lifecycleManager, idParam) {
     proposalResult,
     itemResult,
     tipAmountResult,
+    paymentSummary,
     cancellationResult,
     amendmentResult,
+    reimbursementLogs,
+    reserveRefundLogs,
   ] = await Promise.all([
     deliveryEscrow.getRequest(requestId),
     deliveryEscrow.getMilestones(requestId),
     deliveryEscrow.getProposals(requestId),
     deliveryEscrow.getItems(requestId),
     deliveryEscrow.tipAmounts(requestId),
+    deliveryEscrow.getPaymentSummary(requestId),
     lifecycleManager.getCancellationRequests(requestId),
     lifecycleManager.getAmendmentRequests(requestId),
+    deliveryEscrow.filters?.OperationalAllowanceReimbursed
+      ? deliveryEscrow.queryFilter(deliveryEscrow.filters.OperationalAllowanceReimbursed(requestId))
+      : Promise.resolve([]),
+    deliveryEscrow.filters?.OperationalAllowanceRefunded
+      ? deliveryEscrow.queryFilter(deliveryEscrow.filters.OperationalAllowanceRefunded(requestId))
+      : Promise.resolve([]),
   ]);
 
   const shipper = request.shipper ?? request[1];
@@ -3922,6 +4756,18 @@ async function loadShipment(deliveryEscrow, lifecycleManager, idParam) {
   const released = BigInt(request.releasedAmount ?? request[6] ?? 0n);
   const refunded = BigInt(request.refundedAmount ?? request[12] ?? 0n);
   const createdAt = Number(request.createdAt ?? request[10] ?? 0n);
+  const operationalAllowance = BigInt(
+    paymentSummary?.operationalAllowance ?? request.operationalAllowance ?? request[13] ?? 0n,
+  );
+  const operationalSpent = BigInt(
+    paymentSummary?.operationalSpent ?? request.operationalSpent ?? request[14] ?? 0n,
+  );
+  const operationalRemaining = BigInt(
+    paymentSummary?.operationalRemaining
+      ?? (operationalAllowance > operationalSpent ? operationalAllowance - operationalSpent : 0n),
+  );
+  const operationalReimbursed = Array.from(reimbursementLogs || []).reduce((total, log) => total + BigInt(log.args?.amount ?? log.args?.[3] ?? 0n), 0n);
+  const operationalReturned = Array.from(reserveRefundLogs || []).reduce((total, log) => total + BigInt(log.args?.amount ?? log.args?.[2] ?? 0n), 0n);
   const milestones = Array.from(milestoneResult || []).map((milestone, index) => ({
     index,
     milestoneId: Number(milestone.milestoneId ?? milestone[11] ?? index),
@@ -3934,11 +4780,15 @@ async function loadShipment(deliveryEscrow, lifecycleManager, idParam) {
     status: MILESTONE_STATUS[Number(milestone.status ?? milestone[6])] || 'Unknown',
     submittedAt: Number(milestone.submittedAt ?? milestone[7] ?? 0n),
     verifiedAt: Number(milestone.verifiedAt ?? milestone[8] ?? 0n),
-    additionalPayoutAmount: BigInt(
-      milestone.additionalPayoutAmount ?? milestone[9] ?? 0n,
-    ),
-    addedByAmendment: Boolean(milestone.addedByAmendment ?? milestone[10] ?? false),
-  }));
+     additionalPayoutAmount: BigInt(
+       milestone.additionalPayoutAmount ?? milestone[9] ?? 0n,
+     ),
+     addedByAmendment: Boolean(milestone.addedByAmendment ?? milestone[10] ?? false),
+     proofSubmissionNumber: Number(milestone.proofSubmissionNumber ?? milestone[12] ?? 0n),
+     proofWithdrawalsThisRound: Number(milestone.proofWithdrawalsThisRound ?? milestone[13] ?? 0n),
+     submittedAfterRejection: Boolean(milestone.submittedAfterRejection ?? milestone[14] ?? false),
+     proofSubmissionReimbursed: Boolean(milestone.proofSubmissionReimbursed ?? milestone[15] ?? false),
+   }));
   const proposals = await Promise.all(Array.from(proposalResult || []).map(async (proposal, id) => {
     const proposalMilestoneResult = await deliveryEscrow.getProposalMilestones(requestId, id);
     return {
@@ -4017,9 +4867,23 @@ async function loadShipment(deliveryEscrow, lifecycleManager, idParam) {
             ? amendment.resolvedAt ?? amendment[10] ?? 0n
             : amendment[9] ?? 0n,
         ),
-        directExtension: expandedHistoryRecord
-          ? Boolean(amendment.directExtension ?? amendment[11] ?? false)
-          : false,
+         directExtension: expandedHistoryRecord
+           ? Boolean(amendment.directExtension ?? amendment[11] ?? false)
+           : false,
+         gasPolicy: expandedHistoryRecord ? Number(amendment.gasPolicy ?? amendment[12] ?? 0) : 0,
+         responseAllowance: expandedHistoryRecord
+           ? BigInt(amendment.responseAllowance ?? amendment[13] ?? 0n)
+           : 0n,
+         responseAllowanceSpent: expandedHistoryRecord
+           ? BigInt(amendment.responseAllowanceSpent ?? amendment[14] ?? 0n)
+           : 0n,
+         responseAllowanceFunder: expandedHistoryRecord
+           ? amendment.responseAllowanceFunder ?? amendment[15] ?? null
+           : null,
+         responseReimbursed: expandedHistoryRecord
+           ? Boolean(amendment.responseReimbursed ?? amendment[16] ?? false)
+           : false,
+        operationalAllowance: BigInt(amendment.operationalAllowance ?? 0n),
         existingFunding: Array.from(existingResult || []).map((allocation) => ({
           milestoneId: Number(allocation.milestoneId ?? allocation[0] ?? 0n),
           amount: BigInt(allocation.amount ?? allocation[1] ?? 0n),
@@ -4051,6 +4915,11 @@ async function loadShipment(deliveryEscrow, lifecycleManager, idParam) {
     refunded,
     remaining: escrow - released - refunded,
     tipAmount: BigInt(tipAmountResult ?? 0n),
+    operationalAllowance,
+    operationalSpent,
+    operationalRemaining,
+    operationalReimbursed,
+    operationalReturned,
     items,
     milestones,
     proposals,
@@ -4091,7 +4960,7 @@ function parsePositiveEth(value) {
   try {
     parsed = parseEther(value);
   } catch {
-    throw new Error('Enter valid funding amounts in ETH.');
+    throw new Error('Enter valid funding amounts in CARGO.');
   }
   if (parsed <= 0n) throw new Error('Funding amounts must be greater than zero.');
   return parsed;
@@ -4122,7 +4991,7 @@ function buildTimelineEvents({ shipper, carrier, createdAt, proposedAmount, mile
     statusLabel: 'Published',
     timestamp: createdAt,
     actor: shipper,
-    details: `The shipper published this request with a planned payment of ${formatEth(proposedAmount)}.`,
+    details: `The shipper published this request with a planned payment of ${formatCargo(proposedAmount)}.`,
     milestoneId: null,
   }];
 
@@ -4139,8 +5008,8 @@ function buildTimelineEvents({ shipper, carrier, createdAt, proposedAmount, mile
       timestamp: milestone.verifiedAt || milestone.submittedAt || null,
       actor: carrier,
       details: milestone.addedByAmendment
-        ? `${formatEth(payout)} funded through an accepted agreement change. ${firstMeaningfulRemark(milestone.remark, milestone.rejectionReason) || milestoneDescription(milestone.status)}`
-        : `${milestone.payoutPercentage}% payout (${formatEth(payout)}). ${firstMeaningfulRemark(milestone.remark, milestone.rejectionReason) || milestoneDescription(milestone.status)}`,
+        ? `${formatCargo(payout)} funded through an accepted agreement change. ${firstMeaningfulRemark(milestone.remark, milestone.rejectionReason) || milestoneDescription(milestone.status)}`
+        : `${milestone.payoutPercentage}% payout (${formatCargo(payout)}). ${firstMeaningfulRemark(milestone.remark, milestone.rejectionReason) || milestoneDescription(milestone.status)}`,
       milestoneId: milestone.milestoneId,
     });
   }
@@ -4216,8 +5085,12 @@ function formatActionError(error) {
   if (error?.code === 4001 || error?.code === 'ACTION_REJECTED') {
     return 'Transaction cancelled in MetaMask.';
   }
-  const message = error?.shortMessage || error?.reason || error?.message || '';
+  const message = formatWalletTransactionError(error, 'The shipment transaction failed.');
+  if (message.includes('proof submission changed')) return 'This proof was replaced while you were reviewing it. Refresh and review the new evidence before deciding.';
   if (message.includes('insufficient funds')) return 'The shipper wallet does not have enough ETH.';
+  if (message.includes('CARGO allowance too low')) return 'Approve enough CARGO for this payment and reserve before retrying.';
+  if (message.includes('operational allowance below minimum')) return 'The operational reserve is below the contract minimum for this shipment.';
+  if (message.includes('response allowance below minimum')) return 'The response reserve is below the contract minimum.';
   if (message.includes('caller is not shipper')) return 'Only the request shipper can perform this action.';
   if (message.includes('proposal is not active')) return 'This proposal is no longer active. Refresh the request and choose another plan.';
   if (message.includes('request is not open')) return 'This request is no longer open for proposal review.';

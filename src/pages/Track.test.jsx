@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import {
   checkpointPaymentState,
   milestoneEscrowAllocation,
   proofFileError,
+  ProofSubmitBox,
   ProofViewerModal,
+  shipmentLoadView,
   visibleOpenProposalsFor,
 } from './Track';
 
@@ -25,11 +27,46 @@ function ProofHarness({ proofUris }) {
 }
 
 describe('Shipment Detail checkpoint presentation', () => {
+  it('keeps the loaded shipment visible while its post-transaction refresh is pending', () => {
+    const loadedShipment = { id: 1 };
+
+    expect(shipmentLoadView({ loading: true, shipment: null })).toBe('loading');
+    expect(shipmentLoadView({ loading: true, shipment: loadedShipment })).toBe('ready');
+    expect(shipmentLoadView({ loading: false, shipment: loadedShipment, error: 'Refresh failed' })).toBe('ready');
+    expect(shipmentLoadView({ loading: false, shipment: null, error: 'Initial load failed' })).toBe('error');
+  });
+
+  it('does not crash while the submitted proof preview is being cleared', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(true);
+    const createObjectUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:proof-preview');
+    const revokeObjectUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const { container } = render(
+      <ProofSubmitBox milestoneId={1} rejected={false} busy={false} onSubmit={onSubmit} />,
+    );
+    const file = new File(['proof'], 'proof.png', { type: 'image/png' });
+
+    fireEvent.change(container.querySelector('input[type="file"]'), {
+      target: { files: [file] },
+    });
+    expect(screen.getByAltText('Preview of proof.png')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit photo proof' }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(1, file, ''));
+    await waitFor(() => expect(screen.queryByAltText('Preview of proof.png')).toBeNull());
+
+    createObjectUrl.mockRestore();
+    revokeObjectUrl.mockRestore();
+  });
+
   it('validates proof files before upload', () => {
     expect(proofFileError(null)).toContain('Choose a photo');
     expect(proofFileError({ type: 'application/pdf', size: 10 })).toContain('Invalid file type');
     expect(proofFileError({ type: 'image/jpeg', size: 2 * 1024 * 1024 + 1 })).toContain('2 MB');
     expect(proofFileError({ type: 'image/webp', size: 512 })).toBe('');
+    expect(proofFileError({ type: 'image/gif', size: 512 })).toBe('');
+    expect(proofFileError({ type: 'image/avif', size: 512 })).toBe('');
+    expect(proofFileError({ type: 'image/bmp', size: 512 })).toBe('');
+    expect(proofFileError({ type: 'image/svg+xml', size: 512 })).toContain('Invalid file type');
   });
 
   it('shows all active proposals only to the shipper and only the carrier own proposal otherwise', () => {

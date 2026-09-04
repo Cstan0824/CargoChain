@@ -2,6 +2,8 @@
 
 > This document describes the implemented boundaries. For exact Solidity signatures, events, and caller restrictions, use [`API_v1.md`](../API_v1.md).
 
+The CARGO payment model and encrypted Pinata/IPFS evidence path are included in the implemented boundaries below. Supabase remains responsible only for private chat and wrapped proof-key records.
+
 ## a. User profile and wallet — wx
 
 **Owned areas:** `UserRegistry.sol`, wallet/profile contexts, registration modal, profile presentation.
@@ -25,8 +27,8 @@
 
 **Owned areas:** escrow accounting and payment events in `DeliveryEscrow.sol` / `PaymentEvents.sol`; payment history UI.
 
-- `approveAndFund` locks the exact proposal amount.
-- `verifyMilestone(true)` releases the checkpoint's original payout plus approved amendment top-up, if any.
+- `approveAndFundWithAllowance` locks the proposal compensation plus a refundable operational reserve.
+- `verifyMilestone` releases the checkpoint's original CARGO payout plus approved amendment top-up, if any, after confirming the reviewed proof submission number.
 - `refundRemaining` returns only unpaid escrow after the allowed deadline/cancellation path.
 - Accepted mutual cancellation preserves released payments and refunds the balance only.
 - `tipCarrier` is a separate one-time direct payment after completion and does not alter escrow totals.
@@ -38,7 +40,7 @@
 - The project does not deploy a separate `MilestoneVerifier.sol`; proof state is implemented in `DeliveryEscrow`.
 - Carrier submits proof URLs and remarks for the next checkpoint in execution order.
 - Shipper verifies or rejects proof. Rejection allows resubmission; verification pays the checkpoint.
-- The browser creates a SHA-256 hash before uploading proof images to Supabase Storage. The storage URL and proof metadata are on-chain delivery evidence; the image itself is not stored on-chain.
+- The browser creates a plaintext SHA-256 hash, encrypts proof images up to 2 MiB with AES-256-GCM, and uploads ciphertext through the authenticated Pinata path. The canonical URI and proof metadata are on-chain delivery evidence; plaintext is not stored on-chain.
 
 ## e. Frontend and UI/UX — Cstan
 
@@ -53,10 +55,17 @@ Current primary routes:
 /shipments/:id/propose    carrier proposal editor/history
 /track/:id                tracking, proof, payment, amendment, cancellation
 /messages                 private request conversations
-/profile                  wallet profile and history
+/account                  wallet identity, CARGO conversion, reputation, and history
 ```
 
 Frontend reads use the direct Ganache provider. Wallet writes use the shared transaction executor, which prepares transactions against Ganache and leaves MetaMask responsible for signing/broadcasting.
+
+The Account page keeps its ETH provider read independent from contract-map
+validation, refreshes CARGO and locked escrow in separate lanes, and scans
+payment events incrementally from the last observed block. A slow activity
+scan therefore cannot hold the wallet balances hostage. Dialog surfaces share
+the `ModalShell` overlay, focus trap, dismissal policy, sizing, and busy-state
+semantics; each workflow supplies only its content and actions.
 
 ## Shared hand-offs
 
@@ -65,7 +74,7 @@ UserRegistry ── registration check ──► DeliveryEscrow
 DeliveryEscrow ── canonical shipment/progress reads ──► LifecycleManager
 LifecycleManager ── restricted settlement/final amendment ──► DeliveryEscrow
 DeliveryEscrow + LifecycleManager events ──► chat activity timeline
-Supabase Storage ── public proof URL ──► DeliveryEscrow.submitProof
+Browser AES-GCM ── signed Pinata/IPFS ciphertext ──► DeliveryEscrow.submitProof
 ```
 
 ## Change protocol

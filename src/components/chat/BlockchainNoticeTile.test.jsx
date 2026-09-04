@@ -26,4 +26,19 @@ describe('BlockchainNoticeTile', () => {
     expect(screen.getByText('submitted')).toBeTruthy();
     expect(container.querySelector('[aria-label="Proposal #1 submitted"]')).toBeTruthy();
   });
+
+  it('shows the reimbursed C. amount in structured gas activity', () => {
+    render(
+      <BlockchainNoticeTile notice={{
+        text: '15.7434 C. gas reimbursement paid to the carrier.',
+        subject: 'Gas reserve',
+        action: 'reimbursed',
+        detail: ' (15.7434 C. paid to the carrier).',
+        tone: 'payment',
+      }} />,
+    );
+
+    expect(screen.getByLabelText('15.7434 C. gas reimbursement paid to the carrier.')).toBeTruthy();
+    expect(screen.getByText(/15\.7434 C\. paid to the carrier/)).toBeTruthy();
+  });
 });

@@ -86,11 +86,22 @@ describe('My Shipments navigation', () => {
 
   it('keeps proposal editing as an explicit action-cell control', async () => {
     mocks.wallet.account = walletB;
+    mocks.contracts.deliveryEscrow.getProposals.mockResolvedValue([
+      { carrier: walletB, status: 0n, createdAt: 1_800_000_000n, rejectionNote: '' },
+      { carrier: walletB, status: 1n, createdAt: 1_700_000_000n, rejectionNote: '' },
+    ]);
+    mocks.contracts.deliveryEscrow.getProposalMilestones = vi.fn().mockResolvedValue([]);
     render(<MyShipments />);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Edit proposal' })).toBeTruthy());
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit proposal' }));
     expect(mocks.navigate).toHaveBeenCalledWith('/shipments/1/propose?edit=active');
+
+    const historyButton = screen.getByRole('button', { name: 'View proposal history' });
+    expect(historyButton.textContent).toBe('');
+    fireEvent.click(historyButton);
+    expect(screen.getByRole('dialog', { name: 'Shipment #0001' })).toBeTruthy();
+    expect(screen.getByText('These submitted plans remain recorded on-chain, even after a shipper decision.')).toBeTruthy();
   });
 
   it('places the primary create action in the shared page header', async () => {

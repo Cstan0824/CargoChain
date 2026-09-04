@@ -5,9 +5,10 @@ Current contract sources:
 | File | Module | Owner | Status |
 |---|---|---|---|
 | `Migrations.sol` | Truffle migration bookkeeping | — | ✅ implemented |
+| `CargoToken.sol` | fixed-rate ETH-backed CARGO minting, transfer, and redemption | Jeremy | ✅ implemented |
 | `UserRegistry.sol` | wallet identity/profile | wx | ✅ implemented |
-| `DeliveryEscrow.sol` | requests, proposals, escrow, milestones, proof, payment, refunds, completion tips | team | ✅ implemented |
-| `LifecycleManager.sol` | amendments, shared negotiation lock, and mutual cancellation | GAN | ✅ implemented |
+| `DeliveryEscrow.sol` | requests, proposals, CARGO escrow, proof, payment, refunds, operational reserve, completion tips | team | ✅ implemented |
+| `LifecycleManager.sol` | amendments, response reimbursement, shared negotiation lock, and mutual cancellation | GAN | ✅ implemented |
 | `PaymentEvents.sol` | payment event definitions inherited by `DeliveryEscrow` | Jeremy | ✅ implemented |
 | `ReputationRegistry.sol` | immutable carrier ratings and feedback-tag aggregates | team | ✅ implemented |
 

@@ -31,7 +31,7 @@ describe('Phase 11 shipment and marketplace layout structure', () => {
     expect(styles).toContain('margin-left: auto;');
   });
 
-  it('keeps open-request content in separate full-width rows and reserves the proposal action track', () => {
+  it('keeps open-request content in separate rows and keeps the milestone metric attached to the action', () => {
     const page = source('./Track.jsx');
     const styles = source('./Track.module.css');
 
@@ -40,7 +40,8 @@ describe('Phase 11 shipment and marketplace layout structure', () => {
     expect(page).toContain('className={styles.proposalSummaryActionLabel}');
     expect(page).toContain('Review proposal');
     expect(page).not.toContain('proposalSummaryReviewHint');
-    expect(styles).toContain('grid-template-columns: minmax(150px, 1fr) auto 136px;');
+    expect(styles).toContain('grid-template-columns: minmax(150px, 1fr) auto auto;');
+    expect(styles).not.toContain('grid-template-columns: minmax(150px, 1fr) auto 136px;');
     expect(styles).toContain('transition-property: width, background-color, box-shadow, color, scale;');
     expect(styles).toContain('filter: blur(4px);');
     expect(styles).toContain('filter: blur(0px);');

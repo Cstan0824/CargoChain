@@ -1,10 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-vi.mock('../lib/supabase.js', () => ({
-  supabase: {},
-}));
-
-import { uploadPhoto } from './upload';
+import { uploadPhoto, validateProofFile } from './upload';
 
 const VALID_HASH = `0x${'a'.repeat(64)}`;
 
@@ -19,13 +15,19 @@ function proofFile(overrides = {}) {
 
 describe('uploadPhoto validation', () => {
   it('rejects unsupported proof formats before contacting storage', async () => {
-    await expect(uploadPhoto(proofFile({ type: 'image/gif' }), VALID_HASH, 1, 0))
-      .rejects.toThrow('JPEG, PNG, or WebP');
+    await expect(uploadPhoto(proofFile({ type: 'image/svg+xml' }), VALID_HASH, 1, 0))
+      .rejects.toThrow('JPEG, PNG, WebP, GIF, AVIF, or BMP');
+  });
+
+  it('accepts the supported raster formats before encrypted upload', () => {
+    for (const type of ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif', 'image/bmp']) {
+      expect(validateProofFile(proofFile({ type }))).toBe('');
+    }
   });
 
   it('rejects oversized proof images', async () => {
-    await expect(uploadPhoto(proofFile({ size: 10 * 1024 * 1024 + 1 }), VALID_HASH, 1, 0))
-      .rejects.toThrow('10 MB or smaller');
+    await expect(uploadPhoto(proofFile({ size: 2 * 1024 * 1024 + 1 }), VALID_HASH, 1, 0))
+      .rejects.toThrow('File size exceeds 2 MB');
   });
 
   it('requires a valid request ID and SHA-256 hash', async () => {

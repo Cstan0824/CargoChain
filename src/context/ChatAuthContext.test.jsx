@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
     account: '0x90F8bf6A479f320ead074411a4B0e7944Ea8c9C1',
     chainId: 1337,
     walletChainId: 1337,
+    walletInitialized: true,
     signer: {},
   },
   getCurrentChatUser: vi.fn(),
@@ -56,8 +57,30 @@ function ConcurrentAuthProbe() {
 
 describe('ChatAuthProvider session restoration', () => {
   beforeEach(() => {
+    mocks.wallet.account = '0x90F8bf6A479f320ead074411a4B0e7944Ea8c9C1';
+    mocks.wallet.walletChainId = 1337;
+    mocks.wallet.walletInitialized = true;
     window.sessionStorage.clear();
     window.sessionStorage.setItem('cargochain_chat_token', 'valid-test-token');
+  });
+
+  it('preserves the stored session while MetaMask restores the same wallet after refresh', async () => {
+    const wallet = '0x90F8bf6A479f320ead074411a4B0e7944Ea8c9C1';
+    mocks.wallet.account = null;
+    mocks.wallet.walletChainId = null;
+    mocks.wallet.walletInitialized = false;
+    mocks.getCurrentChatUser.mockResolvedValue({ user: { walletAddress: wallet } });
+
+    const view = render(<ChatAuthProvider><AuthProbe /></ChatAuthProvider>);
+    expect(window.sessionStorage.getItem('cargochain_chat_token')).toBe('valid-test-token');
+
+    mocks.wallet.account = wallet;
+    mocks.wallet.walletChainId = 1337;
+    mocks.wallet.walletInitialized = true;
+    view.rerender(<ChatAuthProvider><AuthProbe /></ChatAuthProvider>);
+
+    await waitFor(() => expect(screen.getByText(`authenticated:${wallet.toLowerCase()}`)).toBeTruthy());
+    expect(window.sessionStorage.getItem('cargochain_chat_token')).toBe('valid-test-token');
   });
 
   it('accepts the nested /auth/me response returned by the API', async () => {

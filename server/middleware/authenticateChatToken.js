@@ -1,4 +1,4 @@
-// server/middleware/authenticateChatToken.js — CargoChain Chat JWT Verification Middleware
+// server/middleware/authenticateChatToken.js — CargoChain wallet-session JWT middleware
 // Verifies Bearer JWT tokens and attaches normalized req.user = { walletAddress }.
 
 const { verifyToken } = require('../services/tokenService');

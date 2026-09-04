@@ -283,7 +283,12 @@ function stateCopy({ status, currentStage, relationship, activeProposalCount, ha
     return { title: 'Shipment expired', nextStep: remaining > 0n ? 'The shipper can claim the remaining escrow.' : 'No remaining escrow is available.' };
   }
   if (currentStage === 'completed' || allPaid) {
-    return { title: 'Delivery completed', nextStep: 'Review the final payment and rating when ready.' };
+    return {
+      title: 'Delivery completed',
+      nextStep: relationship === 'shipper'
+        ? 'Share your experience with a rating, or send an optional tip to thank the carrier.'
+        : 'No further shipment action is required.',
+    };
   }
   if (currentStage === 'created') {
     if (relationship === 'public') {
@@ -325,7 +330,12 @@ function stateCopy({ status, currentStage, relationship, activeProposalCount, ha
     return { title: 'Escrow funding is pending', nextStep: escrow > 0n ? 'The delivery plan is ready to begin.' : 'The accepted plan will lock the planned payment.' };
   }
   if (currentStage === 'payment' || hasSubmittedProof) {
-    return { title: 'Proof is awaiting payment review', nextStep: relationship === 'shipper' ? 'Review the submitted proof and release or reject payment.' : 'Wait for the shipper to review the submitted proof.' };
+    return {
+      title: 'Proof submitted',
+      nextStep: relationship === 'shipper'
+        ? 'Review proof and release or reject payment.'
+        : 'Wait for the shipper to review the submitted proof.',
+    };
   }
   if (hasPendingProof) {
     return { title: 'A checkpoint needs proof', nextStep: relationship === 'carrier' ? 'Submit photo proof for the next checkpoint.' : 'Wait for the carrier to submit the next proof.' };
@@ -337,7 +347,7 @@ function requiredActionFor({ status, currentStage, relationship, activeProposalC
   if (relationship === 'public' || relationship === 'other' || relationship === 'disconnected') return null;
   if (relationship === 'shipper') {
     if (currentStage === 'proposal' || currentStage === 'approval') return activeProposalCount ? 'Review and accept a carrier proposal.' : 'Wait for a carrier proposal.';
-    if (hasSubmittedProof) return 'Review the submitted proof and decide the checkpoint payment.';
+    if (hasSubmittedProof) return 'Review proof and release or reject payment.';
     if (status === 'Expired' || status === 'Cancelled' || status === 'Refunded' || status === 'Completed') return null;
     return null;
   }

@@ -25,7 +25,7 @@ Use the tokens in `src/css/tokens.css` by semantic role:
 | Page heading / KPI | `--fs-2xl` (28px) | Page titles and primary Account values |
 | Exceptional display | `--fs-3xl` (32px) | Rare, deliberately prominent metrics only |
 
-Do not add hard-coded text sizes below 12px. A visual exception must be recorded here. Use `--lh-tight` for headings, `--lh-normal` for reading copy, `text-wrap: balance` on headings, `text-wrap: pretty` on prose, and tabular numerals for balances, counts, dates, IDs, and transaction values.
+Do not add hard-coded text sizes below 12px except the documented 10px wallet-balance and shortfall cues directly beneath financial inputs. Those cues are secondary information and must retain tabular numerals, readable contrast, and a 1.4 line height. Use `--lh-tight` for headings, `--lh-normal` for reading copy, `text-wrap: balance` on headings, `text-wrap: pretty` on prose, and tabular numerals for balances, counts, dates, IDs, and transaction values.
 
 ## Color, surfaces, and spacing
 
@@ -71,6 +71,14 @@ The shared `Skeleton` primitive is decorative (`aria-hidden="true"`). Its parent
 
 Skeleton motion is a restrained shimmer and becomes static under `prefers-reduced-motion`. Never show `0 ETH`, an empty count, or stale data as if it were resolved.
 
+## Financial inputs and C. recovery
+
+- Money fields use a suffix inside the field: `C.` for CARGO and `ETH` for native ETH. Users do not enter a leading currency symbol.
+- C. amount fields show a compact 10px `C. balance: <amount>` cue below the field. ETH-to-C. conversion shows the available ETH balance; C.-to-ETH redemption shows available C.
+- If a C. amount exceeds the connected wallet balance, replace the normal balance cue with a red `Need <amount> more` message and a blue `Top up` action. Do not show the top-up action when the balance is sufficient.
+- `Top up` opens the fixed-rate ETH-to-C. conversion modal over the current page. The underlying draft remains in place. After a successful conversion, refresh the balances and return focus to the same workflow; never auto-submit the original transaction.
+- Proposal acceptance separates delivery compensation from operational gas reserve and shows the reserve calculation by eligible proof count. Amendment response allowances stay visually separate from proof reserves and checkpoint compensation.
+
 ## Interaction and motion
 
 Interactive elements have at least a 40px hit area (44px is preferred for primary controls). Use `scale(0.96)` for press feedback. Transitions name exact properties; never use `transition: all`. Use interruptible CSS transitions for hover/focus/press. Enter states may be split and staggered; exits stay subtle. Add `will-change` only for a measured transform/opacity/filter need. Icons are optically aligned and animate contextually rather than blinking between states.
@@ -79,7 +87,7 @@ Interactive elements have at least a 40px hit area (44px is preferred for primar
 
 Every keyboard path has a visible focus ring. Color never carries state alone. Busy regions announce once, errors expose a retry or recovery path, and controls retain their accessible name when visual copy is shortened. Dates, ETH, addresses, request IDs, and hashes remain readable when truncated visually. Respect reduced motion and preserve focus when overlays close.
 
-## Phase 8 workflow patterns
+## Implemented workflow patterns
 
 - Proposal editing is an explicit presentation mode. An active carrier proposal stays read-only on the normal submitted route; `?edit=active` opens a local editable draft. Saving uses the existing revoke-then-submit contract sequence and labels both wallet confirmations. If the second transaction fails, keep the draft, explain that the original was revoked, and offer a retry that submits only the replacement.
 - Repeated row and dialog actions use the shared 44px button shell. `softNeutral` is for navigation or keep actions, `softPrimary` is for a positive follow-up, and `softDanger` is for revoke/reject actions. Chat uses a lightly transparent blue surface with the same focus and press behavior.
@@ -90,7 +98,7 @@ Every keyboard path has a visible focus ring. Color never carries state alone. B
 ## Consistency checklist
 
 - [ ] Page title, subtitle, primary action, inset, and content width match the shared shell.
-- [ ] Typography uses a semantic token and no active-route text is below 12px.
+- [ ] Typography uses a semantic token and no active-route text is below 12px, except the documented 10px financial-input balance cue.
 - [ ] Surface, radius, border, shadow, and layer choices follow this document.
 - [ ] Tables use the shared header divider, row geometry, numeric treatment, and internal overflow.
 - [ ] Loading, empty, error, disconnected, unauthorized, and partial states are distinct.

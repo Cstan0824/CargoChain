@@ -55,6 +55,7 @@ export function getContract(providerOrSigner, name, networkId) {
 // Keep keys camel-cased so contexts and components share one stable API.
 export function buildContractMap(provider, networkId) {
   return {
+    cargoToken: getContract(provider, 'CargoToken', networkId),
     deliveryEscrow: getContract(provider, 'DeliveryEscrow', networkId),
     lifecycleManager: getContract(provider, 'LifecycleManager', networkId),
     reputationRegistry: getContract(provider, 'ReputationRegistry', networkId),
@@ -70,21 +71,29 @@ export function buildContractMap(provider, networkId) {
 export async function validateContractMap(provider, contracts) {
   try {
     const results = await retryTransientGanacheRead(() => Promise.all([
-        contracts.deliveryEscrow.getRequestCount(),
-        contracts.deliveryEscrow.getRequestIds(0n, 0n),
-        contracts.deliveryEscrow.getOpenRequests(0n, 0n),
-        contracts.lifecycleManager.deliveryEscrow(),
-        contracts.reputationRegistry.deliveryEscrow(),
-        contracts.userRegistry.getUser('0x0000000000000000000000000000000000000000'),
-      ]));
+      contracts.deliveryEscrow.getRequestCount(),
+      contracts.cargoToken.name(),
+      contracts.cargoToken.symbol(),
+      contracts.cargoToken.decimals(),
+      contracts.deliveryEscrow.getRequestIds(0n, 0n),
+      contracts.deliveryEscrow.getOpenRequests(0n, 0n),
+      contracts.lifecycleManager.deliveryEscrow(),
+      contracts.lifecycleManager.cargoToken(),
+      contracts.reputationRegistry.deliveryEscrow(),
+      contracts.userRegistry.getUser('0x0000000000000000000000000000000000000000'),
+    ]));
 
-    const configuredEscrow = String(results[3]).toLowerCase();
-    const reputationEscrow = String(results[4]).toLowerCase();
+    const configuredEscrow = String(results[6]).toLowerCase();
+    const configuredToken = String(results[7]).toLowerCase();
+    const reputationEscrow = String(results[8]).toLowerCase();
     if (configuredEscrow !== String(contracts.deliveryEscrow.target).toLowerCase()) {
       throw new Error('LifecycleManager is linked to a different DeliveryEscrow deployment.');
     }
     if (reputationEscrow !== String(contracts.deliveryEscrow.target).toLowerCase()) {
       throw new Error('ReputationRegistry is linked to a different DeliveryEscrow deployment.');
+    }
+    if (configuredToken !== String(contracts.cargoToken.target).toLowerCase()) {
+      throw new Error('LifecycleManager is linked to a different CargoToken deployment.');
     }
   } catch (error) {
     if (isMissingHeaderError(error)) {

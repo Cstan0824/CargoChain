@@ -101,8 +101,9 @@ export function buildConversationPresentation({
     otherRole,
     otherWallet,
     otherName,
-    title: `${otherName}#${requestId}`,
-    workLabel: `${isShipper ? 'Shipper' : 'Carrier'} work`,
+    title: otherName,
+    shipmentLabel: `Shipment #${requestId}`,
+    workLabel: otherRole,
     preview: String(conversation?.latest_message_preview || '').trim() || 'Shipment activity',
   };
 }

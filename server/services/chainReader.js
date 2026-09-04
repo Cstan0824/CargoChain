@@ -6,6 +6,7 @@ const { JsonRpcProvider, Contract, getAddress } = require('ethers');
 const path = require('path');
 const fs = require('fs');
 const { config, getCurrentContractAddress } = require('../config/environment');
+const { isProofUriForCid, normalizeCid } = require('./proofUri');
 
 const REQUEST_STATUS_MAP = {
   0: 'Open',
@@ -24,6 +25,17 @@ const PROPOSAL_STATUS_MAP = {
   2: 'Rejected',
   3: 'Accepted',
 };
+
+const MILESTONE_STATUS_MAP = {
+  0: 'Proposed',
+  1: 'PendingProof',
+  2: 'Submitted',
+  3: 'Verified',
+  4: 'Rejected',
+  5: 'Paid',
+};
+
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 let providerInstance = null;
 let contractInstance = null;
@@ -89,6 +101,103 @@ function normalizeAddress(addr) {
   return getAddress(addr).toLowerCase();
 }
 
+function normalizeMilestone(rawMilestone) {
+  if (!rawMilestone) return null;
+  const statusCode = Number(rawMilestone.status ?? rawMilestone[6]);
+  return {
+    milestoneId: Number(rawMilestone.milestoneId ?? rawMilestone[11]),
+    name: rawMilestone.name ?? rawMilestone[0] ?? '',
+    statusCode,
+    status: MILESTONE_STATUS_MAP[statusCode] || 'Unknown',
+    proofUris: Array.from(rawMilestone.proofUris ?? rawMilestone[3] ?? []),
+    submittedAt: Number(rawMilestone.submittedAt ?? rawMilestone[7] ?? 0),
+  };
+}
+
+function authorizationError(message, status = 403, code = 'proof_forbidden') {
+  const error = new Error(message);
+  error.status = status;
+  error.statusCode = status;
+  error.code = code;
+  return error;
+}
+
+function normalizedStatus(status, statusCode) {
+  if (typeof status === 'string' && status) return status;
+  return REQUEST_STATUS_MAP[Number(statusCode)] || REQUEST_STATUS_MAP[Number(status)] || 'Unknown';
+}
+
+function normalizedMilestoneStatus(status, statusCode) {
+  if (typeof status === 'string' && status) return status;
+  return MILESTONE_STATUS_MAP[Number(statusCode)] || MILESTONE_STATUS_MAP[Number(status)] || 'Unknown';
+}
+
+/**
+ * Pure carrier-side authorization decision. Keeping this separate from RPC
+ * reads lets route tests exercise the security boundary without Ganache.
+ */
+function authorizeProofUpload({ request, milestone, walletAddress, previousMilestoneStatus = null }) {
+  const wallet = normalizeAddress(walletAddress);
+  const carrier = normalizeAddress(request?.carrier);
+  if (carrier === ZERO_ADDRESS || wallet !== carrier) {
+    throw authorizationError('Only the assigned carrier can upload proof', 403, 'not_assigned_carrier');
+  }
+
+  const status = normalizedStatus(request?.status, request?.statusCode);
+  if (!['Funded', 'InProgress'].includes(status)) {
+    throw authorizationError('Proof upload is unavailable for this request state', 403, 'request_not_active');
+  }
+
+  if (Number(request?.deadline || 0) > 0 && Math.floor(Date.now() / 1000) > Number(request.deadline)) {
+    throw authorizationError('The delivery deadline has passed', 403, 'request_deadline_passed');
+  }
+
+  const milestoneStatus = normalizedMilestoneStatus(milestone?.status, milestone?.statusCode);
+  if (!['PendingProof', 'Rejected'].includes(milestoneStatus)) {
+    throw authorizationError('This milestone is not accepting a proof submission', 403, 'milestone_not_accepting_proof');
+  }
+
+  if (previousMilestoneStatus !== null && previousMilestoneStatus !== undefined
+    && normalizedMilestoneStatus(previousMilestoneStatus) !== 'Paid') {
+    throw authorizationError('The previous milestone must be paid before this proof upload', 403, 'previous_milestone_unpaid');
+  }
+
+  return {
+    walletAddress: wallet,
+    requestId: String(request.requestId),
+    milestoneId: Number(milestone.milestoneId),
+    role: 'carrier',
+  };
+}
+
+/**
+ * Pure participant/CID authorization decision for decryption-key release.
+ */
+function authorizeProofKey({ request, milestone, walletAddress, cid }) {
+  const wallet = normalizeAddress(walletAddress);
+  const shipper = normalizeAddress(request?.shipper);
+  const carrier = normalizeAddress(request?.carrier);
+  const isShipper = wallet === shipper;
+  const isCarrier = carrier !== ZERO_ADDRESS && wallet === carrier;
+  if (!isShipper && !isCarrier) {
+    throw authorizationError('Only the request shipper or assigned carrier can view proof', 403, 'not_proof_participant');
+  }
+
+  const normalizedCid = normalizeCid(cid);
+  const proofUris = Array.isArray(milestone?.proofUris) ? milestone.proofUris : [];
+  if (!proofUris.some((proofUri) => isProofUriForCid(proofUri, normalizedCid))) {
+    throw authorizationError('The requested CID is not recorded for this milestone', 403, 'cid_not_recorded');
+  }
+
+  return {
+    walletAddress: wallet,
+    requestId: String(request.requestId),
+    milestoneId: Number(milestone.milestoneId),
+    cid: normalizedCid,
+    role: isShipper ? 'shipper' : 'carrier',
+  };
+}
+
 /**
  * Reads delivery request details from smart contract.
  */
@@ -98,7 +207,7 @@ async function getDeliveryRequest(requestId) {
   try {
     req = await contract.getRequest(BigInt(requestId));
   } catch (err) {
-    if (err.reason === 'request does not exist' || err.message?.includes('request does not exist')) {
+    if (err.revert?.name === 'RequestDoesNotExist' || err.reason === 'request does not exist' || err.message?.includes('request does not exist')) {
       throw new Error(`Delivery request #${requestId} does not exist on-chain`);
     }
     throw err;
@@ -137,7 +246,7 @@ async function getProposals(requestId) {
   try {
     rawProposals = await contract.getProposals(BigInt(requestId));
   } catch (err) {
-    if (err.reason === 'request does not exist' || err.message?.includes('request does not exist')) {
+    if (err.revert?.name === 'RequestDoesNotExist' || err.reason === 'request does not exist' || err.message?.includes('request does not exist')) {
       return [];
     }
     throw err;
@@ -157,6 +266,65 @@ async function getProposals(requestId) {
       updatedAt: Number(p.updatedAt),
     };
   });
+}
+
+/**
+ * Reads one milestone and normalizes the fields needed by proof authorization.
+ */
+async function getMilestone(requestId, milestoneId) {
+  const contract = getDeliveryEscrowContract();
+  let rawMilestone;
+  try {
+    rawMilestone = await contract.getMilestone(BigInt(requestId), BigInt(milestoneId));
+  } catch (err) {
+    if (err.revert?.name === 'MilestoneDoesNotExist' || err.reason === 'milestone does not exist' || err.message?.includes('milestone does not exist')) {
+      const error = new Error(`Milestone #${milestoneId} does not exist for delivery request #${requestId}`);
+      error.status = 404;
+      throw error;
+    }
+    throw err;
+  }
+  return normalizeMilestone(rawMilestone);
+}
+
+/**
+ * Authoritatively checks the current request/milestone state before any proof
+ * upload capability or decryption key is issued.
+ */
+async function getProofAuthorization(requestId, milestoneId, walletAddress, mode = 'upload', cid = null) {
+  if (!['upload', 'key'].includes(mode)) {
+    throw authorizationError('Unsupported proof authorization mode', 400, 'invalid_proof_authorization_mode');
+  }
+  const request = await getDeliveryRequest(requestId);
+  const milestone = await getMilestone(requestId, milestoneId);
+
+  if (mode === 'key') {
+    return {
+      ...authorizeProofKey({ request, milestone, walletAddress, cid }),
+      request,
+      milestone,
+    };
+  }
+
+  let previousMilestoneStatus = null;
+  const contract = getDeliveryEscrowContract();
+  const executionIndex = await contract.getMilestoneExecutionIndex(BigInt(requestId), BigInt(milestoneId));
+  if (Number(executionIndex) > 0) {
+    const order = await contract.getMilestoneExecutionOrder(BigInt(requestId));
+    const previousMilestoneId = order[Number(executionIndex) - 1];
+    previousMilestoneStatus = await contract.getMilestoneStatus(BigInt(requestId), previousMilestoneId);
+  }
+
+  return {
+    ...authorizeProofUpload({
+      request,
+      milestone,
+      walletAddress,
+      previousMilestoneStatus,
+    }),
+    request,
+    milestone,
+  };
 }
 
 /**
@@ -180,8 +348,14 @@ module.exports = {
   getDeliveryEscrowContract,
   getRequestIds,
   getProposals,
+  getMilestone,
+  getProofAuthorization,
   getContractState,
+  authorizeProofKey,
+  authorizeProofUpload,
   REQUEST_STATUS_MAP,
   PROPOSAL_STATUS_MAP,
+  MILESTONE_STATUS_MAP,
   normalizeAddress,
+  normalizeMilestone,
 };

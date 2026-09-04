@@ -36,7 +36,7 @@ import {
   proposalValidationMessage,
 } from '../utils/proposalPresentation.js';
 import {
-  formatEth,
+  formatCargo,
   formatDate,
   formatDaysLeft,
   requestStatus,
@@ -715,6 +715,7 @@ export function ProposeMilestones() {
                   editable={isEditableMode}
                   label={milestones.length > 0 ? 'Add checkpoint before milestone 1' : 'Add checkpoint'}
                   onAdd={() => insertMilestone(0)}
+                  disabled={milestones.length >= 10}
                 />
 
                 {/* Milestone Intermediate Inputs */}
@@ -777,7 +778,7 @@ export function ProposeMilestones() {
                               )}
                             </div>
 
-                            {/* Column 2: Payout Percentage & calculated ETH */}
+                            {/* Column 2: Payout Percentage and calculated CARGO */}
                             <div className={styles.field}>
                               <label className={styles.label} htmlFor={`${m.id}-payoutPercentage`}>Payout</label>
                               <div className={styles.percentWrap}>
@@ -802,7 +803,7 @@ export function ProposeMilestones() {
                                 <span className={styles.percentUnit}>%</span>
                               </div>
                               <span className={styles.calculatedEth}>
-                                {payoutWei > 0n ? formatEth(payoutWei) : '0.00 ETH'}
+                                {payoutWei > 0n ? formatCargo(payoutWei) : '0.00 C.'}
                               </span>
                               {allocation.firstInvalidIndex === i && allocation.firstInvalidField === 'payoutPercentage' && (
                                 <span id={`${m.id}-payout-error`} className={styles.fieldError} role="alert">{proposalValidationMessage(allocation)}</span>
@@ -828,11 +829,7 @@ export function ProposeMilestones() {
 
                         </div>
                         {i < milestones.length - 1 && (
-                          <TimelineConnector
-                            editable={isEditableMode}
-                            label={`Add checkpoint after milestone ${i + 1}`}
-                            onAdd={() => insertMilestone(i + 1)}
-                          />
+                          <TimelineConnector editable={isEditableMode} label={`Add checkpoint after milestone ${i + 1}`} onAdd={() => insertMilestone(i + 1)} disabled={milestones.length >= 10} />
                         )}
                       </Fragment>
                     );
@@ -843,6 +840,7 @@ export function ProposeMilestones() {
                   editable={isEditableMode}
                   label={milestones.length > 0 ? `Add checkpoint after milestone ${milestones.length}` : 'Add checkpoint'}
                   onAdd={() => insertMilestone(milestones.length)}
+                  disabled={milestones.length >= 10}
                 />
 
                 {/* End Node: Destination */}
@@ -896,7 +894,7 @@ export function ProposeMilestones() {
                 <HiOutlineCurrencyDollar className={styles.infoIcon} />
                 <div>
                   <div className={styles.infoLabel}>Planned budget</div>
-                  <strong className={styles.infoVal}>{formatEth(request.proposedAmountWei)}</strong>
+                  <strong className={styles.infoVal}>{formatCargo(request.proposedAmountWei)}</strong>
                 </div>
               </div>
               <div className={styles.infoDivider} />
@@ -940,32 +938,19 @@ export function ProposeMilestones() {
   );
 }
 
-function TimelineConnector({ editable, label, onAdd }) {
+function TimelineConnector({ editable, label, onAdd, disabled = false }) {
   return (
     <div className={`${styles.timelineConnector} ${editable ? styles.timelineConnectorEditable : ''}`}>
       {editable ? (
         <>
           <span className={`${styles.timelineConnectorLine} ${styles.timelineConnectorLineBefore}`} aria-hidden="true" />
-          <button
-            type="button"
-            className={styles.timelineConnectorAdd}
-            aria-label={label}
-            title={label}
-            onClick={(event) => {
-              event.stopPropagation();
-              onAdd();
-            }}
-          >
-            <span className={styles.timelineConnectorVisual} aria-hidden="true">
-              <HiOutlinePlus />
-            </span>
-            <span className={styles.timelineConnectorLabel} aria-hidden="true">Add checkpoint</span>
+          <button type="button" className={styles.timelineConnectorAdd} aria-label={label} title={disabled ? 'Maximum 10 checkpoints per proposal' : label} onClick={(event) => { event.stopPropagation(); onAdd(); }} disabled={disabled}>
+            <span className={styles.timelineConnectorVisual} aria-hidden="true"><HiOutlinePlus /></span>
+            <span className={styles.timelineConnectorLabel} aria-hidden="true">{disabled ? 'Maximum reached' : 'Add checkpoint'}</span>
           </button>
           <span className={`${styles.timelineConnectorLine} ${styles.timelineConnectorLineAfter}`} aria-hidden="true" />
         </>
-      ) : (
-        <span className={styles.timelineConnectorLine} aria-hidden="true" />
-      )}
+      ) : <span className={styles.timelineConnectorLine} aria-hidden="true" />}
     </div>
   );
 }

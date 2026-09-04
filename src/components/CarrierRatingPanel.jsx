@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { HiOutlineArrowRight, HiOutlineStar, HiStar } from 'react-icons/hi2';
+import { HiOutlineArrowRight, HiOutlineStar, HiOutlineXMark, HiStar } from 'react-icons/hi2';
 import { Button } from './Button.jsx';
 import { useContracts } from '../hooks/useContracts.js';
 import { useToast } from '../hooks/useToast.js';
@@ -7,6 +7,7 @@ import { useUserProfile } from '../hooks/useUserProfile.js';
 import { useWallet } from '../hooks/useWallet.js';
 import {
   buildTagMask,
+  getTagsFromMask,
   MAX_REPUTATION_TAGS,
   REPUTATION_TAGS,
 } from '../utils/reputation.js';
@@ -15,9 +16,10 @@ import {
   sendWalletContractTransaction,
 } from '../utils/walletTransaction.js';
 import { startTransactionToast } from '../utils/transactionToast.js';
+import { ModalShell } from './ModalShell.jsx';
 import styles from './CarrierRatingPanel.module.css';
 
-export function CarrierRatingPanel({ requestId, carrier, isShipper, status }) {
+export function CarrierRatingPanel({ requestId, carrier, isShipper, status, onRatingPublished }) {
   const { contracts } = useContracts();
   const { account, signer, provider } = useWallet();
   const { requireRegistration } = useUserProfile();
@@ -60,6 +62,7 @@ export function CarrierRatingPanel({ requestId, carrier, isShipper, status }) {
   const canRate = isCompleted && isShipper && !rating;
   const submitting = stage === 'wallet' || stage === 'mining';
   const visibleScore = hoveredScore || selectedScore;
+  const ratedTags = rating ? getTagsFromMask(rating.tagMask) : [];
 
   const toggleTag = (tagId) => {
     setSelectedTags((current) => {
@@ -116,6 +119,7 @@ export function CarrierRatingPanel({ requestId, carrier, isShipper, status }) {
       transactionToast.submitted();
       await transaction.wait();
       await loadRating();
+      onRatingPublished?.();
       transactionToast.success();
       setModalOpen(false);
       setSelectedScore(0);
@@ -130,35 +134,52 @@ export function CarrierRatingPanel({ requestId, carrier, isShipper, status }) {
     }
   };
 
-  if (!carrier || !isCompleted) return null;
+  if (!carrier || !isCompleted || (!isShipper && !rating)) return null;
+  const ratingTitle = rating
+    ? isShipper ? 'Your rating' : 'Rating received'
+    : 'How did the delivery go?';
+  const ratingDescription = rating
+    ? ratedTags.length > 0
+      ? ratedTags.map((tag) => tag.label).join(' · ')
+      : 'No feedback tags selected.'
+    : 'Publish one verified rating for this completed request.';
 
   return (
     <section className={styles.actionBar} aria-labelledby="carrier-rating-cta-title">
       <div className={styles.actionCopy}>
-        <span className={styles.actionIcon} aria-hidden="true"><HiOutlineStar /></span>
+        <span className={styles.actionIcon} aria-hidden="true">{rating ? <HiStar /> : <HiOutlineStar />}</span>
         <div>
-          <span className={styles.actionKicker}>Delivery complete</span>
-          <strong id="carrier-rating-cta-title">{rating ? 'Carrier rating published' : 'How did the delivery go?'}</strong>
+          <span className={styles.actionKicker}>{rating && !isShipper ? 'Shipper feedback' : 'Delivery complete'}</span>
+          <strong id="carrier-rating-cta-title">{ratingTitle}</strong>
           <p>
             {loading
-              ? 'Checking this request...'
-                : rating
-                ? 'Your verified rating is recorded on-chain.'
-                : 'Publish one verified rating for this completed request.'}
+                ? 'Checking this request...'
+                : ratingDescription}
           </p>
         </div>
       </div>
-      {canRate && <Button onClick={() => setModalOpen(true)}>Rate carrier <HiOutlineArrowRight aria-hidden="true" /></Button>}
+      {rating ? (
+        <span className={styles.ratingResult} aria-label={String(rating.score) + ' out of 5 stars'}>
+          <HiStar aria-hidden="true" />
+          {rating.score} / 5
+        </span>
+      ) : canRate && (
+        <Button className={styles.actionCta} onClick={() => setModalOpen(true)}>Rate carrier <HiOutlineArrowRight aria-hidden="true" /></Button>
+      )}
 
       {modalOpen && (
-        <div className={styles.overlay} role="presentation" onMouseDown={(event) => event.target === event.currentTarget && closeModal()}>
-          <section className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="carrier-rating-title">
+        <ModalShell
+          size="md"
+          onClose={closeModal}
+          busy={submitting}
+          labelledBy="carrier-rating-title"
+        >
             <header className={styles.modalHeader}>
               <div>
                 <span className={styles.kicker}>Completed request #{String(requestId).padStart(4, '0')}</span>
                 <h2 id="carrier-rating-title">Rate this carrier</h2>
               </div>
-              <button type="button" className={styles.closeButton} onClick={closeModal} disabled={submitting} aria-label="Close rating dialog">×</button>
+              <button type="button" className={styles.closeButton} onClick={closeModal} disabled={submitting} aria-label="Close rating dialog"><HiOutlineXMark aria-hidden="true" /></button>
             </header>
 
             <div className={styles.formBody}>
@@ -212,8 +233,7 @@ export function CarrierRatingPanel({ requestId, carrier, isShipper, status }) {
             </div>
             <div className={styles.tagLimit}>Choose up to {MAX_REPUTATION_TAGS} tags across both groups.</div>
             {submitting && <div className={styles.transactionState} role="status">{stage === 'wallet' ? 'Review and approve the rating in MetaMask.' : 'Waiting for the rating transaction to confirm...'}</div>}
-          </section>
-        </div>
+        </ModalShell>
       )}
     </section>
   );

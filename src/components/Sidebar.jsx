@@ -3,13 +3,11 @@
 // Connected Wallet card pinned at the bottom, and a "Need help?" card.
 // On <768px the parent Layout collapses it into a drawer.
 
-import { NavLink } from 'react-router-dom';
-import { useNavigate } from 'react-router-dom';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
 import {
   HiOutlineShoppingCart,
   HiOutlineTruck,
   HiOutlineChatBubbleLeftRight,
-  HiOutlineQuestionMarkCircle,
   HiOutlineUserCircle,
   HiOutlineXMark,
 } from 'react-icons/hi2';
@@ -18,8 +16,6 @@ import { ConnectButton } from './ConnectButton.jsx';
 import { useWallet } from '../hooks/useWallet.js';
 import { shortAddress } from '../utils/format.js';
 import styles from './Sidebar.module.css';
-
-const SUPPORT_EMAIL = import.meta.env.VITE_SUPPORT_EMAIL || 'tancs-wm23@student.tarc.edu.my';
 
 // Top-level destinations only. Track, Create Request, and Wallet are
 // reached through their list-page actions (My Shipments → Track, Account
@@ -37,7 +33,9 @@ export function Sidebar({ onNavigate }) {
   return (
     <aside className={styles.sidebar} aria-label="Primary navigation">
       <div className={styles.brand}>
-        <CargoChainLogo className={styles.brandLogo} />
+        <Link to="/" onClick={onNavigate} className={styles.brandLink} aria-label="CargoChain Marketplace">
+          <CargoChainLogo className={styles.brandLogo} />
+        </Link>
         <button
           type="button"
           className={styles.closeNav}
@@ -66,14 +64,6 @@ export function Sidebar({ onNavigate }) {
       </nav>
 
       <div className={styles.bottomStack}>
-        <div className={styles.helpCard}>
-          <span className={styles.helpIcon} aria-hidden="true"><HiOutlineQuestionMarkCircle /></span>
-          <div className={styles.helpCopy}>
-            <strong>Need help?</strong>
-            <span>Talk to the CargoChain team.</span>
-          </div>
-          <a className={styles.helpLink} href={`mailto:${SUPPORT_EMAIL}`}>Contact us</a>
-        </div>
         <div className={styles.walletCard}>
           <button
             type="button"

@@ -6,14 +6,21 @@
 .actionCopy strong { color: var(--text-primary); font-size: var(--fs-sm); text-wrap: balance; }
 .actionCopy p { margin: 2px 0 0; color: var(--text-secondary); font-size: var(--fs-xs); line-height: 1.45; text-wrap: pretty; }
 .actionBar > button { min-height: 44px; flex: 0 0 auto; }
+.actionCta { width: 184px; max-width: 100%; justify-content: center; }
+.ratingResult { width: 184px; max-width: 100%; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: var(--s-2); color: var(--text-primary); background: var(--bg-surface); border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border)); border-radius: var(--r-md); font-size: var(--fs-sm); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+.ratingResult svg { width: 18px; height: 18px; color: #c58a1d; }
 .actionBar > button svg { width: 17px; height: 17px; }
 .overlay { position: fixed; inset: 0; z-index: var(--z-modal); display: grid; place-items: center; padding: var(--s-5); background: rgba(15, 23, 42, .42); }
 .modal { width: min(100%, 560px); max-height: min(720px, calc(100vh - 40px)); overflow: auto; padding: var(--s-6); background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); }
-.modalHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s-4); margin-bottom: var(--s-5); }
+.modalHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s-4); padding: var(--s-5); box-shadow: inset 0 -1px var(--border-soft); }
 .kicker { display: block; color: var(--text-secondary); font-size: var(--fs-xs); font-weight: var(--fw-semibold); letter-spacing: .05em; text-transform: uppercase; }
 .modal h2 { margin: 2px 0 3px; font-size: var(--fs-lg); line-height: var(--lh-tight); }
-.closeButton { width: 44px; height: 44px; padding: 0; color: var(--text-secondary); background: transparent; border: 0; font-size: var(--fs-xl); line-height: 1; }
-.formBody { display: flex; flex-direction: column; gap: var(--s-5); }
+.closeButton { width: 44px; height: 44px; padding: 0; display: inline-grid; place-items: center; color: var(--text-secondary); background: transparent; border: 0; border-radius: var(--r-md); font-size: var(--fs-xl); line-height: 1; cursor: pointer; transition-property: color, background-color, transform; transition-duration: var(--dur-1); transition-timing-function: var(--ease); }
+.closeButton:hover:not(:disabled) { color: var(--text-primary); background: var(--bg-subtle); }
+.closeButton:active:not(:disabled) { transform: scale(0.96); }
+.closeButton:disabled { cursor: not-allowed; opacity: 0.5; }
+.closeButton svg { width: 22px; height: 22px; }
+.formBody { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--s-5); padding: var(--s-5); }
 .formBody fieldset { margin: 0; padding: 0; border: 0; }
 .formBody legend { margin-bottom: var(--s-3); color: var(--text-primary); font-size: var(--fs-sm); font-weight: var(--fw-semibold); }
 .formBody legend span { color: var(--text-muted); font-weight: var(--fw-normal); }
@@ -31,5 +38,5 @@
 .tagLimit { margin-top: var(--s-3); color: var(--text-muted); font-size: var(--fs-xs); }
 .modalActions { display: flex; justify-content: flex-end; gap: var(--s-2); }
 .transactionState { margin-top: var(--s-4); padding: 10px 12px; color: var(--primary-text); background: var(--primary-soft); border-radius: var(--r-md); font-size: var(--fs-sm); }
-@media (max-width: 768px) { .actionBar { grid-template-columns: 40px minmax(0, 1fr); padding: var(--s-3); } .actionIcon { width: 40px; height: 40px; } .actionBar > button { grid-column: 1 / -1; width: 100%; justify-content: center; } }
-@media (max-width: 620px) { .tagChoices { grid-template-columns: 1fr; } .modal { padding: var(--s-5); } }
+@media (max-width: 768px) { .actionBar { grid-template-columns: 40px minmax(0, 1fr); padding: var(--s-3); } .actionIcon { width: 40px; height: 40px; } .actionBar > button, .ratingResult { grid-column: 1 / -1; width: 100%; justify-content: center; } }
+@media (max-width: 620px) { .tagChoices { grid-template-columns: 1fr; } }

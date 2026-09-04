@@ -227,6 +227,7 @@
   color: var(--primary);
   background: var(--bg-surface);
   box-shadow: var(--shadow-sm);
+  align-self: center;
 }
 
 .instructionsIcon svg {
@@ -348,6 +349,7 @@
   flex-direction: column;
   gap: var(--s-1);
   background: var(--bg-subtle);
+  box-shadow: var(--shadow-border), 0 3px 8px rgba(15, 23, 42, 0.08);
 }
 
 .escrowValue {

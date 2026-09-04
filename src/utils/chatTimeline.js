@@ -1,6 +1,6 @@
 // src/utils/chatTimeline.js — merges off-chain chat messages with verified on-chain delivery activity.
 
-import { formatEther } from 'ethers';
+import { formatCargo } from './format.js';
 
 export const ESCROW_CHAT_EVENT_NAMES = [
   'RequestCreated',
@@ -18,6 +18,9 @@ export const ESCROW_CHAT_EVENT_NAMES = [
   'RequestExpired',
   'RefundIssued',
   'CarrierTipped',
+  'OperationalAllowanceFunded',
+  'OperationalAllowanceReimbursed',
+  'OperationalAllowanceRefunded',
 ];
 
 export const REPUTATION_CHAT_EVENT_NAMES = ['CarrierRated'];
@@ -29,6 +32,9 @@ export const LIFECYCLE_CHAT_EVENT_NAMES = [
   'AmendmentRejected',
   'AmendmentWithdrawn',
   'AmendmentExpired',
+  'AmendmentResponseAllowanceFunded',
+  'AmendmentResponseReimbursed',
+  'AmendmentResponseAllowanceRefunded',
   'CancellationRequested',
   'CancellationAccepted',
   'CancellationRejected',
@@ -53,11 +59,12 @@ export async function fetchRequestNotices({
   if (!escrowContract || !provider || requestId === undefined || requestId === null) return [];
 
   const parsedRequestId = BigInt(requestId);
-  const [escrowEntries, lifecycleEntries, reputationEntries, proposalNotes] = await Promise.all([
+  const [escrowEntries, lifecycleEntries, reputationEntries, proposalNotes, milestoneNames] = await Promise.all([
     fetchContractEventEntries(escrowContract, ESCROW_CHAT_EVENT_NAMES, parsedRequestId, 'escrow'),
     fetchContractEventEntries(lifecycleManager, LIFECYCLE_CHAT_EVENT_NAMES, parsedRequestId, 'lifecycle'),
     fetchContractEventEntries(reputationRegistry, REPUTATION_CHAT_EVENT_NAMES, parsedRequestId, 'reputation'),
     fetchProposalRejectionNotes(escrowContract, parsedRequestId),
+    fetchMilestoneNames(escrowContract, parsedRequestId),
   ]);
 
   const logs = filterRequestNoticesForCarrier(
@@ -66,7 +73,7 @@ export async function fetchRequestNotices({
   );
   const notices = await Promise.all(logs.map(async ({ log, eventName }) => {
     const timestampMs = (await getBlockTimestamp(provider, log.blockNumber)) * 1000;
-    const notice = eventLogToNotice(log, timestampMs, eventName, { proposalNotes });
+    const notice = eventLogToNotice(log, timestampMs, eventName, { proposalNotes, milestoneNames });
     return notice ? { ...notice, requestId: Number(parsedRequestId) } : null;
   }));
 
@@ -218,30 +225,30 @@ export function eventLogToNotice(log, timestampMs, eventNameOverride = '', conte
     }
     case 'EscrowFunded': {
       const amount = formatAmount(args.amount);
-      return { ...base, tone: 'payment', subject: 'Escrow', action: 'funded', detail: ` with ${amount} ETH.`, text: `Escrow funded with ${amount} ETH.` };
+      return { ...base, tone: 'payment', subject: 'Escrow', action: 'funded', detail: ` with ${amount}`, text: `Escrow funded with ${amount}` };
     }
     case 'ProofSubmitted': {
-      const subject = `Checkpoint ID ${Number(args.milestoneId)}`;
+      const subject = milestoneSubject(args.milestoneId, context.milestoneNames);
       return { ...base, tone: 'proof', subject, action: 'photo proof submitted', text: `${subject} photo proof submitted.` };
     }
     case 'MilestoneVerified':
       if (args.approved === false) return null;
       {
-        const subject = `Checkpoint ID ${Number(args.milestoneId)}`;
+        const subject = milestoneSubject(args.milestoneId, context.milestoneNames);
         return { ...base, tone: 'success', subject, action: 'verified', text: `${subject} was verified.` };
       }
     case 'MilestoneRejected':
       {
-        const subject = `Checkpoint ID ${Number(args.milestoneId)}`;
+        const subject = milestoneSubject(args.milestoneId, context.milestoneNames);
         const text = args.reason
           ? `${subject} was rejected: ${args.reason}`
           : `${subject} was rejected.`;
         return { ...base, tone: 'warning', subject, action: 'rejected', detail: args.reason ? `: ${args.reason}` : '.', text };
       }
     case 'MilestonePaid': {
-      const subject = `Checkpoint ID ${Number(args.milestoneId)}`;
+      const subject = milestoneSubject(args.milestoneId, context.milestoneNames);
       const amount = formatAmount(args.amount);
-      return { ...base, tone: 'payment', subject, action: 'paid', detail: ` (${amount} ETH released).`, text: `${amount} ETH released for ${subject}.` };
+      return { ...base, tone: 'payment', subject, action: 'paid', detail: ` (${amount} released).`, text: `${amount} released for ${subject}.` };
     }
     case 'RequestCancelled':
       return { ...base, tone: 'warning', subject: 'Delivery request', action: 'cancelled', text: 'Delivery request cancelled.' };
@@ -251,11 +258,42 @@ export function eventLogToNotice(log, timestampMs, eventNameOverride = '', conte
       return { ...base, tone: 'warning', subject: 'Shipment deadline', action: 'passed', detail: '; remaining escrow can be refunded to the shipper.', text: 'Shipment deadline passed; remaining escrow can be refunded to the shipper.' };
     case 'RefundIssued': {
       const amount = formatAmount(args.amount);
-      return { ...base, tone: 'payment', subject: 'Refund', action: 'issued', detail: ` (${amount} ETH returned to the shipper).`, text: `${amount} ETH refunded to the shipper.` };
+      return { ...base, tone: 'payment', subject: 'Refund', action: 'issued', detail: ` (${amount} returned to the shipper).`, text: `${amount} refunded to the shipper.` };
     }
     case 'CarrierTipped': {
       const amount = formatAmount(args.amount);
-      return { ...base, tone: 'payment', subject: 'Completion tip', action: 'sent', detail: ` (${amount} ETH to the carrier).`, text: `The shipper sent a ${amount} ETH completion tip.` };
+      return { ...base, tone: 'payment', subject: 'Completion tip', action: 'sent', detail: ` (${amount} to the carrier).`, text: `The shipper sent a ${amount} completion tip.` };
+    }
+    case 'OperationalAllowanceFunded': {
+      const amount = formatAmount(args.amount);
+      return { ...base, tone: 'payment', subject: 'Gas reserve', action: 'funded', text: `${amount} gas reserve funded.` };
+    }
+    case 'OperationalAllowanceReimbursed': {
+      const amount = formatAmount(args.amount);
+      return {
+        ...base,
+        tone: 'payment',
+        subject: 'Gas reserve',
+        action: 'reimbursed',
+        detail: ` (${amount} paid to the carrier).`,
+        text: `${amount} gas reimbursement paid to the carrier.`,
+      };
+    }
+    case 'OperationalAllowanceRefunded': {
+      const amount = formatAmount(args.amount);
+      return { ...base, tone: 'payment', subject: 'Gas reserve', action: 'refunded', text: `${amount} unused gas reserve refunded.` };
+    }
+    case 'AmendmentResponseAllowanceFunded': {
+      const amount = formatAmount(args.amount);
+      return { ...base, tone: 'payment', subject: 'Amendment response reserve', action: 'funded', text: `${amount} response reserve funded.` };
+    }
+    case 'AmendmentResponseReimbursed': {
+      const amount = formatAmount(args.amount);
+      return { ...base, tone: 'payment', subject: 'Amendment response reserve', action: 'reimbursed', text: `${amount} response reimbursement paid.` };
+    }
+    case 'AmendmentResponseAllowanceRefunded': {
+      const amount = formatAmount(args.amount);
+      return { ...base, tone: 'payment', subject: 'Amendment response reserve', action: 'refunded', text: `${amount} response reserve refunded.` };
     }
     case 'CarrierRated':
       return { ...base, tone: 'success', subject: 'Carrier rating', action: 'published', text: 'Carrier rating published.' };
@@ -329,9 +367,9 @@ async function getBlockTimestamp(provider, blockNumber) {
 function formatAmount(value) {
   try {
     // Keep blockchain amounts deterministic across browser and test locales.
-    return Number(formatEther(value)).toLocaleString('en-US', { maximumFractionDigits: 4 });
+    return formatCargo(value);
   } catch {
-    return '0';
+    return formatCargo(0n);
   }
 }
 
@@ -372,6 +410,20 @@ async function fetchProposalRejectionNotes(contract, requestId) {
   }
 }
 
+async function fetchMilestoneNames(contract, requestId) {
+  if (typeof contract?.getMilestones !== 'function') return new Map();
+  try {
+    const milestones = await contract.getMilestones(requestId);
+    return new Map(Array.from(milestones || []).map((milestone, index) => {
+      const milestoneId = Number(milestone.milestoneId ?? milestone[15] ?? index);
+      const name = String(milestone.name ?? milestone[0] ?? '').trim();
+      return [milestoneId, name];
+    }));
+  } catch {
+    return new Map();
+  }
+}
+
 function subscribeToContractEvents(contract, eventNames, requestId, handler) {
   if (!contract) return [];
   return eventNames.flatMap((eventName) => {
@@ -388,11 +440,16 @@ function proposalRejectionText(proposalId, proposalNotes) {
   return note ? `${prefix} Note: ${note}` : prefix;
 }
 
+function milestoneSubject(milestoneId, milestoneNames) {
+  const resolvedName = milestoneNames?.get(Number(milestoneId));
+  return resolvedName || 'Checkpoint';
+}
+
 function amendmentRequestText(additionalFunding) {
   try {
     const amount = BigInt(additionalFunding ?? 0n);
     return amount > 0n
-      ? `An agreement change needs a response and proposes ${formatAmount(amount)} ETH in additional escrow.`
+      ? `An agreement change needs a response and proposes ${formatAmount(amount)} in additional escrow.`
       : 'An agreement change needs a response.';
   } catch {
     return 'An agreement change needs a response.';

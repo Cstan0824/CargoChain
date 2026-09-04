@@ -6,6 +6,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Topbar } from '../components/Topbar.jsx';
 import { Card } from '../components/Card.jsx';
 import { Button } from '../components/Button.jsx';
+import { ModalShell } from '../components/ModalShell.jsx';
 import { ChatButton } from '../components/chat/ChatButton.jsx';
 import { Badge } from '../components/Badge.jsx';
 import { SearchInput } from '../components/SearchInput.jsx';
@@ -14,12 +15,11 @@ import { Skeleton } from '../components/Skeleton.jsx';
 import { ProgressLine } from '../components/ProgressLine.jsx';
 import { CreateRequestModal } from '../components/CreateRequestModal.jsx';
 import { shipmentRoute } from '../assets';
-import { HiOutlineChevronRight, HiOutlineEye, HiOutlinePencilSquare, HiOutlineXMark } from 'react-icons/hi2';
+import { HiOutlineChevronRight, HiOutlineClock, HiOutlineEye, HiOutlinePencilSquare, HiOutlineXMark } from 'react-icons/hi2';
 import { useWallet } from '../hooks/useWallet.js';
 import { useContracts } from '../hooks/useContracts.js';
-import { useDialogFocus } from '../hooks/useDialogFocus.js';
 import {
-  formatEth,
+  formatCargo,
   formatDate,
   formatDaysLeft,
   milestoneStatus,
@@ -289,7 +289,7 @@ export function MyShipments() {
                     </td>
                     <td>
                       <span className={styles.numCell}>
-                        {formatEth(r.rewardWei > 0n ? r.rewardWei : r.proposedAmountWei)}
+                        {formatCargo(r.rewardWei > 0n ? r.rewardWei : r.proposedAmountWei)}
                       </span>
                     </td>
                     <td>
@@ -359,13 +359,15 @@ export function MyShipments() {
                           )
                         )}
                         {shouldShowProposalHistory(r) && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
+                          <button
+                            type="button"
+                            className={`${styles.iconBtn} ${styles.historyBtn}`}
                             onClick={() => setHistoryShipment(r)}
+                            title="View proposal history"
+                            aria-label="View proposal history"
                           >
-                            View proposal history
-                          </Button>
+                            <HiOutlineClock aria-hidden="true" />
+                          </button>
                         )}
                         <button
                           type="button"
@@ -532,7 +534,7 @@ async function loadWalletShipments(deliveryEscrow, account) {
         hasActiveProposal,
         ownHistoricalProposals,
         milestoneStatuses,
-        pendingProofLabel: pendingProofAmountWei > 0n ? formatEth(pendingProofAmountWei) : '',
+        pendingProofLabel: pendingProofAmountWei > 0n ? formatCargo(pendingProofAmountWei) : '',
       });
 
       return {
@@ -628,18 +630,14 @@ function nextActionPresentation(row) {
 function CarrierProposalHistoryModal({ shipment, onResubmit, onClose }) {
   const proposals = [...shipment.ownHistoricalProposals]
     .sort((a, b) => b.createdAt - a.createdAt);
-  const dialogRef = useDialogFocus({ onClose });
 
   return (
-    <div className={styles.historyOverlay} role="presentation" onMouseDown={onClose}>
-      <section
-        ref={dialogRef}
-        className={styles.historyModal}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="carrier-proposal-history-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
+    <ModalShell
+      size="lg"
+      onClose={onClose}
+      labelledBy="carrier-proposal-history-title"
+      className={styles.historyModal}
+    >
         <div className={styles.historyModalHeader}>
           <div>
             <span className={styles.historyKicker}>Carrier proposal history</span>
@@ -691,8 +689,7 @@ function CarrierProposalHistoryModal({ shipment, onResubmit, onClose }) {
             ))}
           </div>
         </div>
-      </section>
-    </div>
+    </ModalShell>
   );
 }
 

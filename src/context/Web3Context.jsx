@@ -19,6 +19,7 @@ export function Web3Provider({ children }) {
   const [account,  setAccount]  = useState(null);
   const [rpcChainId, setRpcChainId] = useState(null);
   const [walletChainId, setWalletChainId] = useState(null);
+  const [walletInitialized, setWalletInitialized] = useState(false);
   const [error,    setError]    = useState(null);
   const [busy,     setBusy]     = useState(false);
   const connectInFlightRef = useRef(null);
@@ -37,6 +38,7 @@ export function Web3Provider({ children }) {
       .catch(() => setError(`Could not connect to ${CARGO_NETWORK_CONFIG.chainName} at ${CARGO_NETWORK_CONFIG.rpcUrl}.`));
 
     if (typeof window === 'undefined' || !window.ethereum) {
+      setWalletInitialized(true);
       setError('MetaMask not detected. Install the browser extension to use this app.');
       return () => readProvider.destroy();
     }
@@ -73,6 +75,8 @@ export function Web3Provider({ children }) {
           setSigner(null);
           setError(walletError.shortMessage || walletError.message || 'Could not load the active MetaMask account.');
         }
+      } finally {
+        if (active && revision === accountRevision) setWalletInitialized(true);
       }
     };
     const onChainChanged    = () => window.location.reload();
@@ -181,6 +185,7 @@ export function Web3Provider({ children }) {
     chainId,
     rpcChainId,
     walletChainId,
+    walletInitialized,
     isCorrectNetwork,
     error,
     busy,

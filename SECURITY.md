@@ -33,12 +33,14 @@ Please **do not** include working exploit code in public issues. A short descrip
   `.env.local`, and `.env.*.local`. If you accidentally commit one, rotate
   the key immediately and use `git filter-repo` (or rewrite history) to
   purge it from the repo. Treat the key as burned.
-- **Do not store long-lived secrets in browser storage.** The chat module keeps
-  only its short-lived SIWE chat JWT and associated wallet/expiry metadata in
-  `sessionStorage`, so it disappears when the browser session ends and is
-  cleared on wallet/network changes. Service-role keys, private keys, and
-  server signing secrets must never enter browser storage, React state, or any
-  file under `src/`.
+- **Do not store long-lived secrets in browser storage.** The shared SIWE
+  wallet-session module keeps only its short-lived JWT and associated
+  wallet/expiry metadata in `sessionStorage`, so it disappears when the
+  browser session ends and is cleared on wallet/network changes. The proof
+  flow holds a per-proof AES key only in memory while finalizing or viewing;
+  it never persists plaintext, raw keys, decrypted Blob URLs, Pinata signed
+  URLs, service-role keys, private keys, `PINATA_JWT`, or `IPFS_MASTER_KEY`.
+  Server signing secrets must never enter React state or any file under `src/`.
 - **No secrets hardcoded in code** — including in `truffle-config.js`,
   server modules, or any `.js`/`.jsx` file. If you need a
   value at runtime, read it from `process.env` (Node) or a `VITE_*` var
@@ -50,11 +52,8 @@ Please **do not** include working exploit code in public issues. A short descrip
 - A `VITE_*` variable ends up in the JS file served to every visitor. If
   the value is sensitive, **do not use the `VITE_` prefix**. Use a regular
   env var and read it server-side only (Truffle, Express, etc.).
-- The frontend does not need `SEPOLIA_RPC` (Truffle uses it; the browser
-  talks to MetaMask, which already knows its own RPC). `SEPOLIA_RPC` and
-  `TEAM_MNEMONIC` are **future plan only** — see `.env.example` and the
-  commented Sepolia block in `truffle-config.js`. Do not fill them in or
-  enable Sepolia until the team agrees to ship v2.
+- The frontend does not use a Sepolia RPC. CargoChain uses only the local
+  Ganache network and its configured local development values.
 
 ## Local-only by default
 
@@ -65,7 +64,7 @@ the repo listens on a public interface unless you explicitly opt in.
 |------------------|------|--------------|---------------------------|
 | Ganache CLI      | 7545 | 127.0.0.1    | `--host 0.0.0.0`          |
 | CargoChain API   | 3000 | 127.0.0.1    | source change required (not recommended) |
-| Vite dev server  | 5173 | 127.0.0.1    | `vite --host 0.0.0.0`     |
+| Vite dev server  | 5174 | 127.0.0.1    | `vite --host 0.0.0.0`     |
 | Vite preview     | 8080 | 127.0.0.1    | `vite preview --host 0.0.0.0` |
 
 The repository intentionally does not provide a shared-Ganache mode. Each
@@ -76,8 +75,9 @@ so a fresh clone never accidentally exposes a wallet RPC, chat API, or dev UI.
 
 - No `dangerouslySetInnerHTML` in any component. If you need to render
   user input, sanitise first.
-- No fetching of arbitrary URLs from user input. Proof uploads are restricted
-  to the configured Supabase project and `milestone-proofs` bucket.
+- No fetching of arbitrary URLs from user input. Encrypted proof retrieval is
+  limited to HTTPS gateway bases configured through the public
+  `VITE_IPFS_GATEWAY_URLS` variable.
 - No third-party CDN scripts loaded at runtime. All deps are in
   `package.json` and installed locally.
 
@@ -98,5 +98,8 @@ so a fresh clone never accidentally exposes a wallet RPC, chat API, or dev UI.
 - Production-grade abuse protection, managed secrets, and a public deployment.
 - Mobile wallet flows (WalletConnect, deep links) — MetaMask extension
   only.
-- IPFS / decentralised storage. Proof images use Supabase Storage; the browser
-  uses a SHA-256-derived object path and submits the resulting proof URI on-chain.
+- Public IPFS confidentiality or availability guarantees. New proof plaintext
+  is encrypted in the browser before Pinata upload, but CIDs and ciphertext
+  are public and provider pinning/gateway uptime still require operational
+  monitoring. Supabase Postgres/Realtime remains in scope for chat and the
+  server-only wrapped-key table.

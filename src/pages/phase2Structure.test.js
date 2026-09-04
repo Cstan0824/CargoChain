@@ -36,7 +36,7 @@ describe('Phase 2 workflow structure', () => {
   it('keeps exact stable-toast stages for the four critical shipment writes', () => {
     const track = source('./Track.jsx');
     for (const copy of [
-      'Confirm proposal and escrow funding in MetaMask…',
+      'Confirm CARGO allowance and escrow funding in MetaMask…',
       'Funding shipment…',
       'Proposal accepted and escrow funded.',
       'Confirm proof submission in MetaMask…',

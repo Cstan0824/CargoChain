@@ -11,24 +11,22 @@
 
 ## What is CargoChain?
 
+**CargoChain** is the platform. Its ETH-backed payment currency is **CARGO**, with the on-chain symbol **`C.`**. The interface displays amounts such as `500 C.`. The fixed conversion rate remains `1 ETH = 10,000 C.`; network gas is paid in ETH.
+
 A milestone-based delivery marketplace where:
 
 1. A **shipper** posts a goods request with cargo details, a route, payment amount, and deadline.
-2. Carriers submit their own milestone proposals. The shipper reviews the proposals, selects one, and locks the exact ETH amount in escrow; remaining active proposals are rejected on-chain.
-3. The accepted carrier uploads a **photo-proof** for each checkpoint. The browser derives a SHA-256-based Storage path, uploads the image to Supabase, and records the resulting proof URL and remark on-chain.
+2. Carriers submit their own milestone proposals. The shipper reviews the proposals, selects one, and locks the CARGO compensation plus a refundable carrier gas reserve; remaining active proposals become effectively rejected on-chain.
+3. The accepted carrier uploads a **photo-proof** for each checkpoint. The browser validates a JPEG/PNG/WebP up to 2 MiB, hashes and encrypts it with AES-256-GCM, uploads only ciphertext through a short-lived Pinata signed URL, and records a canonical `ipfs://` reference and remark on-chain.
 4. The **shipper verifies** each proof in the web UI, releasing that checkpoint's agreed escrow allocation to the carrier.
-5. After acceptance, either party can negotiate an amendment: extend or shorten a deadline under the applicable rules, add ETH to unpaid checkpoints, or insert a newly funded checkpoint without rewriting completed work.
+5. After acceptance, either party can negotiate an amendment: extend or shorten a deadline under the applicable rules, add CARGO to unpaid checkpoints, or insert a newly funded checkpoint without rewriting completed work.
 6. Either participant can request mutual cancellation. If the other accepts, completed payouts remain with the carrier and only unpaid escrow returns to the shipper. Overdue requests retain a separate refund path.
 7. After completion, the shipper may send one optional, one-time tip directly to the carrier.
 8. The shipper may publish one permanent 1-5 star rating with up to three predefined feedback tags. Carrier profiles combine those verified ratings with aggregate completion and timing outcomes.
 
-CargoChain also includes account-based access: one account can enable Shipper, Carrier, or both roles, then link one or more MetaMask wallets for on-chain signing. Wallet-backed display names and request-scoped private chat remain available. Chat messages are private, off-chain Supabase data; the accompanying delivery timeline is reconstructed from relevant, verified on-chain events.
+The connected MetaMask wallet is the CargoChain identity and can act as shipper or carrier according to its relationship to each request. Wallet-backed display names and request-scoped private chat remain available. Chat messages are private, off-chain Supabase data; the accompanying delivery timeline is reconstructed from relevant on-chain events.
 
 This is the **assignment version** — built for clarity, demo, and grading — not a production logistics platform.
-
-> **Note on naming:** The PRD written 2026-07-05 was titled "LogiChain v3". The GitHub repo is named **CargoChain** to avoid collision with the published TARUC reference (`TARUCmarketplace.zip`) and to make the project discoverable. When you see "LogiChain" in older docs (`docs/PRD.md`), it's the same project.
-
----
 
 ## Tech stack
 
@@ -37,11 +35,11 @@ This is the **assignment version** — built for clarity, demo, and grading — 
 | Smart contracts | Solidity `^0.8.0` |
 | Dev framework | Truffle Suite |
 | Local chain | Ganache (127.0.0.1:7545) |
-| Testnet | Sepolia — **future plan, not part of v1** |
+| Testnet | Not included in CargoChain |
 | Frontend | React 18 + Vite (plain JavaScript) |
 | Wallet layer | ethers.js v6 |
-| Off-chain services | Express SIWE/chat API + Supabase Database/Storage |
-| Photo upload | Supabase Storage with browser-side SHA-256 hashing |
+| Off-chain services | Express SIWE/proof/chat API + Supabase Database/Realtime |
+| Photo upload | Browser AES-256-GCM + Pinata public IPFS via server-issued signed URL |
 | Tests | Mocha + Chai (Truffle built-in) |
 
 **Do not** introduce Hardhat, Next.js, Vue, wagmi, viem, or Web3.js — these are out of scope. ethers.js is approved as the client library (project owner decision 2026-07-06).
@@ -55,27 +53,31 @@ This is the **assignment version** — built for clarity, demo, and grading — 
 - A registered shipper creates an open request with cargo items, pickup/destination, advertised payment, and deadline.
 - Each registered carrier may keep one active proposal per request, revoke it, and submit a revised plan while the request remains open.
 - The shipper can compare active proposals, sort them by date and checkpoint count, inspect details, optionally reject with a note, or approve exactly one plan.
-- Approval locks the advertised ETH in `DeliveryEscrow`, assigns the carrier, and automatically rejects competing active proposals with an auditable reason.
+- Approval locks the advertised CARGO and contract-calculated operational reserve in `DeliveryEscrow`, assigns the carrier, and makes competing active proposals effectively rejected with an auditable reason.
 
 ### During delivery
 
-- The accepted carrier submits JPEG, PNG, or WebP photo proof for the next checkpoint. The browser hashes the file with SHA-256 before uploading it to Supabase Storage.
+- The accepted carrier submits a JPEG, PNG, WebP, GIF, AVIF, or BMP image proof up to 2 MiB for the next checkpoint. The browser computes a plaintext SHA-256, encrypts with a fresh AES-256-GCM key, and sends neutral `.bin` ciphertext to Pinata through the authenticated Express proof API.
+- Express re-checks the assigned-carrier/milestone state, issues a constrained short-lived Pinata URL, verifies the returned CID and ciphertext hash, and stores only a master-key-wrapped per-proof key in Supabase. The contract stores the provider-independent `ipfs://` URI; the viewer releases and decrypts it only for the current shipper or carrier.
 - The shipper approves or rejects the submitted proof. Approval releases the checkpoint's payout directly to the carrier.
+- The carrier pays native ETH gas when submitting proof. The first successful proof submission for each checkpoint may receive measured and capped CARGO reimbursement from the shipper-funded operational reserve. Withdrawals, corrected submissions, reverted transactions, and repeated submissions are not reimbursed.
+- The contract preserves enough operational reserve for later checkpoints. The shipper may fund an extra buffer or top up an active request; unused reserve returns to the shipper when the request settles.
 - Checkpoints have stable IDs. An amendment can insert a new checkpoint into the execution order without changing prior proof, payment, or event references.
 - If the shipment deadline passes, the shipper can reclaim remaining unpaid escrow. A refunded request cannot accept further milestone proofs.
 
 ### Agreement changes and completion
 
 - A shipper can directly extend a deadline when no negotiation is pending. Either participant can otherwise request an amendment with a response deadline, reason, funding allocations, and newly funded checkpoints.
+- Each new amendment checkpoint includes its required proof-operation reserve. Amendments may use `EachPaysOwn` or `RequesterCoversResponse`; a covered acceptance or rejection may receive one measured and capped CARGO reimbursement, with unused response allowance returned to its funder.
 - A request can have only one pending amendment or cancellation at a time. Resolved negotiations preserve a history of the requester, notes, before/after values, and outcome.
 - Once funded, cancellation is mutual: either participant requests it, the other accepts/rejects, and acceptance returns only remaining unpaid escrow to the shipper. It cannot settle while a proof is awaiting verification.
 - After all checkpoints are paid, the shipper can send one optional, separate tip directly to the carrier.
-- A completed request can receive one immutable shipper rating. Carrier reputation opens in a read-only proposal/track modal, while `/profile` shows the connected wallet's own aggregate delivery outcomes.
+- A completed request can receive one immutable shipper rating. Carrier reputation opens in a read-only proposal/track modal, while `/account` shows the connected wallet's own aggregate delivery outcomes.
 
 ### Identity and chat
 
-- A connected MetaMask wallet is the CargoChain identity. A wallet can register an on-chain display name through `UserRegistry`, then act as both shipper and carrier on different requests.
-- The accepted shipper/carrier pair receives a request-scoped conversation. Text messages live in Supabase; SIWE authorisation and server-side contract checks protect access.
+- A connected MetaMask wallet is the CargoChain identity. It may register an on-chain display name through `UserRegistry`, then act as shipper or carrier according to its relationship to each request.
+- A request-scoped conversation can be created after a carrier submits an on-chain proposal. It remains writable before selection while the request is open. After the shipper accepts a carrier, only that carrier's conversation remains writable; other proposal conversations become read-only. Text messages live in Supabase, with SIWE authorisation and server-side contract checks protecting access.
 - Chat also renders a filtered, read-only activity timeline from `DeliveryEscrow` and `LifecycleManager` events, including completion and expiry outcomes. Pending amendments and cancellations link directly to the relevant Track review section.
 
 For exact callable functions and validation rules, see [`API_v1.md`](API_v1.md). For product decisions around amendments, cancellation, and tips, see [`docs/Agreement-Changes.md`](docs/Agreement-Changes.md).
@@ -92,7 +94,7 @@ CargoChain/
 ├── src/                    # React 18 + Vite frontend
 │   ├── pages/              # marketplace, requests, proposals, tracking, profile, messages
 │   ├── components/         # shared controls, registration, confirmations, chat
-│   ├── context/            # wallet, contracts, profile, SIWE chat, toast
+│   ├── context/            # wallet, contracts, profile, shared SIWE session, toast
 │   ├── hooks/              # context hooks plus identity/confirmation helpers
 │   ├── contracts/          # ethers contract factory
 │   ├── utils/              # formatting, upload, transaction, history, chat helpers
@@ -100,12 +102,11 @@ CargoChain/
 ├── server/                 # Express SIWE authentication + request-scoped chat API
 ├── scripts/                # chat schema, development launcher, scenario helpers
 ├── docs/                   # PRD, specification, architecture, agreement-change rules
-├── truffle-config.js       # Ganache default; Sepolia commented (future plan)
+├── truffle-config.js       # Ganache development configuration
 ├── vite.config.mjs         # Vite dev server on 127.0.0.1:5174
 ├── package.json
 ├── README.md               # this file
 ├── AGENTS.md               # Coding-agent rules (read first)
-├── CLAUDE.md               # Claude Code specific instructions
 ├── SECURITY.md             # Secret-handling + local-only defaults
 ├── .env.example            # Template for .env (committed)
 └── API_v1.md               # Contract function reference
@@ -117,7 +118,7 @@ CargoChain/
 
 | Tool | Version | Why |
 |---|---|---|
-| **Node.js** | 18.x or 20.x LTS | Truffle + ethers + Vite + Express |
+| **Node.js** | 22.x LTS (`.nvmrc`) | Truffle + ethers + Vite + Express |
 | **npm** | 9+ (bundled with Node) | package management |
 | **Git** | 2.30+ | version control |
 | **Ganache** | 7.x | local Ethereum chain |
@@ -153,9 +154,8 @@ Install the browser extension from [https://metamask.io/](https://metamask.io/).
 ## Ganache — your local blockchain
 
 **What it is:** A one-machine Ethereum blockchain that runs on your laptop.
-It speaks the same JSON-RPC protocol as mainnet / Sepolia, so MetaMask,
-Truffle, and ethers.js all work against it without any code changes. It's
-the project's v1 chain — Sepolia is a future plan, not active.
+It speaks the Ethereum JSON-RPC protocol, so MetaMask, Truffle, and ethers.js
+all work against it. It is CargoChain's only blockchain network.
 
 ### What Ganache gives you for free
 
@@ -253,11 +253,10 @@ tests use this to verify deadline-based proof and refund rules.
 
 ### What Ganache is **not**
 
-- **Not a public chain.** Nothing on Ganache is visible to anyone else. If
-  you want a "live" demo the tutor can verify on a block explorer, that's
-  Sepolia — which is a future plan.
-- **Not persistent.** A laptop restart wipes the chain. Don't store any
-  real data in the contracts.
+- **Not a public chain.** Nothing on Ganache is visible to anyone else.
+- **Not a durable record.** The development launcher keeps local history in
+  `ganache-data/`, but the chain can be reset or replaced at any time. Do not
+  store real data in the contracts.
 - **Not representative of mainnet gas costs.** A `createRequest` on
   Ganache costs 0 fake ETH. On mainnet, the same tx might cost $0.50–$2
   in real ETH. Design the contract logic to be gas-efficient anyway, but
@@ -281,15 +280,23 @@ npm install
 cp .env.example .env
 ```
 
-Open `.env` and provide the Supabase project URL, browser publishable key, service-role key, and a private `SUPABASE_JWT_SECRET` of at least 32 characters. Keep the Ganache defaults unless your local chain uses a different host, port, or chain ID.
+Open `.env` and provide the Supabase project URL, browser publishable key,
+service-role key, a private `SUPABASE_JWT_SECRET` of at least 32 characters,
+the server-only Pinata JWT/gateway host, and a random 32-byte
+`IPFS_MASTER_KEY`. Keep the Ganache defaults unless your local chain uses a
+different host, port, or chain ID.
 
 ### Configure Supabase once
 
-CargoChain needs Supabase for proof images and private chat:
+CargoChain needs Supabase for private chat/database state and Pinata for new
+encrypted proof ciphertext:
 
 1. In the Supabase SQL Editor, run [`scripts/apply-chat-schema.sql`](scripts/apply-chat-schema.sql). It creates the `conversations` and `messages` tables, indexes, RLS read policies, and realtime publication entries.
-3. Create a public Storage bucket named `milestone-proofs`. The browser uploads JPEG, PNG, and WebP proof images up to 10 MB under a SHA-256-derived object path; the resulting public URL is submitted on-chain.
-4. Restart the API/Vite processes after changing `.env` values. Never commit `.env` or the service-role key.
+2. Apply [`scripts/apply-proof-key-schema.sql`](scripts/apply-proof-key-schema.sql) to create the server-only `proof_keys` table. Keep RLS enabled; do not add browser policies for this table.
+3. Create a scoped Pinata JWT that can create public signed uploads, and set `PINATA_GATEWAY_HOST` to the account's HTTPS gateway host. Generate a random 32-byte `IPFS_MASTER_KEY` (base64url or 64 hex characters). These values are Express-only; never prefix them with `VITE_`.
+4. Set `VITE_IPFS_GATEWAY_URLS` to a comma-separated list of HTTPS gateway bases (the example includes Pinata and the public IPFS gateway). These URLs are public and are used only for retrieval fallback.
+5. New proof images are JPEG, PNG, WebP, GIF, AVIF, or BMP up to **2 MiB**. The browser encrypts them before uploading neutral `.bin` ciphertext; no proof Storage bucket is required. SVG is intentionally excluded because it can contain active or externally loaded content.
+6. Restart the API/Vite processes after changing `.env` values. Never commit `.env` or the service-role key.
 
 **Every dev session — one command, one terminal:**
 
@@ -297,12 +304,12 @@ CargoChain needs Supabase for proof images and private chat:
 npm run dev:all
 ```
 
-That command starts deterministic Ganache with a local `ganache-data/` database, waits for RPC, compiles, runs a reset migration, then starts the CargoChain API and Vite in **one terminal**. It requires the Supabase configuration above because the API validates its configuration at startup:
+That command starts deterministic Ganache with a local `ganache-data/` database, waits for RPC, compiles, runs a reset migration, then starts the CargoChain API and Vite in **one terminal**. It requires the Supabase, Pinata, and master-key configuration above because the API validates its configuration at startup:
 
 ```
 RPC Listening on 127.0.0.1:7545
 [cargochain-api] listening on http://127.0.0.1:3000
-VITE v5.4.21 ready
+VITE ready
 ➜  Local: http://127.0.0.1:5174/
 ```
 
@@ -363,17 +370,17 @@ See `API_v1.md` for the function reference, `docs/Module-Split.md` for per-file 
 | `index.html`, `main.jsx`, `App.jsx` | Vite entry + React root + Router |
 | `pages/` | marketplace, request details, proposals, shipments/tracking, profile, and messages |
 | `components/` | shared UI plus proposal, registration, and private-chat components |
-| `context/` | account auth/access, wallet/contracts, registered profile, SIWE chat auth, and toast state |
+| `context/` | account auth/access, wallet/contracts, registered profile, shared SIWE wallet session, and toast state |
 | `hooks/` | context access helpers |
 | `contracts/index.js` | `getContract(provider, name, networkId)` factory |
-| `utils/` | formatting, SHA-256/Supabase proof upload, transaction execution, payment history, and on-chain chat timeline helpers |
+| `utils/` | formatting, browser proof hashing/encryption, canonical IPFS URIs, transaction execution, payment history, and on-chain chat timeline helpers |
 | `css/style.css` | Global stylesheet (layout, navbar, toast, timeline) |
 
 Routes are defined in `src/App.jsx`; contract reads are built from the current Truffle artifacts in `build/contracts/` and validated against the active Ganache deployment.
 
 ### `server/` — CargoChain API
 
-The Express API verifies SIWE wallet sessions, authorizes request-scoped conversations against the deployed contract, and reads/writes private chat data in Supabase. The chat timeline also reads verified `DeliveryEscrow` and `LifecycleManager` events directly from the chain, including proposals, amendments, cancellations, deadline extensions, and tips; pending agreement notices link back to tracking for decisions. Photo proofs do not pass through this API; the frontend uploads them directly to the configured Supabase Storage bucket.
+The Express API verifies SIWE wallet sessions, authorizes both proof operations and request-scoped conversations against the deployed contract, and reads/writes private chat plus wrapped proof-key records in Supabase. For proofs, it issues a constrained Pinata signed URL, re-checks on-chain authorization, verifies CID retrieval and ciphertext integrity, and releases a wrapped key only to the current shipper or assigned carrier. The browser derives safe gateway URLs, decrypts in memory, and revokes Blob URLs when the viewer closes. The chat timeline also reads verified `DeliveryEscrow` and `LifecycleManager` events directly from the chain.
 
 ### `test/` — Truffle tests
 
@@ -385,16 +392,18 @@ npm run test:frontend # Vitest frontend suite
 npm run build         # production bundle
 ```
 
-The latest full local verification completed with **72 passing contract tests** and **48 passing frontend tests**.
+The current automated verification baseline is **93 passing contract tests**, **196 passing frontend tests**, and **18 passing server tests**. The separate fresh-wallet Ganache frontend integration test remains optional and was skipped by decision.
 
 ### `docs/` — Documentation
 
 | File | Content |
 |---|---|
-| `PRD.md` | Exported PRD v3 (LogiChain) — product requirements baseline |
-| `Spec.md` | Concise functional + technical spec — quick-reference for the team |
-| `Architecture.md` | Diagram-rich architecture overview |
-| `Module-Split.md` | Detailed responsibilities, dependencies, handoffs per module |
+| `PRD.md` | Current CargoChain product requirements baseline |
+| `Spec.md` | Current functional and technical specification |
+| `Architecture.md` | Current system and contract architecture |
+| `BusinessFlow.md` | Current user and settlement workflow |
+| `Module-Feature-Listing.md` | Implemented feature matrix |
+| `Module-Split.md` | Responsibilities, dependencies, and hand-offs per module |
 | `Agreement-Changes.md` | Implemented amendment, mutual-cancellation, and completion-tip rules |
 | `DESIGN.md` | Shared UI typography, surfaces, layering, tables, loading, and accessibility contract |
 
@@ -440,7 +449,7 @@ The demo runs end-to-end on Ganache + a fresh `npm run migrate`:
 1. **Connect a Ganache wallet** in MetaMask and register its optional public display name through the profile flow.
 2. **Switch MetaMask wallets** when demonstrating the other party. Each connected wallet may act as a shipper or carrier according to the shipment action.
 3. **Create and propose:** the shipper creates a request at `http://127.0.0.1:5174/`; two carriers submit milestone plans; the shipper compares, selects, and funds one.
-4. **Proof and payment:** the accepted carrier uploads checkpoint proof; the shipper verifies it; show the released ETH and on-chain payment entry.
+4. **Proof and payment:** with a synthetic JPEG, PNG, WebP, GIF, AVIF, or BMP image no larger than 2 MiB, the accepted carrier signs in on demand, uploads encrypted ciphertext through Pinata, submits the returned `ipfs://` reference, and the shipper verifies it; show the released CARGO and on-chain payment entry. ETH remains available in both wallets for gas.
 5. **Private chat:** the accepted pair authenticates with SIWE and exchanges request-scoped messages. Show that the activity timeline only contains events for that carrier/request pair.
 6. **Agreement change:** request a funded amendment or mutual cancellation, then show its review panel, on-chain decision, and history. Do not try to finalise cancellation while a proof is awaiting verification.
 7. **Completion:** finish remaining checkpoints, show the optional one-time tip in Payments, and confirm it reaches the carrier without changing escrow accounting.
@@ -451,9 +460,9 @@ The demo runs end-to-end on Ganache + a fresh `npm run migrate`:
 
 - One accepted carrier per request; multiple carriers may propose while the request is open.
 - Chat is request-scoped for the shipper and the specific carrier. It is not a general marketplace messaging system.
-- Photo off-chain storage is mutable. The browser uses a SHA-256-derived object path and does not overwrite an existing proof object, but the current contract stores the URL rather than independently validating file content on-chain.
-- Supabase Storage proof URLs are public in the current assignment build. Do not upload real personal or commercially sensitive images.
-- Time-travel tests depend on Ganache's `evm_increaseTime`. (Sepolia is a future plan; when/if activated, its clock is real-time.)
+- IPFS CIDs are content-addressed but public and provider pinning is not an availability guarantee. New proof plaintext is encrypted in the browser, while ciphertext and the canonical URI remain public; gateway access is not an access-control mechanism.
+- Keep `PINATA_JWT`, `IPFS_MASTER_KEY`, Supabase service-role credentials, and SIWE signing secrets server-only. Use synthetic evidence for the classroom demo and apply the `proof_keys` schema before testing encrypted viewing.
+- Time-travel tests depend on Ganache's `evm_increaseTime`.
 - The main workflow is responsive, but MetaMask extension remains the supported wallet flow.
 
 ---
@@ -463,8 +472,8 @@ The demo runs end-to-end on Ganache + a fresh `npm run migrate`:
 - PRD: [`docs/PRD.md`](docs/PRD.md)
 - Module breakdown: [`docs/Module-Split.md`](docs/Module-Split.md)
 - Contract API: [`API_v1.md`](API_v1.md)
-- Account and asset plan: [`docs/Account-Based-Access-and-Asset-Plan.md`](docs/Account-Based-Access-and-Asset-Plan.md)
-- Coding-agent rules: [`AGENTS.md`](AGENTS.md)
+- CARGO and gas allocation: [`docs/Spec.md`](docs/Spec.md)
+- Interface design: [`DESIGN.md`](DESIGN.md)
 
 ---
 

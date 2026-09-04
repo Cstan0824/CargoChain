@@ -1,4 +1,4 @@
-// src/context/ChatAuthContext.jsx — CargoChain SIWE Chat Auth Provider
+// src/context/ChatAuthContext.jsx — CargoChain SIWE wallet-session provider
 // Manages SIWE wallet authentication, 8-hour JWT lifecycle, sessionStorage persistence,
 // and automatic session clearing when MetaMask account or chain changes.
 
@@ -16,7 +16,7 @@ const CHAT_EXP_KEY = 'cargochain_chat_exp';
 const ChatAuthContext = createContext(null);
 
 export function ChatAuthProvider({ children }) {
-  const { account, walletChainId, signer } = useWallet();
+  const { account, walletChainId, walletInitialized = true, signer } = useWallet();
 
   const [authStatus, setAuthStatus] = useState('disconnected'); // 'disconnected' | 'unauthenticated' | 'authenticating' | 'authenticated' | 'error'
   const [authenticatedWallet, setAuthenticatedWallet] = useState(null);
@@ -59,6 +59,7 @@ export function ChatAuthProvider({ children }) {
   }, []);
 
   const restoreChatSession = useCallback(async () => {
+    if (!walletInitialized) return false;
     if (!account) {
       setAuthStatus('disconnected');
       setAuthenticatedWallet(null);
@@ -115,10 +116,11 @@ export function ChatAuthProvider({ children }) {
       }
       return false;
     }
-  }, [account, walletChainId, getChatAccessToken, clearChatSession]);
+  }, [account, walletChainId, walletInitialized, getChatAccessToken, clearChatSession]);
 
   // Handle automatic session verification and account/chain change events
   useEffect(() => {
+    if (!walletInitialized) return undefined;
     const currentSourceKey = account && walletChainId != null
       ? `${Number(walletChainId)}:${account.toLowerCase()}`
       : '';
@@ -153,7 +155,7 @@ export function ChatAuthProvider({ children }) {
       };
     }
 
-    // Check if connected account matches stored chat session wallet
+    // Check if connected account matches the stored wallet session
     const storedWallet = typeof window !== 'undefined' ? window.sessionStorage.getItem(CHAT_WALLET_KEY) : null;
     if (storedWallet && storedWallet.toLowerCase() !== account.toLowerCase()) {
       clearChatSession();
@@ -164,7 +166,7 @@ export function ChatAuthProvider({ children }) {
     return () => {
       window.removeEventListener('cargochain:chat_auth_401', handle401);
     };
-  }, [account, walletChainId, clearChatSession, restoreChatSession]);
+  }, [account, walletChainId, walletInitialized, clearChatSession, restoreChatSession]);
 
   /**
    * Explicit user-triggered SIWE authentication.
@@ -209,7 +211,7 @@ export function ChatAuthProvider({ children }) {
       try {
         const signerAddress = await activeSigner.getAddress();
         if (signerAddress.toLowerCase() !== normalizedAccount) {
-          throw new Error('The active MetaMask account changed before chat sign-in.');
+          throw new Error('The active MetaMask account changed before wallet sign-in.');
         }
         const signerNetwork = await activeSigner.provider?.getNetwork();
         if (signerNetwork && Number(signerNetwork.chainId) !== CARGO_NETWORK_CONFIG.chainId) {
@@ -229,7 +231,7 @@ export function ChatAuthProvider({ children }) {
       const siweMsg = new SiweMessage({
         domain,
         address: getAddress(activeAccount),
-        statement: 'Sign in to CargoChain Chat',
+        statement: 'Sign in to CargoChain',
         uri: origin,
         version: '1',
         chainId: CARGO_NETWORK_CONFIG.chainId,
@@ -251,7 +253,7 @@ export function ChatAuthProvider({ children }) {
         || latest.walletChainId !== CARGO_NETWORK_CONFIG.chainId
         || latestSignerAddress.toLowerCase() !== normalizedAccount
       ) {
-        throw new Error('The wallet account or network changed during chat sign-in. Please try again.');
+        throw new Error('The wallet account or network changed during wallet sign-in. Please try again.');
       }
 
       // 4. Verify the wallet signature with the Express backend.
@@ -271,7 +273,7 @@ export function ChatAuthProvider({ children }) {
         || finalSource.account?.toLowerCase() !== normalizedAccount
         || finalSource.walletChainId !== CARGO_NETWORK_CONFIG.chainId
       ) {
-        throw new Error('The wallet account or network changed before chat sign-in completed.');
+        throw new Error('The wallet account or network changed before wallet sign-in completed.');
       }
 
       // 5. Store session data in sessionStorage
@@ -279,7 +281,7 @@ export function ChatAuthProvider({ children }) {
       window.sessionStorage.setItem(CHAT_WALLET_KEY, verifiedWallet);
       const expiresInSeconds = Number(result.expiresIn);
       if (!Number.isFinite(expiresInSeconds) || expiresInSeconds <= 0) {
-        throw new Error('Invalid chat session expiry returned by the server.');
+        throw new Error('Invalid wallet session expiry returned by the server.');
       }
       window.sessionStorage.setItem(CHAT_EXP_KEY, String(Date.now() + expiresInSeconds * 1000));
 

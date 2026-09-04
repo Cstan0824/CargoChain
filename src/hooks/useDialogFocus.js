@@ -14,15 +14,17 @@ const FOCUSABLE_SELECTOR = [
  * opened the modal. The topmost-dialog check lets a confirmation dialog sit
  * above another dialog without both responding to Escape or Tab.
  */
-export function useDialogFocus({ enabled = true, onClose, initialFocusRef } = {}) {
+export function useDialogFocus({ enabled = true, onClose, initialFocusRef, closeDisabled = false } = {}) {
   const dialogRef = useRef(null);
   const onCloseRef = useRef(onClose);
+  const closeDisabledRef = useRef(closeDisabled);
   const initialFocusRefValue = useRef(initialFocusRef);
 
   useEffect(() => {
     onCloseRef.current = onClose;
+    closeDisabledRef.current = closeDisabled;
     initialFocusRefValue.current = initialFocusRef;
-  }, [onClose, initialFocusRef]);
+  }, [onClose, closeDisabled, initialFocusRef]);
 
   useEffect(() => {
     if (!enabled || !dialogRef.current) return undefined;
@@ -54,6 +56,7 @@ export function useDialogFocus({ enabled = true, onClose, initialFocusRef } = {}
       if (!isTopmostDialog()) return;
 
       if (event.key === 'Escape') {
+        if (closeDisabledRef.current) return;
         event.preventDefault();
         onCloseRef.current?.();
         return;

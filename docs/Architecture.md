@@ -2,6 +2,8 @@
 
 > Current v1 architecture. This project is designed for a local Ganache demonstration, not a public production deployment.
 
+The diagrams below describe the running CARGO settlement and encrypted Pinata/IPFS proof implementation. Supabase stores private chat records and server-only wrapped proof keys; it is not used for new proof-image uploads. ETH remains the backing and native gas asset, not delivery escrow.
+
 ## 1. System overview
 
 ```mermaid
@@ -9,31 +11,39 @@ flowchart LR
   Browser[React + Vite browser app]
   MetaMask[MetaMask]
   Ganache[Ganache JSON-RPC<br/>127.0.0.1:7545 / chain 1337]
-  API[Express SIWE / chat API<br/>127.0.0.1:3000]
+  API[Express SIWE / proof / chat API<br/>127.0.0.1:3000]
   DB[Supabase Postgres + Realtime]
-  Storage[Supabase Storage<br/>milestone-proofs]
+  IPFS[Pinata public IPFS<br/>encrypted ciphertext + gateway]
 
   Browser <-->|wallet signing and broadcast| MetaMask
   Browser <-->|ethers reads / contract writes| Ganache
-  Browser <-->|SIWE auth + private chat API| API
-  API <-->|service-role validated reads/writes| DB
+  Browser <-->|SIWE auth + proof/chat API| API
+  API <-->|service-role reads/writes| DB
   Browser <-->|chat realtime with SIWE JWT| DB
-  Browser -->|proof image upload| Storage
+  API -->|short-lived signed upload URL| Browser
+  Browser -->|multipart network=public ciphertext upload| IPFS
+  Browser -->|allowlisted gateway retrieval| IPFS
 ```
 
-The browser is the DApp. Ganache holds all delivery state and ETH accounting. Express is not a delivery authority: it only authenticates chat users and verifies that they are shipment participants before it accesses Supabase.
+The browser is the DApp. Ganache holds delivery state, CARGO accounting, and the ETH-backed token reserve. ETH remains the native gas currency.
+Express is not a delivery authority: it authenticates the shared SIWE wallet
+session, re-reads on-chain request/milestone state for proof operations and
+chat, and accesses Supabase only for private chat data and wrapped proof keys.
 
 ## 2. Contract relationships
 
 ```mermaid
 flowchart TB
   Registry[UserRegistry<br/>display name / registration]
+  Token[CargoToken<br/>ETH-backed CARGO]
   Escrow[DeliveryEscrow<br/>requests, proposals, escrow, proofs,<br/>checkpoints, refunds, tips]
   Lifecycle[LifecycleManager<br/>amendments, cancellation,<br/>one-pending-negotiation lock]
   Reputation[ReputationRegistry<br/>completed-request ratings,<br/>feedback aggregates]
   Events[PaymentEvents<br/>event definitions]
 
   Registry -->|registration checks| Escrow
+  Token -->|business settlement| Escrow
+  Token -->|staged amendment funding| Lifecycle
   Events -->|inherited events| Escrow
   Lifecycle -->|canonical shipment/progress reads| Escrow
   Lifecycle -->|restricted finalisation calls| Escrow
@@ -45,14 +55,23 @@ flowchart TB
 Deployment order is:
 
 ```text
+CargoToken
 UserRegistry
-LifecycleManager
-DeliveryEscrow(registryAddress, lifecycleManagerAddress)
+LifecycleManager(cargoTokenAddress)
+DeliveryEscrow(registryAddress, lifecycleManagerAddress, cargoTokenAddress)
 LifecycleManager.initializeDeliveryEscrow(escrowAddress)
 ReputationRegistry(escrowAddress)
 ```
 
 The frontend creates read-only ethers contract instances from Truffle artifacts and validates that the manager and reputation registry escrow links match the artifact address. This catches a common local Ganache failure where MetaMask/RPC points to a stale deployment.
+
+The `/account` financial surface reads the native ETH balance directly from
+the provider while the contract map is validating. CARGO, locked escrow, and
+event-derived payment history run in independent refresh lanes; payment
+history advances a block cursor after each successful scan instead of querying
+the full chain on every ten-second refresh. Each lane keeps its own loading and
+error state so a slow or unavailable event query does not block the balance
+cards.
 
 ## 3. On-chain delivery flow
 
@@ -60,7 +79,7 @@ The frontend creates read-only ethers contract instances from Truffle artifacts 
 stateDiagram-v2
   [*] --> Open: shipper creates request
   Open --> Open: carriers propose / revoke / resubmit
-  Open --> Funded: shipper approves one proposal and funds exact ETH
+  Open --> Funded: shipper funds CARGO compensation + reserve
   Funded --> InProgress: carrier submits proof
   InProgress --> InProgress: proof rejected / resubmitted
   InProgress --> Completed: final proof verified and paid
@@ -75,15 +94,21 @@ Every checkpoint receives an immutable `milestoneId`. The contract keeps a separ
 ## 4. Proof and payment data path
 
 ```text
-Carrier selects JPEG / PNG / WebP file
-  → browser computes SHA-256
-  → browser uploads file to Supabase Storage
-  → browser submits proof URL + remark to DeliveryEscrow
+Carrier selects JPEG / PNG / WebP / GIF / AVIF / BMP file (≤ 2 MiB)
+  → browser computes plaintext SHA-256 and encrypts with AES-256-GCM
+  → Express authorizes the wallet and returns a short-lived Pinata URL
+  → browser posts multipart `network=public`, `file`, and `name` fields
+  → Express verifies CID retrieval/hash and wraps the per-proof key in Supabase
+  → browser submits canonical `ipfs://` URI + remark to DeliveryEscrow
+  → authorized viewer gets a key, verifies/decrypts in memory, and revokes Blob URL
   → shipper verifies/rejects proof
   → verification transfers that checkpoint's payment to carrier
 ```
 
-The image is not written to the blockchain. The browser uses a SHA-256-derived object path, then the URL and proof metadata are recorded in the contract. The contract does not independently verify the file content, and Storage URLs are public in this assignment build.
+The plaintext image and AES key are not written to the blockchain. Only the
+provider-independent encrypted URI and proof metadata are recorded in the
+contract. Public IPFS exposes the ciphertext/CID, not the plaintext; gateway
+selection is configurable and is not an access-control boundary.
 
 ## 5. Negotiation architecture
 
@@ -101,17 +126,17 @@ Only one can be pending at a time. Amendment acceptance verifies that milestone 
 ```mermaid
 sequenceDiagram
   participant W as Wallet / MetaMask
-  participant B as React Messages page
+  participant B as React Messages / Track page
   participant A as Express API
   participant E as DeliveryEscrow
   participant S as Supabase
 
-  B->>A: request SIWE nonce
+  B->>A: request SIWE nonce (on demand)
   B->>W: sign SIWE message
   B->>A: verify signed message
   A->>E: verify request shipper/carrier participation
-  A->>S: create/read authorised conversation
-  B->>S: read/realtime messages with chat JWT
+  A->>S: create/read authorised conversation or wrapped proof key
+  B->>S: read/realtime messages with session JWT
   B->>E: read relevant escrow/lifecycle event history
 ```
 
@@ -130,7 +155,8 @@ Conversation identity includes chain ID, deployed contract address, request ID, 
 
 ## 8. Security and scope boundaries
 
-- Private keys and service-role keys are only in `.env`; `VITE_*` variables are public browser values.
+- Private keys, service-role keys, `PINATA_JWT`, and `IPFS_MASTER_KEY` are only in `.env`; `VITE_*` variables (including gateway URLs) are public browser values.
+- Proof API access is authenticated by the existing SIWE wallet session and rechecked against current chain state. Public IPFS CIDs do not grant plaintext access to encrypted proofs.
 - State-changing escrow actions require a registered wallet and request-participant ownership checks.
 - Chat access is checked by the API and constrained by Supabase RLS.
 - Contract state is not updated by the chat server or Supabase.

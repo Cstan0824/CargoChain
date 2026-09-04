@@ -7,6 +7,7 @@ import { loadCarrierReputationProfile } from '../services/reputationService.js';
 import { formatRatingAverage, REPUTATION_TAGS } from '../utils/reputation.js';
 import { pickAvatar } from '../utils/avatar.js';
 import { shortAddress } from '../utils/format.js';
+import { ModalShell } from './ModalShell.jsx';
 import styles from './CarrierReputationModal.module.css';
 
 export function CarrierReputationModal({ carrier, onClose }) {
@@ -25,12 +26,6 @@ export function CarrierReputationModal({ carrier, onClose }) {
     return () => { cancelled = true; };
   }, [carrier, contracts]);
 
-  useEffect(() => {
-    const onKeyDown = (event) => { if (event.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
-
   const popularTags = useMemo(() => profile
     ? REPUTATION_TAGS
       .map((tag) => ({ ...tag, count: profile.tagCounts[tag.id] || 0 }))
@@ -39,20 +34,20 @@ export function CarrierReputationModal({ carrier, onClose }) {
     : [], [profile]);
 
   return (
-    <div className={styles.overlay} role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className={styles.modal} role="dialog" aria-modal="true" aria-labelledby="carrier-reputation-title">
+    <ModalShell size="sm" onClose={onClose} labelledBy="carrier-reputation-title">
         <header className={styles.header}>
           <div>
             <span className={styles.eyebrow}>Verified carrier evidence</span>
             <h2 id="carrier-reputation-title">Carrier reputation</h2>
           </div>
-          <button type="button" className={styles.close} onClick={onClose} aria-label="Close carrier reputation"><HiOutlineXMark /></button>
+          <button type="button" className={styles.close} onClick={onClose} aria-label="Close carrier reputation"><HiOutlineXMark aria-hidden="true" /></button>
         </header>
 
-        {!profile && !error && <div className={styles.state}>Reading verified delivery outcomes...</div>}
-        {error && <div className={styles.state}>{error}</div>}
-        {profile && (
-          <>
+        <div className={styles.body}>
+          {!profile && !error && <div className={styles.state}>Reading verified delivery outcomes...</div>}
+          {error && <div className={styles.state} role="alert">{error}</div>}
+          {profile && (
+            <>
             <div className={styles.identity}>
               <Avatar src={pickAvatar('Carrier', carrier)} name={profile.displayName || 'Carrier'} size={52} />
               <div className={styles.identityCopy}>
@@ -74,10 +69,10 @@ export function CarrierReputationModal({ carrier, onClose }) {
                 ? popularTags.slice(0, 5).map((tag) => <Badge key={tag.id} tone={tag.tone === 'improvement' ? 'warning' : 'neutral'}>{tag.label} · {tag.count}</Badge>)
                 : <span className={styles.muted}>No structured feedback yet.</span>}
             </div>
-          </>
-        )}
-      </section>
-    </div>
+            </>
+          )}
+        </div>
+    </ModalShell>
   );
 }
 

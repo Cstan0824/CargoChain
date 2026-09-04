@@ -1,12 +1,23 @@
 import { requestStatus } from './format.js';
 
-const PAYMENT_EVENTS = ['EscrowFunded', 'PaymentReleased', 'RefundIssued', 'CarrierTipped'];
+const PAYMENT_EVENTS = [
+  'EscrowFunded',
+  'PaymentReleased',
+  'RefundIssued',
+  'CarrierTipped',
+  'OperationalAllowanceFunded',
+  'OperationalAllowanceReimbursed',
+  'OperationalAllowanceRefunded',
+];
 
 export const PAYMENT_ACTION_TONE = {
   EscrowFunded: 'info',
   PaymentReleased: 'success',
   RefundIssued: 'warning',
   CarrierTipped: 'success',
+  OperationalAllowanceFunded: 'info',
+  OperationalAllowanceReimbursed: 'success',
+  OperationalAllowanceRefunded: 'warning',
 };
 
 export function paymentActionLabel(action, milestoneId = null) {
@@ -18,6 +29,9 @@ export function paymentActionLabel(action, milestoneId = null) {
   }
   if (action === 'RefundIssued') return 'Refund issued';
   if (action === 'CarrierTipped') return 'Carrier tipped';
+  if (action === 'OperationalAllowanceFunded') return 'Gas reserve funded';
+  if (action === 'OperationalAllowanceReimbursed') return 'Carrier gas reimbursed';
+  if (action === 'OperationalAllowanceRefunded') return 'Gas reserve refunded';
   return action;
 }
 
@@ -38,13 +52,15 @@ export async function loadPaymentHistory({
   provider,
   requestId = null,
   account = null,
+  fromBlock = 0,
+  toBlock = 'latest',
 }) {
   if (!contract) return [];
 
   const historyProvider = provider || contract.runner?.provider;
   const eventGroups = await Promise.all(
     PAYMENT_EVENTS.map(async (action) => {
-      const logs = await contract.queryFilter(action, 0, 'latest');
+      const logs = await contract.queryFilter(action, fromBlock, toBlock);
       return logs.map((log) => ({ action, log }));
     }),
   );
@@ -95,11 +111,13 @@ export async function loadPaymentHistory({
       const milestoneId = action === 'PaymentReleased'
         ? Number(log.args?.milestoneId ?? log.args?.[1])
         : null;
-      const amountIndex = action === 'EscrowFunded'
+      const amountIndex = action === 'EscrowFunded' || action === 'OperationalAllowanceFunded'
         ? 1
-        : action === 'CarrierTipped'
+        : action === 'CarrierTipped' || action === 'OperationalAllowanceReimbursed'
           ? 3
-          : 2;
+          : action === 'OperationalAllowanceRefunded'
+            ? 2
+            : 2;
       const amount = BigInt(log.args?.amount ?? log.args?.[amountIndex] ?? 0n);
       const recipient = action === 'PaymentReleased'
         ? (log.args?.recipient ?? log.args?.[3])
@@ -107,6 +125,10 @@ export async function loadPaymentHistory({
           ? (log.args?.to ?? log.args?.[1])
           : action === 'CarrierTipped'
             ? (log.args?.carrier ?? log.args?.[2])
+            : action === 'OperationalAllowanceReimbursed'
+              ? (log.args?.carrier ?? log.args?.[2])
+              : action === 'OperationalAllowanceRefunded'
+                ? (log.args?.to ?? log.args?.[1])
             : contract.target;
       const transactionHash = log.transactionHash;
       const logIndex = Number(log.index ?? log.logIndex ?? 0);

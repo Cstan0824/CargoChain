@@ -1,4 +1,4 @@
-// src/lib/chatApiClient.js — CargoChain Protected Chat API Client
+// src/lib/chatApiClient.js — CargoChain Protected API Client (chat endpoints)
 // Handles HTTP communications with backend Express server at VITE_CHAT_API_URL.
 // Automatically attaches Bearer <chatJwt> and dispatches 401 unauth event to clear invalid sessions.
 
@@ -102,7 +102,7 @@ export async function verifyAuthSiwe(message, signature, accountToken = null) {
 }
 
 /**
- * Validate current chat JWT session via GET /api/auth/me.
+ * Validate the current wallet-session JWT via GET /api/auth/me.
  */
 export async function getCurrentChatUser() {
   return request('/api/auth/me');

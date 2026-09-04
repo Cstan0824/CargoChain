@@ -47,4 +47,15 @@ describe('paymentHistory completion tips', () => {
       timestamp: 1_800_000_000,
     });
   });
+
+  it('limits event queries to the requested block range', async () => {
+    const queryFilter = vi.fn().mockResolvedValue([]);
+    const contract = { target: '0x3333333333333333333333333333333333333333', queryFilter };
+
+    await loadPaymentHistory({ contract, fromBlock: 42, toBlock: 57 });
+
+    expect(queryFilter).toHaveBeenCalledTimes(7);
+    expect(queryFilter).toHaveBeenNthCalledWith(1, 'EscrowFunded', 42, 57);
+    expect(queryFilter).toHaveBeenNthCalledWith(7, 'OperationalAllowanceRefunded', 42, 57);
+  });
 });
