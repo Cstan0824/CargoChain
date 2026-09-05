@@ -227,7 +227,7 @@ The current application uses the encrypted Pinata proof flow above. Apply
 gateway fallbacks with `VITE_IPFS_GATEWAY_URLS`. The synthetic gate is
 `npm run smoke:ipfs` and skips cleanly without Pinata credentials. For manual
 Ganache GUI use,
-run `npm run compile`, `npm run migrate`, `npm run server`, and
+run `npm run compile`, `npm run migrate` (which also seeds local demo data), `npm run server`, and
 `npm run dev` separately.
 
 ```bash

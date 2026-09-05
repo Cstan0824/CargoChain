@@ -236,10 +236,21 @@ the Carrier. Both come from the same MNEMONIC.
 
 `npm run dev:all` keeps local block history in the gitignored
 `ganache-data/` directory and redeploys the current contracts on startup.
-`npm run migrate` also uses `truffle migrate --reset`: it redeploys the
-contracts and updates the frontend artifacts, but it does not erase old
-contracts from the Ganache database. The app will point to the new deployment,
-so its visible requests and registered names start fresh after migration.
+`npm run migrate` also uses `truffle migrate --reset`, then runs the demo seed:
+it redeploys the contracts, updates the frontend artifacts, and recreates a
+small deterministic set of local records. It does not erase old contracts
+from the Ganache database; the app simply points to the new deployment.
+
+The automatic demo seed registers the first four deterministic Ganache wallets
+and gives them starter CARGO balances. It creates 10 open Marketplace requests;
+two of those listings have active carrier proposals. The configured demo
+shipper wallet (`0x1dF62f291b2E969fB0849d99D9Ce41e2F137006e`) owns exactly four
+My Shipments records: one awaiting proposal approval, one completed shipment,
+and two in-progress shipments with mock proof awaiting review. The configured
+carrier wallet is `0x22d491Bde2303f2f43325b2108D26f1eAbA1e32b`. It is safe to run
+again against the same deployment because it skips when requests already exist.
+Set `CARGOCHAIN_SEED_DEMO=false` to disable it, or run `npm run seed:demo`
+manually after deploying contracts.
 
 To create a completely new chain, stop the launcher and rename or remove
 `ganache-data/` before starting it again. A complete reset invalidates
@@ -304,7 +315,7 @@ encrypted proof ciphertext:
 npm run dev:all
 ```
 
-That command starts deterministic Ganache with a local `ganache-data/` database, waits for RPC, compiles, runs a reset migration, then starts the CargoChain API and Vite in **one terminal**. It requires the Supabase, Pinata, and master-key configuration above because the API validates its configuration at startup:
+That command starts deterministic Ganache with a local `ganache-data/` database, waits for RPC, compiles, runs a reset migration plus the deterministic demo seed, then starts the CargoChain API and Vite in **one terminal**. It requires the Supabase, Pinata, and master-key configuration above because the API validates its configuration at startup:
 
 ```
 RPC Listening on 127.0.0.1:7545
@@ -444,7 +455,10 @@ Before pushing:
 
 ## Demo (the 20-minute presentation)
 
-The demo runs end-to-end on Ganache + a fresh `npm run migrate`:
+The demo runs end-to-end on Ganache + a fresh `npm run migrate`. The migration
+already creates the starter profiles, balances, and sample requests described
+above, so you can connect one of the first four deterministic Ganache wallets
+and inspect the seeded data immediately:
 
 1. **Connect a Ganache wallet** in MetaMask and register its optional public display name through the profile flow.
 2. **Switch MetaMask wallets** when demonstrating the other party. Each connected wallet may act as a shipper or carrier according to the shipment action.

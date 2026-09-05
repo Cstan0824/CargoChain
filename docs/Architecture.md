@@ -151,7 +151,7 @@ Conversation identity includes chain ID, deployed contract address, request ID, 
 | Express | `http://127.0.0.1:3000` | SIWE and chat API; needs Supabase env values. |
 | Vite preview | `http://127.0.0.1:8080` | Production-bundle inspection. |
 
-`npm run dev:all` starts Ganache, compiles, reset-migrates, then launches Express and Vite. A reset migration redeploys contracts and refreshes artifact addresses; it does not erase historical contracts from the local Ganache database.
+`npm run dev:all` starts Ganache, compiles, reset-migrates, seeds deterministic demo data, then launches Express and Vite. A reset migration redeploys contracts and refreshes artifact addresses; it does not erase historical contracts from the local Ganache database.
 
 ## 8. Security and scope boundaries
 

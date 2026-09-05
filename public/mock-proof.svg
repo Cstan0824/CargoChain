@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540" role="img" aria-labelledby="title description">
+  <title id="title">CargoChain local demo proof</title>
+  <desc id="description">A simple local fixture image used by the Ganache demo seed.</desc>
+  <rect width="960" height="540" fill="#eef4ff"/>
+  <rect x="72" y="72" width="816" height="396" rx="28" fill="#ffffff" stroke="#bfd2f7" stroke-width="4"/>
+  <path d="M265 340h430V220l-94-66H359l-94 66z" fill="#dce9ff" stroke="#2864d7" stroke-width="8" stroke-linejoin="round"/>
+  <path d="M265 220h430M480 154v186M359 154l121 66 121-66" fill="none" stroke="#2864d7" stroke-width="8" stroke-linejoin="round"/>
+  <circle cx="480" cy="385" r="30" fill="#2864d7"/>
+  <path d="m466 385 10 10 20-24" fill="none" stroke="#ffffff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="480" y="116" fill="#18345f" font-family="Arial, sans-serif" font-size="30" font-weight="700" text-anchor="middle">CargoChain Demo Proof</text>
+  <text x="480" y="438" fill="#56709a" font-family="Arial, sans-serif" font-size="20" text-anchor="middle">Local Ganache fixture · encrypted upload not required</text>
+</svg>

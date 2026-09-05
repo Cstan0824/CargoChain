@@ -128,6 +128,41 @@ describe('Account', () => {
     await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith('0xpaymenthash'));
   });
 
+  it('paginates recent activity in groups of five', async () => {
+    mocks.wallet.provider = { getBalance: vi.fn().mockResolvedValue(0n) };
+    mocks.contracts.contracts = {
+      deliveryEscrow: {
+        target: '0xescrow',
+        getLockedEscrow: vi.fn().mockResolvedValue({ totalLocked: 0n, activeRequestCount: 0n }),
+      },
+    };
+    mocks.loadPaymentHistory.mockResolvedValue(Array.from({ length: 6 }, (_, index) => ({
+      id: `payment-${index + 1}`,
+      action: 'PaymentReleased',
+      milestoneId: 1,
+      requestId: index + 1,
+      requestStatus: 'InProgress',
+      amount: 1n,
+      timestamp: 1_700_000_000 + index,
+      transactionHash: `0xpaymenthash${index + 1}`,
+      recipient: walletAddress,
+    })));
+
+    render(<Account />);
+
+    await screen.findByRole('row', { name: /Open request #0001 timeline/i });
+    expect(screen.getAllByRole('row', { name: /Open request #/i })).toHaveLength(5);
+    expect(screen.getByText('Page 1 of 2')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Previous' }).disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(screen.getAllByRole('row', { name: /Open request #/i })).toHaveLength(1);
+    expect(screen.getByRole('row', { name: /Open request #0006 timeline/i })).toBeTruthy();
+    expect(screen.getByText('Page 2 of 2')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Next' }).disabled).toBe(true);
+  });
+
   it('shows only average rating and verified count when rating data is available', async () => {
     mocks.contracts.contracts = { reputationRegistry: {} };
     mocks.loadReputation.mockResolvedValue({ averageRating: 4.5, ratingCount: 2 });
