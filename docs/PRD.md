@@ -1,16 +1,8 @@
-# CargoChain — Product Requirements Document
-
-**Course:** BMIS2003 Blockchain Application Development, TARUMT Y3S1
-
-**Project:** CargoChain
-
-**Version:** Current local-Ganache assignment build
+# CargoChain product requirements
 
 ## 1. Product summary
 
 CargoChain is a decentralised logistics delivery application that uses an ETH-backed CARGO token for business settlement and milestone proof. A shipper creates a request; carriers compete with milestone proposals; the shipper funds one accepted plan; the carrier submits photo evidence; and the shipper releases payment checkpoint by checkpoint. ETH remains the native gas currency.
-
-The product is deliberately scoped for an academic local-chain demonstration. It prioritises traceable agreement state, readable smart contracts, and an end-to-end browser workflow over production logistics scale.
 
 ## 2. Goals
 
@@ -128,15 +120,7 @@ A registered wallet can be a shipper for some requests and carrier for others. T
 
 LifecycleManager is intentionally separate to preserve DeliveryEscrow bytecode headroom. DeliveryEscrow remains canonical for shipment state.
 
-## 7. Out of scope
-
-- Sepolia or mainnet deployment for v1.
-- Recipient QR confirmation.
-- Automatic dispute-window payout release.
-- Carrier republishing/recovery/custody transfer.
-- Public marketplace messaging, staking, speculative token markets, and mobile wallet connections.
-
-## 8. Acceptance checks
+## 7. Acceptance checks
 
 ~~~bash
 npm run compile
@@ -146,12 +130,10 @@ npm run test:server
 npm run build
 ~~~
 
-Manual demonstration should show wallet registration, proposal selection/funding, proof/payment, one completed-request rating, private chat, an amendment or mutual cancellation decision, and a completion tip.
-
-## 9. References
+## 8. References
 
 - [README.md](../README.md) — setup and feature overview
-- [API_v1.md](../API_v1.md) — contract API
+- [API.md](../API.md) — contract API
 - [BusinessFlow.md](BusinessFlow.md) — user workflow
 - [Architecture.md](Architecture.md) — implementation architecture
 - [Agreement-Changes.md](Agreement-Changes.md) — negotiation rules

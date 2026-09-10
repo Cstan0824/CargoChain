@@ -7,28 +7,11 @@
 const UserRegistry = artifacts.require('UserRegistry');
 const DeliveryEscrow = artifacts.require('DeliveryEscrow');
 const CargoToken = artifacts.require('CargoToken');
+const { resolveDemoWallets } = require('./demo-seed-accounts');
 
 const DAY = 24 * 60 * 60;
-const DEMO_CARGO_DEPOSIT_ETH = '2';
+const DEMO_CARGO_BACKING_ETH = '2';
 const MOCK_PROOF_URI = '/mock-proof.svg';
-
-const DEMO_WALLETS = [
-  {
-    address: '0x1dF62f291b2E969fB0849d99D9Ce41e2F137006e',
-    label: 'demo shipper',
-    displayName: 'Demo Shipper',
-  },
-  {
-    address: '0x22d491Bde2303f2f43325b2108D26f1eAbA1e32b',
-    label: 'demo carrier',
-    displayName: 'SwiftLine Carrier',
-  },
-  {
-    address: '0x90F8bf6A479f320ead074411a4B0e7944Ea8c9C1',
-    label: 'marketplace shipper',
-    displayName: 'Peninsula Retail',
-  },
-];
 
 const MARKETPLACE_PLANS = [
   {
@@ -126,18 +109,6 @@ function requestIdFromReceipt(receipt) {
   return event.args.requestId.toString();
 }
 
-function resolveDemoWallets(accounts) {
-  return DEMO_WALLETS.map((wallet) => {
-    const account = accounts.find((candidate) => (
-      candidate.toLowerCase() === wallet.address.toLowerCase()
-    ));
-    if (!account) {
-      throw new Error(`Ganache does not include the configured ${wallet.label} wallet (${wallet.address}).`);
-    }
-    return { ...wallet, account };
-  });
-}
-
 async function registerDemoProfiles(registry, wallets) {
   for (const wallet of wallets) {
     const { account, displayName } = wallet;
@@ -148,14 +119,23 @@ async function registerDemoProfiles(registry, wallets) {
 }
 
 async function topUpDemoBalances(cargoToken, accounts) {
-  const target = BigInt(cargoAmount(DEMO_CARGO_DEPOSIT_ETH));
-  const depositValue = web3.utils.toWei(DEMO_CARGO_DEPOSIT_ETH, 'ether');
+  const cargoPerEth = BigInt((await cargoToken.CARGO_PER_ETH()).toString());
+  const backingEth = BigInt(web3.utils.toWei(DEMO_CARGO_BACKING_ETH, 'ether'));
+  const targetCargoBalance = backingEth * cargoPerEth;
 
   for (const account of accounts) {
     const balance = BigInt((await cargoToken.balanceOf(account)).toString());
-    if (balance < target) {
-      await cargoToken.deposit({ from: account, value: depositValue });
+    if (balance >= targetCargoBalance) continue;
+
+    const missingCargo = targetCargoBalance - balance;
+    const requiredEth = (missingCargo + cargoPerEth - 1n) / cargoPerEth;
+    const availableEth = BigInt(await web3.eth.getBalance(account));
+    if (availableEth <= requiredEth) {
+      throw new Error(
+        `${account} does not have enough ETH to receive its starter CARGO balance and retain gas.`,
+      );
     }
+    await cargoToken.deposit({ from: account, value: requiredEth.toString() });
   }
 }
 
@@ -217,13 +197,20 @@ async function seedDemoData() {
 
   const accounts = await web3.eth.getAccounts();
   const demoWallets = resolveDemoWallets(accounts);
-  const [shipperWallet, carrierWallet, marketplaceWallet] = demoWallets;
+  const shipperWallet = demoWallets.find(({ key }) => key === 'shipper');
+  const carrierWallet = demoWallets.find(({ key }) => key === 'carrier');
+  const marketplaceWallet = demoWallets.find(({ key }) => key === 'marketplaceShipper');
   const demoShipper = shipperWallet.account;
   const demoCarrier = carrierWallet.account;
   const marketplaceShipper = marketplaceWallet.account;
   const registry = await UserRegistry.deployed();
   const cargoToken = await CargoToken.deployed();
   const escrow = await DeliveryEscrow.deployed();
+
+  console.log('[seed-demo] Ganache role accounts:');
+  for (const wallet of demoWallets) {
+    console.log(`[seed-demo] account[${wallet.accountIndex}] ${wallet.label}: ${wallet.account}`);
+  }
 
   const requestCount = Number((await escrow.getRequestCount()).toString());
   if (requestCount > 0) {
@@ -252,7 +239,7 @@ async function seedDemoData() {
   }
 
   // Exactly two active proposals are attached to two different open market
-  // listings. Both use the configured demo carrier so one MetaMask account can
+  // listings. Both use the selected demo carrier so one MetaMask account can
   // demonstrate every carrier-side workflow.
   await proposeDemoMilestones(escrow, marketplaceRequestIds[0], demoCarrier, [
     ['Pickup and secure cargo', 30],
@@ -265,7 +252,7 @@ async function seedDemoData() {
     ['Signed delivery', 25],
   ]);
 
-  // The first deterministic wallet owns exactly four My Shipments records:
+  // The demo shipper wallet owns exactly four My Shipments records:
   // one open request awaiting proposal approval, one completed shipment, and
   // two shipments with proof currently awaiting review.
   const completedRequestId = await createDemoRequest(escrow, {
@@ -329,7 +316,7 @@ async function seedDemoData() {
     'Mock collection proof awaiting shipper review.',
   );
 
-  console.log(`[seed-demo] registered ${DEMO_WALLETS.length} demo wallets.`);
+  console.log(`[seed-demo] registered ${demoWallets.length} demo wallets from this Ganache instance.`);
   console.log(`[seed-demo] created ${marketplaceRequestIds.length} marketplace requests.`);
   console.log('[seed-demo] attached two active proposals to marketplace requests #1 and #2.');
   console.log(`[seed-demo] demo shipper request #${marketplaceRequestIds[0]} is awaiting proposal approval.`);

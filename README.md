@@ -1,11 +1,6 @@
 # CargoChain
 
 > Decentralised escrow and milestone-based logistics tracking DApp on Ethereum.
->
-> **Course:** BMIS2003 Blockchain Application Development (TARUMT, Y3S1, Semester 2026/05)
-> **Repo:** [https://github.com/Cstan0824/CargoChain.git](https://github.com/Cstan0824/CargoChain.git)
-> **Assignment Due:** Sunday, Week 12 (2026-09-06)
-> **Group:** 5 members — Cstan (lead + frontend), wx (user/wallet), GAN (goods requests), Jeremy (payment), Melissa (milestone/proof)
 
 ---
 
@@ -17,7 +12,7 @@ A milestone-based delivery marketplace where:
 
 1. A **shipper** posts a goods request with cargo details, a route, payment amount, and deadline.
 2. Carriers submit their own milestone proposals. The shipper reviews the proposals, selects one, and locks the CARGO compensation plus a refundable carrier gas reserve; remaining active proposals become effectively rejected on-chain.
-3. The accepted carrier uploads a **photo-proof** for each checkpoint. The browser validates a JPEG/PNG/WebP up to 2 MiB, hashes and encrypts it with AES-256-GCM, uploads only ciphertext through a short-lived Pinata signed URL, and records a canonical `ipfs://` reference and remark on-chain.
+3. The accepted carrier uploads a **photo-proof** for each checkpoint. The browser validates a JPEG, PNG, WebP, GIF, AVIF, or BMP image up to 2 MiB, hashes and encrypts it with AES-256-GCM, uploads only ciphertext through a short-lived Pinata signed URL, and records a canonical `ipfs://` reference and remark on-chain.
 4. The **shipper verifies** each proof in the web UI, releasing that checkpoint's agreed escrow allocation to the carrier.
 5. After acceptance, either party can negotiate an amendment: extend or shorten a deadline under the applicable rules, add CARGO to unpaid checkpoints, or insert a newly funded checkpoint without rewriting completed work.
 6. Either participant can request mutual cancellation. If the other accepts, completed payouts remain with the carrier and only unpaid escrow returns to the shipper. Overdue requests retain a separate refund path.
@@ -26,8 +21,6 @@ A milestone-based delivery marketplace where:
 
 The connected MetaMask wallet is the CargoChain identity and can act as shipper or carrier according to its relationship to each request. Wallet-backed display names and request-scoped private chat remain available. Chat messages are private, off-chain Supabase data; the accompanying delivery timeline is reconstructed from relevant on-chain events.
 
-This is the **assignment version** — built for clarity, demo, and grading — not a production logistics platform.
-
 ## Tech stack
 
 | Layer | Tool |
@@ -35,18 +28,15 @@ This is the **assignment version** — built for clarity, demo, and grading — 
 | Smart contracts | Solidity `^0.8.0` |
 | Dev framework | Truffle Suite |
 | Local chain | Ganache (127.0.0.1:7545) |
-| Testnet | Not included in CargoChain |
 | Frontend | React 18 + Vite (plain JavaScript) |
 | Wallet layer | ethers.js v6 |
 | Off-chain services | Express SIWE/proof/chat API + Supabase Database/Realtime |
 | Photo upload | Browser AES-256-GCM + Pinata public IPFS via server-issued signed URL |
 | Tests | Mocha + Chai (Truffle built-in) |
 
-**Do not** introduce Hardhat, Next.js, Vue, wagmi, viem, or Web3.js — these are out of scope. ethers.js is approved as the client library (project owner decision 2026-07-06).
-
 ---
 
-## Implemented workflow
+## System workflow
 
 ### Before a carrier is selected
 
@@ -80,7 +70,7 @@ This is the **assignment version** — built for clarity, demo, and grading — 
 - A request-scoped conversation can be created after a carrier submits an on-chain proposal. It remains writable before selection while the request is open. After the shipper accepts a carrier, only that carrier's conversation remains writable; other proposal conversations become read-only. Text messages live in Supabase, with SIWE authorisation and server-side contract checks protecting access.
 - Chat also renders a filtered, read-only activity timeline from `DeliveryEscrow` and `LifecycleManager` events, including completion and expiry outcomes. Pending amendments and cancellations link directly to the relevant Track review section.
 
-For exact callable functions and validation rules, see [`API_v1.md`](API_v1.md). For product decisions around amendments, cancellation, and tips, see [`docs/Agreement-Changes.md`](docs/Agreement-Changes.md).
+For exact callable functions and validation rules, see [`API.md`](API.md). For product decisions around amendments, cancellation, and tips, see [`docs/Agreement-Changes.md`](docs/Agreement-Changes.md).
 
 ---
 
@@ -109,7 +99,7 @@ CargoChain/
 ├── AGENTS.md               # Coding-agent rules (read first)
 ├── SECURITY.md             # Secret-handling + local-only defaults
 ├── .env.example            # Template for .env (committed)
-└── API_v1.md               # Contract function reference
+└── API.md                  # Contract function reference
 ```
 
 ---
@@ -122,28 +112,48 @@ CargoChain/
 | **npm** | 9+ (bundled with Node) | package management |
 | **Git** | 2.30+ | version control |
 | **Ganache** | 7.x | local Ethereum chain |
-| **MetaMask** | latest browser extension | wallet (for the live demo) |
+| **MetaMask** | latest browser extension | browser wallet |
 | **Truffle** | 5.x | installed locally via `npm install` (no global needed) |
+| **Supabase access** | own project or supplied `.env` | private chat and wrapped proof keys |
+| **Pinata access** | own account or supplied `.env` | encrypted proof storage |
 
-### Install Node.js (Windows)
+### Install Node.js
 
-Install Node.js **22.x LTS** from [https://nodejs.org/](https://nodejs.org/). The current Supabase and Vite dependencies require Node 22. Ganache may print a µWS native-binary compatibility warning on Node 22 and fall back to its JavaScript implementation; this is non-fatal for local development. Verify:
+CargoChain requires Node.js `22.12.0` or later in the Node 22 release line.
+
+**macOS or Linux:** Install Node 22 through [nvm](https://github.com/nvm-sh/nvm),
+then use the version recorded in `.nvmrc`:
+
+```bash
+nvm install
+nvm use
+```
+
+You can also use the macOS installer from [nodejs.org](https://nodejs.org/).
+
+**Windows:** Install the Node.js 22 LTS `.msi` package from
+[nodejs.org](https://nodejs.org/). Restart the terminal after installation.
+
+Verify the installation on either platform:
 
 ```bash
 node --version
 npm --version
 ```
 
+Ganache may print a µWS native-binary compatibility warning on Node 22 and
+fall back to its JavaScript implementation. This warning does not stop the
+local application.
+
 ### Install Ganache
 
-**Option A — Standalone GUI (recommended for demos):**
-Download from [https://trufflesuite.com/ganache/](https://trufflesuite.com/ganache/). Quickstart with default settings (port 7545, MNEMONIC shown).
+**Option A — Standalone GUI:**
+Download it from [Truffle Suite](https://trufflesuite.com/ganache/). Configure
+the workspace with host `127.0.0.1`, port `7545`, chain ID `1337`, network ID
+`1337`, and at least four unlocked accounts.
 
-**Option B — CLI (lighter, for tests only):**
-```bash
-npm install -g ganache
-```
-Then run: `ganache --deterministic`
+**Option B — CLI:** The project installs Ganache locally. `npm run dev:all`
+starts it with the required network settings.
 
 ### Install MetaMask
 
@@ -157,40 +167,27 @@ Install the browser extension from [https://metamask.io/](https://metamask.io/).
 It speaks the Ethereum JSON-RPC protocol, so MetaMask, Truffle, and ethers.js
 all work against it. It is CargoChain's only blockchain network.
 
-### What Ganache gives you for free
+### Ganache defaults
 
-| Resource | Ganache default | Real network (mainnet) |
-|---|---|---|
-| **ETH balance per account** | **1,000 ETH** (fake) | Whatever you buy |
-| **Number of prefunded accounts** | **10**, all derived from one MNEMONIC | You bring your own |
-| **Gas cost** | **0 real ETH** — unlimited free transactions | Real money |
-| **Block time** | **Instant** (mined on demand) | ~12 seconds |
-| **Time travel** | `evm_increaseTime` works (use it in tests) | Block timestamp is real |
-| **Chain state** | Stored locally by `dev:all`; disposable | Permanent, public |
-
-You can spam thousands of transactions, send 100 ETH between accounts, and
-revert everything in a second. Nothing is real. That's the whole point.
+| Resource | Local value |
+|---|---|
+| **ETH balance per account** | **1,000 test ETH** |
+| **Prefunded accounts** | **10**, derived from one mnemonic |
+| **Block production** | Immediate, on demand |
+| **Time control** | `evm_increaseTime` is available to tests |
+| **Chain state** | Stored locally by `dev:all` under `ganache-data/` |
 
 ### Deterministic mode (`--deterministic`)
 
 When started with `--deterministic` (which `npm run dev:all` does by
 default), Ganache derives its 10 accounts from the same MNEMONIC every
-time. **Same mnemonic → same 10 wallet addresses** on a given machine,
-which makes repeatable shipper/carrier demo accounts possible. Each local
-Ganache instance still has its own chain database; teammates do not share
-requests or transaction history merely by using the same mnemonic.
+time. **Same mnemonic → same 10 wallet addresses**, which makes the seeded
+shipper and carrier accounts repeatable. Each Ganache instance has its own
+chain database, so requests and transaction history remain local.
 
-The 10 prefunded accounts look like this on first boot:
-
-```
-(0) 0x90F8...36A3  (1,000 ETH)  ← typically the deployer
-(1) 0x15d3...4Fb1  (1,000 ETH)
-(2) 0x9965...A0Dc  (1,000 ETH)
-… 7 more …
-```
-
-The private key for each is shown alongside in the Ganache log — use those
-to import into MetaMask, never the public addresses alone.
+Ganache prints all account addresses and private keys during startup. Use the
+role mapping printed by the seed process to identify the correct local accounts
+for MetaMask.
 
 ### Two ways to run Ganache
 
@@ -204,14 +201,13 @@ RPC requests serially so MetaMask does not retain invalid block references
 between restarts. Output appears in the same terminal as Vite and the
 CargoChain API.
 
-**Option B — GUI (nicer for demos):**
-Download from <https://trufflesuite.com/ganache/>. Click **QUICKSTART** —
-it listens on `127.0.0.1:7545` with a fresh MNEMONIC (or you can enter a
-custom one to match the CLI's deterministic mode). The GUI shows live
-blocks, transactions, and logs in a dashboard.
+**Option B — GUI:**
+Download it from <https://trufflesuite.com/ganache/> and use a workspace with
+the host, port, chain ID, network ID, and account count listed in the
+installation section. The GUI shows blocks, transactions, and logs.
 
-Both speak the same JSON-RPC; you can swap between them without restarting
-anything else.
+Both modes expose Ethereum JSON-RPC. After changing Ganache instances, rerun
+the migration so the contract artifacts point to that chain's deployments.
 
 ### Importing an account into MetaMask
 
@@ -227,10 +223,10 @@ account from the React app:
 3. Select the imported address in MetaMask and switch it to `Ganache Local`.
    The selected account should show its 1,000 fake ETH balance.
 4. Use a separate browser/MetaMask profile or another imported Ganache
-   account when demonstrating the other party.
+   account when testing the other participant role.
 
-For the demo, **two accounts is enough** — one for the Shipper, one for
-the Carrier. Both come from the same MNEMONIC.
+To use both participant views, import one shipper account and one carrier
+account from the same mnemonic.
 
 ### Resetting the chain
 
@@ -241,20 +237,46 @@ it redeploys the contracts, updates the frontend artifacts, and recreates a
 small deterministic set of local records. It does not erase old contracts
 from the Ganache database; the app simply points to the new deployment.
 
-The automatic demo seed registers the first four deterministic Ganache wallets
-and gives them starter CARGO balances. It creates 10 open Marketplace requests;
-two of those listings have active carrier proposals. The configured demo
-shipper wallet (`0x1dF62f291b2E969fB0849d99D9Ce41e2F137006e`) owns exactly four
-My Shipments records: one awaiting proposal approval, one completed shipment,
-and two in-progress shipments with mock proof awaiting review. The configured
-carrier wallet is `0x22d491Bde2303f2f43325b2108D26f1eAbA1e32b`. It is safe to run
-again against the same deployment because it skips when requests already exist.
-Set `CARGOCHAIN_SEED_DEMO=false` to disable it, or run `npm run seed:demo`
-manually after deploying contracts.
+On every `npm run dev:all`, the launcher checks the newly deployed
+`DeliveryEscrow`. If it contains no requests, the automatic demo seed uses the
+accounts returned by that developer's Ganache instance. Account 0 remains the
+contract deployer; account 1 becomes the demo shipper, account 2 the demo
+carrier, and account 3 the marketplace shipper. The three role accounts receive
+registered profiles and starter CARGO balances.
+
+The seed creates 10 open Marketplace requests, with active carrier proposals on
+two listings. The demo shipper owns exactly four My Shipments records: one
+awaiting proposal approval, one completed shipment, and two in-progress
+shipments with mock proof awaiting review. Startup prints the role-to-address
+mapping so each developer knows which private keys from their own Ganache to
+import into MetaMask. The repository never stores those private keys or the
+Ganache mnemonic.
+
+Running the seed again against a populated deployment is safe because it skips
+when requests already exist. Set `CARGOCHAIN_SEED_DEMO=false` to disable startup
+seeding, or run `npm run seed:demo` manually against an empty deployed contract.
 
 To create a completely new chain, stop the launcher and rename or remove
 `ganache-data/` before starting it again. A complete reset invalidates
 MetaMask's cached local history, so only do it when a clean chain is required.
+
+To keep the old database as a backup, rename it while CargoChain is stopped.
+
+**macOS or Linux:**
+
+```bash
+mv ganache-data ganache-data.backup
+```
+
+**Windows PowerShell:**
+
+```powershell
+Rename-Item ganache-data ganache-data.backup
+```
+
+After a reset, use MetaMask's account activity reset for the imported Ganache
+accounts if MetaMask shows stale transactions or nonce errors. Then reconnect
+to `Ganache Local` and reload CargoChain.
 
 ### Time travel in tests
 
@@ -262,85 +284,187 @@ Ganache supports `evm_increaseTime` and `evm_mine`, which let tests fast-
 forward the chain clock without sleeping. CargoChain's DeliveryEscrow
 tests use this to verify deadline-based proof and refund rules.
 
-### What Ganache is **not**
+## Setup from a fresh clone
 
-- **Not a public chain.** Nothing on Ganache is visible to anyone else.
-- **Not a durable record.** The development launcher keeps local history in
-  `ganache-data/`, but the chain can be reset or replaced at any time. Do not
-  store real data in the contracts.
-- **Not representative of mainnet gas costs.** A `createRequest` on
-  Ganache costs 0 fake ETH. On mainnet, the same tx might cost $0.50–$2
-  in real ETH. Design the contract logic to be gas-efficient anyway, but
-  don't tune the UX to Ganache's free-gas behaviour.
+### 1. Clone and install
 
----
-
-## Quick start (5 minutes from a fresh clone)
-
-**First time only — one-time setup:**
+The Git and npm commands are the same on macOS, Linux, Windows PowerShell,
+and Windows Command Prompt:
 
 ```bash
-# 1. Clone
 git clone https://github.com/Cstan0824/CargoChain.git
 cd CargoChain
-
-# 2. Install JS dependencies
 npm install
+```
 
-# 3. Configure local environment values
+### 2. Add the environment file
+
+If you received a preconfigured `.env`, place it in the repository root next
+to `package.json`. Skip the credential-creation steps below. The supplied
+Supabase project must already contain the CargoChain schemas. Transfer this
+file privately and never commit it.
+
+To configure your own services, create `.env` from the committed template.
+
+**macOS or Linux:**
+
+```bash
 cp .env.example .env
 ```
 
-Open `.env` and provide the Supabase project URL, browser publishable key,
-service-role key, a private `SUPABASE_JWT_SECRET` of at least 32 characters,
-the server-only Pinata JWT/gateway host, and a random 32-byte
-`IPFS_MASTER_KEY`. Keep the Ganache defaults unless your local chain uses a
-different host, port, or chain ID.
+**Windows PowerShell:**
 
-### Configure Supabase once
+```powershell
+Copy-Item .env.example .env
+```
 
-CargoChain needs Supabase for private chat/database state and Pinata for new
-encrypted proof ciphertext:
+**Windows Command Prompt:**
 
-1. In the Supabase SQL Editor, run [`scripts/apply-chat-schema.sql`](scripts/apply-chat-schema.sql). It creates the `conversations` and `messages` tables, indexes, RLS read policies, and realtime publication entries.
-2. Apply [`scripts/apply-proof-key-schema.sql`](scripts/apply-proof-key-schema.sql) to create the server-only `proof_keys` table. Keep RLS enabled; do not add browser policies for this table.
-3. Create a scoped Pinata JWT that can create public signed uploads, and set `PINATA_GATEWAY_HOST` to the account's HTTPS gateway host. Generate a random 32-byte `IPFS_MASTER_KEY` (base64url or 64 hex characters). These values are Express-only; never prefix them with `VITE_`.
-4. Set `VITE_IPFS_GATEWAY_URLS` to a comma-separated list of HTTPS gateway bases (the example includes Pinata and the public IPFS gateway). These URLs are public and are used only for retrieval fallback.
-5. New proof images are JPEG, PNG, WebP, GIF, AVIF, or BMP up to **2 MiB**. The browser encrypts them before uploading neutral `.bin` ciphertext; no proof Storage bucket is required. SVG is intentionally excluded because it can contain active or externally loaded content.
-6. Restart the API/Vite processes after changing `.env` values. Never commit `.env` or the service-role key.
+```bat
+copy .env.example .env
+```
 
-**Every dev session — one command, one terminal:**
+Leave the Ganache, chain, API URL, and client-origin defaults unchanged unless
+you intentionally use different local ports.
+
+### 3. Configure Supabase
+
+CargoChain uses Supabase Postgres and Realtime for private chat and stores only
+wrapped proof keys in the `proof_keys` table.
+
+1. Create a project in the [Supabase dashboard](https://supabase.com/dashboard).
+2. Open the project's Connect dialog or API settings and copy its project URL
+   into both `VITE_SUPABASE_URL` and `SUPABASE_URL`.
+3. Copy the browser-safe publishable key into
+   `VITE_SUPABASE_PUBLISHABLE_KEY`.
+4. Copy the server-only legacy `service_role` key into
+   `SUPABASE_SERVICE_ROLE_KEY`.
+5. Copy the project's legacy HS256 JWT secret into `SUPABASE_JWT_SECRET`.
+   CargoChain signs its SIWE wallet sessions with this exact secret so Supabase
+   can evaluate the chat RLS policies. Do not generate an unrelated value and
+   do not revoke the legacy JWT secret while using this version of CargoChain.
+6. In the Supabase SQL Editor, run
+   [`scripts/apply-chat-schema.sql`](scripts/apply-chat-schema.sql). It creates
+   `conversations`, `messages`, their indexes and triggers, the RLS read
+   policies, and the Realtime publication entries.
+7. Run
+   [`scripts/apply-proof-key-schema.sql`](scripts/apply-proof-key-schema.sql).
+   It creates the server-only `proof_keys` table and indexes. Keep RLS enabled
+   and do not add browser policies for this table.
+
+The publishable key may appear in browser code. The service-role key and JWT
+secret must remain server-only. Supabase documents the current key locations
+under [API keys](https://supabase.com/docs/guides/getting-started/migrating-to-new-api-keys)
+and [JWT signing keys](https://supabase.com/docs/guides/auth/signing-keys).
+
+### 4. Configure Pinata and proof encryption
+
+CargoChain encrypts proof images in the browser and uploads only ciphertext to
+public IPFS through a short-lived Pinata signed URL.
+
+1. Create a [Pinata](https://pinata.cloud/) account. Pinata creates a dedicated
+   gateway for the account.
+2. Open **API Keys**, create a key with public file-write permission
+   (`org:files:write`), and copy its JWT when Pinata displays it. Store that JWT
+   in `PINATA_JWT`. An administrator key also works but grants more access than
+   CargoChain needs.
+3. Copy the dedicated gateway domain, such as
+   `example-gateway.mypinata.cloud`, into `PINATA_GATEWAY_HOST`. Use the host
+   only, without `/ipfs`, credentials, or another path.
+4. Generate a 32-byte proof master key. This command works on macOS, Linux,
+   Windows PowerShell, and Windows Command Prompt:
+
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+   ```
+
+   Copy the result into `IPFS_MASTER_KEY`.
+5. Configure browser retrieval fallbacks as a comma-separated list. For
+   example:
+
+   ```text
+   VITE_IPFS_GATEWAY_URLS=https://example-gateway.mypinata.cloud,https://ipfs.io
+   ```
+
+Pinata documents JWT creation under
+[API Keys](https://docs.pinata.cloud/account-management/api-keys) and dedicated
+gateway domains under
+[Dedicated IPFS Gateways](https://docs.pinata.cloud/gateways/dedicated-ipfs-gateways).
+Never give `PINATA_JWT` or `IPFS_MASTER_KEY` a `VITE_` prefix.
+
+New proof images may be JPEG, PNG, WebP, GIF, AVIF, or BMP and must not exceed
+2 MiB. No Supabase Storage bucket is required.
+
+### 5. Start CargoChain
+
+Run the following command in macOS Terminal, a Linux shell, Windows PowerShell,
+or Windows Command Prompt:
 
 ```bash
 npm run dev:all
 ```
 
+The platform wrappers run the same launcher:
+
+| Platform | Alternative command |
+|---|---|
+| macOS or Linux | `bash start.sh` |
+| Windows PowerShell | `.\start.cmd` |
+| Windows Command Prompt | `start.cmd` |
+
 That command starts deterministic Ganache with a local `ganache-data/` database, waits for RPC, compiles, runs a reset migration plus the deterministic demo seed, then starts the CargoChain API and Vite in **one terminal**. It requires the Supabase, Pinata, and master-key configuration above because the API validates its configuration at startup:
 
 ```
 RPC Listening on 127.0.0.1:7545
+[seed-demo] account[1] demo shipper: 0x...
+[seed-demo] account[2] demo carrier: 0x...
+[seed-demo] created 10 marketplace requests.
 [cargochain-api] listening on http://127.0.0.1:3000
 VITE ready
 ➜  Local: http://127.0.0.1:5174/
 ```
 
-**Then in the browser:**
+### 6. Connect MetaMask
 
 1. Open **http://127.0.0.1:5174**
-2. Install **MetaMask** if you don't have it.
-3. MetaMask → Settings → Networks → Add network:
+2. Open MetaMask and add a custom network:
    - Network name: `Ganache Local`
    - RPC URL: `http://127.0.0.1:7545`
    - Chain ID: `1337`
    - Currency: `ETH`
-4. Restore the deterministic Ganache Secret Recovery Phrase in a dedicated demo MetaMask profile, or import one displayed Ganache private key through **Import account**.
-5. Back in the app, click **Connect Wallet** → approve in MetaMask.
+3. Import the private key printed for Ganache account 1 to use the seeded
+   shipper view. Import account 2 to use the seeded carrier view. Never import
+   these local test keys into a wallet that holds real assets.
+4. Back in the application, click **Connect Wallet** and approve the connection
+   in MetaMask.
+
+### 7. Verify the services
+
+Open `http://127.0.0.1:3000/api/health` in a browser. A successful response has
+`"status": "ok"` and includes the current contract addresses.
+
+You can also check it from a terminal.
+
+**macOS or Linux:**
+
+```bash
+curl http://127.0.0.1:3000/api/health
+```
+
+**Windows PowerShell:**
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:3000/api/health
+```
 
 **Stop everything:** one `Ctrl+C` in the terminal kills all three.
 
 ### If you'd rather use the Ganache GUI
 
-The CLI Ganache is just for one-line convenience. If you prefer the standalone Ganache app, open it and click "Quickstart" first, then run:
+Do not run the GUI and `npm run dev:all` at the same time because both bind to
+port `7545`. In Ganache GUI, create or edit a workspace with host
+`127.0.0.1`, port `7545`, chain ID `1337`, network ID `1337`, and at least four
+unlocked accounts. Start that workspace, then run:
 
 ```bash
 npm run compile
@@ -349,9 +473,11 @@ npm run server    # SIWE/chat API
 npm run dev       # Vite (in another terminal)
 ```
 
-Run the API and Vite commands in separate terminals after the migration completes. Do not run the GUI and `npm run dev:all` at the same time: both attempt to bind Ganache to port `7545`.
+Run the API and Vite commands in separate terminals after the migration
+completes. `npm run migrate` deploys the contracts and seeds the empty
+deployment from accounts 1, 2, and 3 supplied by the GUI workspace.
 
-### Production build (for demo day)
+### Production build
 
 ```bash
 npm run build     # writes dist/
@@ -364,15 +490,16 @@ npm run preview   # serves dist/ on http://127.0.0.1:8080
 
 ### `contracts/` — Solidity sources
 
-| File | Module | Owner |
-|---|---|---|
-| `DeliveryEscrow.sol` | request, proposal, escrow, proof, milestone, refund | team |
-| `LifecycleManager.sol` | amendment state, shared negotiation lock, and mutual-cancellation settlement | GAN |
-| `UserRegistry.sol` | wallet registration and on-chain display names | wx |
-| `PaymentEvents.sol` | payment event base inherited by `DeliveryEscrow` | Jeremy |
-| `ReputationRegistry.sol` | immutable completed-request carrier ratings and feedback aggregates | team |
+| File | Responsibility |
+|---|---|
+| `CargoToken.sol` | Fixed-rate ETH-backed CARGO conversion and redemption. |
+| `DeliveryEscrow.sol` | Requests, proposals, escrow, proof, milestones, refunds, reserves, and tips. |
+| `LifecycleManager.sol` | Amendments, cancellation, response allowances, and the shared negotiation lock. |
+| `UserRegistry.sol` | Wallet registration and on-chain display names. |
+| `PaymentEvents.sol` | Payment event definitions inherited by `DeliveryEscrow`. |
+| `ReputationRegistry.sol` | Completed-request carrier ratings and feedback aggregates. |
 
-See `API_v1.md` for the function reference, `docs/Module-Split.md` for per-file responsibilities.
+See `API.md` for the contract function reference.
 
 ### `src/` — Frontend (React 18 + Vite)
 
@@ -400,73 +527,23 @@ Contract tests run through Truffle with Mocha + Chai; frontend tests run through
 ```bash
 npm test              # Truffle contract suite
 npm run test:frontend # Vitest frontend suite
+npm run test:server   # Express proof and chat support tests
+npm run test:seed     # portable Ganache seed-account tests
 npm run build         # production bundle
 ```
-
-The current automated verification baseline is **93 passing contract tests**, **196 passing frontend tests**, and **18 passing server tests**. The separate fresh-wallet Ganache frontend integration test remains optional and was skipped by decision.
 
 ### `docs/` — Documentation
 
 | File | Content |
 |---|---|
-| `PRD.md` | Current CargoChain product requirements baseline |
-| `Spec.md` | Current functional and technical specification |
-| `Architecture.md` | Current system and contract architecture |
-| `BusinessFlow.md` | Current user and settlement workflow |
-| `Module-Feature-Listing.md` | Implemented feature matrix |
-| `Module-Split.md` | Responsibilities, dependencies, and hand-offs per module |
-| `Agreement-Changes.md` | Implemented amendment, mutual-cancellation, and completion-tip rules |
-| `DESIGN.md` | Shared UI typography, surfaces, layering, tables, loading, and accessibility contract |
+| `PRD.md` | CargoChain product requirements |
+| `Spec.md` | Functional and technical specification |
+| `Architecture.md` | System and contract architecture |
+| `BusinessFlow.md` | User and settlement workflow |
+| `Agreement-Changes.md` | Amendment, mutual-cancellation, and completion-tip rules |
 
----
-
-## Development workflow
-
-### Branching
-
-- `main` is the integration branch. Always green.
-- Per-module branches: `feat/<owner>-<module>` (e.g. `feat/wx-user-wallet`, `feat/gan-goods-request`).
-- PRs into `main` require at least one review from a member of a different module.
-
-### Commit messages
-
-Use Conventional Commits:
-
-```
-feat(contracts): add proof submission validation
-fix(frontend): handle MetaMask not installed
-docs(readme): add Ganache setup steps
-test(escrow): add refund deadline test
-```
-
-### Code review
-
-Before pushing:
-
-- [ ] `npm run compile` clean
-- [ ] `npm test` all green
-- [ ] `npm run test:frontend` all green
-- [ ] `npm run build` succeeds
-- [ ] Manual smoke against Ganache works: connect registered shipper and carrier wallets, then complete the demo flow
-- [ ] `API_v1.md` updated if any contract function changed
-- [ ] No commented-out code in the diff
-
----
-
-## Demo (the 20-minute presentation)
-
-The demo runs end-to-end on Ganache + a fresh `npm run migrate`. The migration
-already creates the starter profiles, balances, and sample requests described
-above, so you can connect one of the first four deterministic Ganache wallets
-and inspect the seeded data immediately:
-
-1. **Connect a Ganache wallet** in MetaMask and register its optional public display name through the profile flow.
-2. **Switch MetaMask wallets** when demonstrating the other party. Each connected wallet may act as a shipper or carrier according to the shipment action.
-3. **Create and propose:** the shipper creates a request at `http://127.0.0.1:5174/`; two carriers submit milestone plans; the shipper compares, selects, and funds one.
-4. **Proof and payment:** with a synthetic JPEG, PNG, WebP, GIF, AVIF, or BMP image no larger than 2 MiB, the accepted carrier signs in on demand, uploads encrypted ciphertext through Pinata, submits the returned `ipfs://` reference, and the shipper verifies it; show the released CARGO and on-chain payment entry. ETH remains available in both wallets for gas.
-5. **Private chat:** the accepted pair authenticates with SIWE and exchanges request-scoped messages. Show that the activity timeline only contains events for that carrier/request pair.
-6. **Agreement change:** request a funded amendment or mutual cancellation, then show its review panel, on-chain decision, and history. Do not try to finalise cancellation while a proof is awaiting verification.
-7. **Completion:** finish remaining checkpoints, show the optional one-time tip in Payments, and confirm it reaches the carrier without changing escrow accounting.
+The root [`DESIGN.md`](DESIGN.md) defines shared UI typography, surfaces,
+layering, tables, loading, and accessibility behavior.
 
 ---
 
@@ -475,7 +552,7 @@ and inspect the seeded data immediately:
 - One accepted carrier per request; multiple carriers may propose while the request is open.
 - Chat is request-scoped for the shipper and the specific carrier. It is not a general marketplace messaging system.
 - IPFS CIDs are content-addressed but public and provider pinning is not an availability guarantee. New proof plaintext is encrypted in the browser, while ciphertext and the canonical URI remain public; gateway access is not an access-control mechanism.
-- Keep `PINATA_JWT`, `IPFS_MASTER_KEY`, Supabase service-role credentials, and SIWE signing secrets server-only. Use synthetic evidence for the classroom demo and apply the `proof_keys` schema before testing encrypted viewing.
+- Keep `PINATA_JWT`, `IPFS_MASTER_KEY`, Supabase service-role credentials, and SIWE signing secrets server-only. Apply the `proof_keys` schema before testing encrypted viewing.
 - Time-travel tests depend on Ganache's `evm_increaseTime`.
 - The main workflow is responsive, but MetaMask extension remains the supported wallet flow.
 
@@ -484,13 +561,6 @@ and inspect the seeded data immediately:
 ## Links
 
 - PRD: [`docs/PRD.md`](docs/PRD.md)
-- Module breakdown: [`docs/Module-Split.md`](docs/Module-Split.md)
-- Contract API: [`API_v1.md`](API_v1.md)
+- Contract API: [`API.md`](API.md)
 - CARGO and gas allocation: [`docs/Spec.md`](docs/Spec.md)
 - Interface design: [`DESIGN.md`](DESIGN.md)
-
----
-
-## License
-
-Educational use only — TARUMT BMIS2003 assignment, 2026/05 semester.
