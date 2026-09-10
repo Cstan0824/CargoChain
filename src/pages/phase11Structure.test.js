@@ -13,7 +13,7 @@ describe('Phase 11 shipment and marketplace layout structure', () => {
     expect(page.indexOf('<ChatButton')).toBeLessThan(page.indexOf('styles.editBtn'));
     expect(page).toContain('className={styles.shipmentChatButton}');
     expect(styles).toContain('.shipmentChatButton {');
-    expect(styles).toContain('.editBtn {');
+    expect(styles).toMatch(/\.editBtn(?:\s*,|\s*\{)/);
     expect(styles).toContain('width: 40px;');
     expect(styles).toContain('box-shadow: var(--shadow-border);');
   });

@@ -1,6 +1,6 @@
-# CargoChain — Business Flow
+# CargoChain business flow
 
-> Current user-facing workflow. For technical signatures and validation messages, see [`API_v1.md`](../API_v1.md).
+> Current user-facing workflow. For technical signatures and validation messages, see [`API.md`](../API.md).
 
 ## 1. Core rule
 
@@ -125,18 +125,11 @@ After a request reaches `Completed`, its shipper can submit one permanent 1-5 ra
 
 Proposal cards show the verified rating average and count. A read-only reputation modal adds completed-delivery, on-time, expiry, accepted-cancellation, and common-tag information during proposal review, while `/account` shows the connected wallet's own rating and delivery aggregates. Reputation views do not reveal route, cargo, proof, escrow, request ID, or chat details.
 
-## 10. Out of scope
+## 10. Activity diagrams
 
-- Carrier republishing/recovery and custody transfer.
-- QR recipient verification.
-- Automatic dispute-window payment release.
-- General marketplace messages and staking.
+The following diagrams describe the CargoChain workflow.
 
-## 11. Activity diagrams
-
-The following diagrams reflect the implemented v1 workflow.
-
-### 11.1 User profile and wallet
+### 10.1 User profile and wallet
 
 ```mermaid
 flowchart TD
@@ -153,7 +146,7 @@ flowchart TD
   K --> J
 ```
 
-### 11.2 Goods request management
+### 10.2 Goods request management
 
 ```mermaid
 flowchart TD
@@ -170,7 +163,7 @@ flowchart TD
   J --> K[Assign selected carrier and create ordered checkpoints]
 ```
 
-### 11.3 Payment and escrow
+### 10.3 Payment and escrow
 
 ```mermaid
 flowchart TD
@@ -189,7 +182,7 @@ flowchart TD
   L -- Yes --> M[Mark Completed and return unused reserve]
 ```
 
-### 11.4 Milestone tracking and proof
+### 10.4 Milestone tracking and proof
 
 ```mermaid
 flowchart TD
@@ -207,9 +200,9 @@ flowchart TD
   L --> B
 ```
 
-## 12. Use case diagrams
+## 11. Use case diagrams
 
-### 12.1 User profile and wallet
+### 11.1 User profile and wallet
 
 ```mermaid
 flowchart LR
@@ -222,7 +215,7 @@ flowchart LR
   A & B & C --> Wallet[MetaMask + UserRegistry]
 ```
 
-### 12.2 Goods request management
+### 11.2 Goods request management
 
 ```mermaid
 flowchart LR
@@ -234,7 +227,7 @@ flowchart LR
   A & B & C & D & E --> Escrow[DeliveryEscrow]
 ```
 
-### 12.3 Payment and escrow
+### 11.3 Payment and escrow
 
 ```mermaid
 flowchart LR
@@ -247,7 +240,7 @@ flowchart LR
   A & B & C & D & E & F --> Payments[CargoToken + DeliveryEscrow]
 ```
 
-### 12.4 Milestone tracking and proof
+### 11.4 Milestone tracking and proof
 
 ```mermaid
 flowchart LR

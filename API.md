@@ -1,6 +1,5 @@
-# CargoChain Smart Contract API v1
+# CargoChain API
 
-> **Status:** Implemented contract surface.
 > Business payment amounts are CARGO base units. Native ETH is used only for gas and token conversion. Timestamps are Unix seconds. Request IDs start at 1. Milestone IDs are stable, zero-indexed creation IDs within a request; their completion order is retrieved separately and may change when an amendment inserts a checkpoint.
 
 ## Deployment order
@@ -278,7 +277,7 @@ Events: `DeliveryEscrowInitialized`, `ShipmentDeadlineExtended`, `AmendmentReque
 `CancellationWithdrawn`, `CancellationExpired`, `AmendmentResponseAllowanceFunded`,
 `AmendmentResponseReimbursed`, and `AmendmentResponseAllowanceRefunded`.
 
-The finalized workflow rules are documented in `docs/Agreement-Changes.md`.
+The workflow rules are documented in `docs/Agreement-Changes.md`.
 
 ---
 
@@ -783,7 +782,7 @@ event CarrierRated(
 
 ## Off-chain encrypted proof API
 
-These Express routes support the unchanged `DeliveryEscrow.submitProof` contract
+These Express routes support the `DeliveryEscrow.submitProof` contract
 method. They use the existing SIWE wallet session (`Authorization: Bearer
 <token>`) and re-read the current request/milestone state before issuing an
 upload capability or releasing a key. `PINATA_JWT` and `IPFS_MASTER_KEY` are

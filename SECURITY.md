@@ -1,8 +1,4 @@
-# CargoChain — Security Notes
-
-> Short reference. The full threat model is "this is a graded assignment
-> running on the developer's laptop, not a production system." Keep that
-> in mind when reading these rules.
+# CargoChain security
 
 ## Supported versions
 
@@ -11,23 +7,19 @@
 | `main` | Active — receives security-relevant fixes |
 | (older) | Unsupported |
 
-Only the latest commit on `main` is supported. No LTS branches are maintained. This is a student project; the supported-versions policy is intentionally narrow.
+Only the latest commit on `main` is supported. No LTS branches are maintained.
 
 ## Reporting a vulnerability
 
-Open a GitHub issue at `https://github.com/Cstan0824/CargoChain/issues/new?labels=security`, or contact the project owner privately:
-
-- **Cstan (Cheong Soon Tian)** — tancs-wm23@student.tarc.edu.my
+Open a GitHub issue at `https://github.com/Cstan0824/CargoChain/issues/new?labels=security`.
 
 Please **do not** include working exploit code in public issues. A short description of the vulnerability class and the affected file or function is enough to start a discussion.
-
-**Response targets:** Best-effort. This is a student project with no SLA. The owner will acknowledge within a reasonable time and coordinate disclosure before any public fix lands.
 
 ## Secret handling
 
 - **`.env` is the only place secrets live.** Truffle, Vite, and the API
   server read from it. `.env` is gitignored.
-- **`.env.example` is committed** and lists every variable the team may
+- **`.env.example` is committed** and lists every variable the system may
   need. Copy it to `.env` and fill in real values. Placeholders only.
 - **Never commit a real key.** The repo's `.gitignore` covers `.env`,
   `.env.local`, and `.env.*.local`. If you accidentally commit one, rotate
@@ -52,24 +44,20 @@ Please **do not** include working exploit code in public issues. A short descrip
 - A `VITE_*` variable ends up in the JS file served to every visitor. If
   the value is sensitive, **do not use the `VITE_` prefix**. Use a regular
   env var and read it server-side only (Truffle, Express, etc.).
-- The frontend does not use a Sepolia RPC. CargoChain uses only the local
-  Ganache network and its configured local development values.
-
 ## Local-only by default
 
 All local services bind to `127.0.0.1` (loopback) by default. Nothing in
 the repo listens on a public interface unless you explicitly opt in.
 
-| Service          | Port | Default bind | Public-bind flag          |
-|------------------|------|--------------|---------------------------|
-| Ganache CLI      | 7545 | 127.0.0.1    | `--host 0.0.0.0`          |
-| CargoChain API   | 3000 | 127.0.0.1    | source change required (not recommended) |
-| Vite dev server  | 5174 | 127.0.0.1    | `vite --host 0.0.0.0`     |
-| Vite preview     | 8080 | 127.0.0.1    | `vite preview --host 0.0.0.0` |
+| Service | Port | Default bind |
+|---|---:|---|
+| Ganache CLI | 7545 | 127.0.0.1 |
+| CargoChain API | 3000 | 127.0.0.1 |
+| Vite dev server | 5174 | 127.0.0.1 |
+| Vite preview | 8080 | 127.0.0.1 |
 
-The repository intentionally does not provide a shared-Ganache mode. Each
-developer normally runs an isolated local chain. Keep the defaults loopback-only
-so a fresh clone never accidentally exposes a wallet RPC, chat API, or dev UI.
+Each installation runs an isolated local chain. Keep the defaults loopback-only
+so a fresh clone does not expose a wallet RPC, chat API, or development UI.
 
 ## React hygiene
 
@@ -83,23 +71,10 @@ so a fresh clone never accidentally exposes a wallet RPC, chat API, or dev UI.
 
 ## What to do if a key leaks
 
-1. **Rotate the key** at the source (Alchemy/Infura dashboard, etc.).
+1. **Rotate the key** in the affected service, such as Supabase or Pinata.
 2. **Rewrite git history** to purge the key from the repo:
    ```bash
    git filter-repo --invert-paths --path .env
    git push --force
    ```
-3. **Notify the team** in the project chat. Anyone with a stale clone
-   needs to pull and reset.
-4. **Update `.env.example`** if the leaked var's name/format changed.
-
-## Out of scope (intentionally)
-
-- Production-grade abuse protection, managed secrets, and a public deployment.
-- Mobile wallet flows (WalletConnect, deep links) — MetaMask extension
-  only.
-- Public IPFS confidentiality or availability guarantees. New proof plaintext
-  is encrypted in the browser before Pinata upload, but CIDs and ciphertext
-  are public and provider pinning/gateway uptime still require operational
-  monitoring. Supabase Postgres/Realtime remains in scope for chat and the
-  server-only wrapped-key table.
+3. **Update `.env.example`** if the leaked variable's name or format changed.
