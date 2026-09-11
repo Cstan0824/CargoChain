@@ -1,6 +1,6 @@
-# CargoChain — Architecture Overview
+# CargoChain architecture
 
-> Current v1 architecture. This project is designed for a local Ganache demonstration, not a public production deployment.
+> CargoChain runs on a local Ganache network with a React browser application and supporting Express, Supabase, and Pinata services.
 
 The diagrams below describe the running CARGO settlement and encrypted Pinata/IPFS proof implementation. Supabase stores private chat records and server-only wrapped proof keys; it is not used for new proof-image uploads. ETH remains the backing and native gas asset, not delivery escrow.
 
@@ -151,7 +151,7 @@ Conversation identity includes chain ID, deployed contract address, request ID, 
 | Express | `http://127.0.0.1:3000` | SIWE and chat API; needs Supabase env values. |
 | Vite preview | `http://127.0.0.1:8080` | Production-bundle inspection. |
 
-`npm run dev:all` starts Ganache, compiles, reset-migrates, then launches Express and Vite. A reset migration redeploys contracts and refreshes artifact addresses; it does not erase historical contracts from the local Ganache database.
+`npm run dev:all` starts Ganache, compiles, reset-migrates, seeds demo data into the empty deployment, then launches Express and Vite. The seed assigns its shipper, carrier, and marketplace roles from accounts 1, 2, and 3 returned by the connected Ganache instance, so it does not depend on one developer's mnemonic or wallet addresses. A reset migration redeploys contracts and refreshes artifact addresses; it does not erase historical contracts from the local Ganache database.
 
 ## 8. Security and scope boundaries
 
@@ -161,6 +161,4 @@ Conversation identity includes chain ID, deployed contract address, request ID, 
 - Chat access is checked by the API and constrained by Supabase RLS.
 - Contract state is not updated by the chat server or Supabase.
 - Carrier ratings are immutable and structured; objective performance is derived from contract state/events instead of user-entered claims.
-- v1 excludes Sepolia, QR verification, public general chat, staking, automatic dispute-window release, and recovery/republish.
-
-See [`README.md`](../README.md) for setup, [`BusinessFlow.md`](BusinessFlow.md) for user flow, and [`API_v1.md`](../API_v1.md) for the full contract surface.
+See [`README.md`](../README.md) for setup, [`BusinessFlow.md`](BusinessFlow.md) for user flow, and [`API.md`](../API.md) for the full contract surface.

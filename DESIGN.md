@@ -1,6 +1,6 @@
 # CargoChain interface design contract
 
-This document is the source of truth for the shared frontend patterns. It keeps the operational surfaces—Marketplace, My Shipments, Messages, Account, tracking, proposals, and their dialogs—predictable without changing the course stack or product workflow.
+This document is the source of truth for the shared frontend patterns. It keeps Marketplace, My Shipments, Messages, Account, tracking, proposals, and their dialogs predictable without changing the product workflow.
 
 ## Principles
 
@@ -87,7 +87,7 @@ Interactive elements have at least a 40px hit area (44px is preferred for primar
 
 Every keyboard path has a visible focus ring. Color never carries state alone. Busy regions announce once, errors expose a retry or recovery path, and controls retain their accessible name when visual copy is shortened. Dates, ETH, addresses, request IDs, and hashes remain readable when truncated visually. Respect reduced motion and preserve focus when overlays close.
 
-## Implemented workflow patterns
+## Workflow patterns
 
 - Proposal editing is an explicit presentation mode. An active carrier proposal stays read-only on the normal submitted route; `?edit=active` opens a local editable draft. Saving uses the existing revoke-then-submit contract sequence and labels both wallet confirmations. If the second transaction fails, keep the draft, explain that the original was revoked, and offer a retry that submits only the replacement.
 - Repeated row and dialog actions use the shared 44px button shell. `softNeutral` is for navigation or keep actions, `softPrimary` is for a positive follow-up, and `softDanger` is for revoke/reject actions. Chat uses a lightly transparent blue surface with the same focus and press behavior.

@@ -1,29 +1,23 @@
-# CargoChain Agreement Changes
+# CargoChain agreement changes
 
-This document records the implemented business rules for post-acceptance amendments, mutual cancellation, and completion tips. For exact Solidity signatures and events, use [`API_v1.md`](../API_v1.md).
+This document records the business rules for post-acceptance amendments, mutual cancellation, and completion tips. For exact Solidity signatures and events, use [`API.md`](../API.md).
 
-The current implementation stages and settles **CARGO**. ETH is paid by the transaction sender as native gas only. Amendments can use `EachPaysOwn` or `RequesterCoversResponse`; the latter stages a separate refundable CARGO allowance for one successful response.
+CargoChain stages and settles **CARGO**. The transaction sender pays native gas in ETH. Amendments can use `EachPaysOwn` or `RequesterCoversResponse`; the latter stages a separate refundable CARGO allowance for one successful response.
 
-## Current implementation boundary
+## Contract responsibilities
 
-The implementation was delivered in these phases:
+`LifecycleManager` owns the negotiation lock and agreement-change records. Each accepted shipment has one negotiation slot. Amendment records capture the milestone-state version so acceptance can detect changed proof progress. Participant, response-deadline, active-shipment, and pending-proof checks protect every decision. Funded agreement changes require at least `0.01 CARGO` of additional compensation.
 
-- one negotiation slot per accepted shipment;
-- a milestone-state version snapshot for stale amendment detection;
-- detection of submitted proof awaiting shipper verification;
-- reusable participant, response-deadline, and active-shipment checks; and
-- a minimum additional-funding constant of `0.01 CARGO`.
+`DeliveryEscrow` remains the authoritative source for request parties, accepted milestones, milestone progress, CARGO escrow, payouts, and refunds. The manager reads milestone-state versions and pending-proof status from the escrow instead of copying shipment data.
 
-`LifecycleManager` owns the negotiation lock and agreement-change records. `DeliveryEscrow` remains the authoritative source for request parties, accepted milestones, milestone progress, CARGO escrow, payouts, and refunds. The manager reads milestone-state versions and pending-proof status from the escrow instead of copying shipment data.
+A shipper may leave an optional note when manually rejecting a carrier plan. Accepting one plan effectively rejects the remaining active plans with the fixed reason documented below. The note is stored on the historical on-chain proposal and displayed to both parties.
 
-Proposal rejection notes are implemented. A shipper may leave an optional note when manually rejecting a carrier plan. When accepting one plan automatically rejects the remaining active plans, each receives the fixed reason documented below. The note is stored on the historical on-chain proposal and displayed to both parties.
+After the final milestone is paid, the shipper may transfer one separate positive CARGO amount directly to the carrier. The amount is recorded on-chain and included in payment history and carrier earnings without entering escrow.
 
-Completion tips are implemented. After the final milestone is paid, the shipper may transfer one separate positive CARGO amount directly to the carrier. The amount is recorded on-chain and included in payment history and carrier earnings without entering escrow.
+Either participant can request mutual cancellation with a required note and response deadline. The counterparty accepts or rejects, the requester may withdraw, and unanswered requests can expire. Acceptance calls a manager-only escrow hook that preserves released milestone payments and refunds only unpaid CARGO escrow. The tracking page exposes the decision and its on-chain history.
 
-Mutual cancellation is implemented end to end. Either participant can submit the required note and response deadline; the counterparty accepts or rejects; the requester may withdraw; unanswered requests can expire. Acceptance calls a manager-only escrow hook that preserves released milestone payments and refunds only unpaid CARGO escrow. The tracking page exposes the decision and its on-chain history.
-
-Amendments are implemented end to end. The shipper can extend a deadline directly;
-either party can request a mutually approved change; new CARGO can top up unpaid existing
+The shipper can extend a deadline directly. Either party can request a mutually approved
+change. New CARGO can top up unpaid existing
 milestones or fully fund newly inserted milestones; staged shipper funding is refunded
 when a request is rejected, withdrawn, or expires. The tracking page exposes the active
 comparison, decisions, full before/after confirmation, payment allocations, and detailed

@@ -1,12 +1,12 @@
 # CargoChain — Technical Specification
 
-> [`API_v1.md`](../API_v1.md) remains the authoritative function-level reference for the currently implemented contracts.
+> [`API.md`](../API.md) is the authoritative function-level contract reference.
 
 ## 1. Scope
 
 CargoChain is a local-Ganache logistics DApp for milestone-based CARGO escrow. A shipper creates a delivery request, carriers compete with milestone proposals, the shipper funds one proposal, the assigned carrier submits photo proof, and the shipper releases payment checkpoint by checkpoint. ETH remains the native gas and collateral-conversion currency.
 
-The current build also supports wallet display names, request-scoped private chat, mutual cancellation, negotiated amendments, immutable checkpoint IDs, a one-time completion tip, and structured carrier reputation.
+CargoChain also supports wallet display names, request-scoped private chat, mutual cancellation, negotiated amendments, immutable checkpoint IDs, a one-time completion tip, and structured carrier reputation.
 
 ## 2. Stack
 
@@ -18,9 +18,9 @@ The current build also supports wallet display names, request-scoped private cha
 | Wallet | MetaMask browser extension |
 | Private chat | Express SIWE API + Supabase Postgres / Realtime |
 | Proof image storage | Browser AES-256-GCM ciphertext pinned to Pinata public IPFS through Express-issued signed URLs; server-only wrapped per-proof keys in Supabase `proof_keys`. |
-| Tests | Truffle Mocha/Chai and Vitest |
+| Tests | Truffle Mocha/Chai, Vitest, and Node server tests |
 
-Sepolia, QR recipient confirmation, auto-release dispute windows, carrier republishing, custody transfer, general marketplace chat, staking, and a scalable event indexer are not included in CargoChain. CARGO is the business-payment currency; ETH remains the native gas currency.
+CARGO is the business-payment currency; ETH remains the native gas currency.
 
 ## 3. Contracts
 
@@ -227,7 +227,7 @@ The current application uses the encrypted Pinata proof flow above. Apply
 gateway fallbacks with `VITE_IPFS_GATEWAY_URLS`. The synthetic gate is
 `npm run smoke:ipfs` and skips cleanly without Pinata credentials. For manual
 Ganache GUI use,
-run `npm run compile`, `npm run migrate`, `npm run server`, and
+run `npm run compile`, `npm run migrate` (which also seeds local demo data), `npm run server`, and
 `npm run dev` separately.
 
 ```bash
@@ -239,11 +239,7 @@ npm run build
 
 ## 9. Constraints
 
-- Local Ganache is the only v1 network; deployment addresses change after reset migration.
+- CargoChain uses local Ganache; deployment addresses change after reset migration.
 - One carrier is accepted per request, but several can propose while it is open.
-- The assignment supports MetaMask extension flow only.
+- Wallet interaction uses the MetaMask browser extension.
 - Chat is between request participants only; it is not a public marketplace messenger.
-
-## 10. Implementation boundary
-
-The CARGO token, contract-calculated operational allowances, measured/capped CARGO reimbursement, and encrypted Pinata/IPFS evidence path are implemented. Sections 1–9 describe the full current system. The exclusions in Section 9 are not implemented.

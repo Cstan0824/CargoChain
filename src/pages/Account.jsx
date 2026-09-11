@@ -62,6 +62,8 @@ const EMPTY_SNAPSHOT = {
   historyLoading: false,
 };
 
+const ACTIVITY_PAGE_SIZE = 5;
+
 export function Account() {
   const navigate = useNavigate();
   const { account, chainId, signer, provider, connect } = useWallet();
@@ -655,7 +657,17 @@ function RatingSummary({ profile = {} }) {
 }
 
 function TxHistoryTable({ rows, loading, error, onRetry, onRowClick, show }) {
+  const [page, setPage] = useState(1);
   const showSkeleton = loading && rows.length === 0;
+  const totalPages = Math.max(1, Math.ceil(rows.length / ACTIVITY_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const firstRowIndex = (currentPage - 1) * ACTIVITY_PAGE_SIZE;
+  const visibleRows = rows.slice(firstRowIndex, firstRowIndex + ACTIVITY_PAGE_SIZE);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
   const copyHash = async (event, hash) => {
     event.stopPropagation();
     try {
@@ -692,7 +704,7 @@ function TxHistoryTable({ rows, loading, error, onRetry, onRowClick, show }) {
               title="No on-chain activity yet"
               description="Create a request or accept a job to see payment events appear here."
             />
-          ) : rows.map((row) => (
+          ) : visibleRows.map((row) => (
             <tr
               key={row.id}
               className={styles.tableRow}
@@ -724,6 +736,31 @@ function TxHistoryTable({ rows, loading, error, onRetry, onRowClick, show }) {
           ))}
         </tbody>
       </table>
+      {rows.length > ACTIVITY_PAGE_SIZE && !showSkeleton && (
+        <nav className={styles.activityPagination} aria-label="Recent activity pagination">
+          <span className={styles.paginationSummary} aria-live="polite">
+            Page {currentPage} of {totalPages}
+          </span>
+          <div className={styles.paginationActions}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setPage((previous) => Math.max(1, previous - 1))}
+              disabled={currentPage === 1}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setPage((previous) => Math.min(totalPages, previous + 1))}
+              disabled={currentPage === totalPages}
+            >
+              Next
+            </Button>
+          </div>
+        </nav>
+      )}
     </div>
   );
 }

@@ -2,11 +2,11 @@
 
 ## Project
 
-CargoChain is a BMIS2003 decentralised logistics DApp. It runs locally on Ganache and uses milestone-based CARGO escrow. A shipper creates a request, carriers submit milestone proposals, the shipper funds one accepted plan, the carrier submits encrypted IPFS photo proof, and the shipper releases each checkpoint payment after review.
+CargoChain is a decentralised logistics DApp that runs locally on Ganache and uses milestone-based CARGO escrow. A shipper creates a request, carriers submit milestone proposals, the shipper funds one accepted plan, the carrier submits encrypted IPFS photo proof, and the shipper releases each checkpoint payment after review.
 
 CargoChain is the platform. **CARGO** is the business-payment currency and uses the symbol **`C.`** in amount displays. `1 ETH = 10,000 C.` through the ownerless ETH-backed `CargoToken`. ETH remains native transaction gas and backing collateral.
 
-Use [README.md](README.md), [docs/Spec.md](docs/Spec.md), [docs/BusinessFlow.md](docs/BusinessFlow.md), and [API_v1.md](API_v1.md) as current system references.
+Use [README.md](README.md), [docs/Spec.md](docs/Spec.md), [docs/BusinessFlow.md](docs/BusinessFlow.md), and [API.md](API.md) as current system references.
 
 ## Required stack
 
@@ -35,17 +35,15 @@ Do not introduce Hardhat, Foundry, Next.js, Vue, Angular, TypeScript, wagmi, vie
 - An amendment may use `EachPaysOwn` or `RequesterCoversResponse`. Response allowance is separate from proof reserve and reimburses one successful amendment acceptance or rejection only.
 - Browser-side AES-256-GCM encryption protects new proof images before Pinata/IPFS upload. Express authorises proof upload/key release from current on-chain participation. Supabase stores wrapped keys, not new proof images.
 
-The system does not include QR recipient verification, automatic dispute-window release, carrier republishing or custody transfer, public marketplace chat, staking, mobile-wallet support, or public-network deployment.
+## Module boundaries
 
-## Module ownership
-
-| Module | Owner | Current responsibility |
-| --- | --- | --- |
-| User profile and wallet | wx | MetaMask integration, registration, display names, profile presentation. |
-| Goods requests and lifecycle | GAN | Requests, proposals, amendments, cancellation, stable checkpoint order. |
-| Payment and escrow | Jeremy | CARGO token, funding, payouts, refunds, reserves, reimbursement, payment history, tips. |
-| Milestone tracking and proof | Melissa | Proof submission/review state and encrypted proof integration. |
-| Frontend and UI/UX | Cstan | React routes, contract integration, transaction feedback, shared interface, chat UI. |
+| Module | Responsibility |
+| --- | --- |
+| User profile and wallet | MetaMask integration, registration, display names, and profile presentation. |
+| Goods requests and lifecycle | Requests, proposals, amendments, cancellation, and stable checkpoint order. |
+| Payment and escrow | CARGO conversion, funding, payouts, refunds, reserves, reimbursement, payment history, and tips. |
+| Milestone tracking and proof | Proof submission/review state and encrypted proof integration. |
+| Frontend and UI/UX | React routes, contract integration, transaction feedback, shared interface, and chat UI. |
 
 ## Implementation rules
 
@@ -67,7 +65,8 @@ npm run compile
 npm test
 npm run test:frontend
 npm run test:server
+npm run test:seed
 npm run build
 ```
 
-Update [API_v1.md](API_v1.md) when a public contract API, event, caller rule, or amount rule changes. Update the relevant current system document when workflow, architecture, security, or UI behaviour changes. Do not add roadmap documents, future-feature proposals, or historical planning language to the final documentation set.
+Update [API.md](API.md) when a public contract API, event, caller rule, or amount rule changes. Update the relevant current system document when workflow, architecture, security, or UI behaviour changes. Do not add roadmap documents, future-feature proposals, or historical planning language to the final documentation set.

@@ -85,8 +85,8 @@ async function launch() {
   await waitForRpc();
   await waitForExit(spawnBg('truffle-compile', 'npx', ['truffle', 'compile'], ROOT), 'Truffle compile');
   await waitForExit(
-    spawnBg('truffle-migrate', 'npx', ['truffle', 'migrate', '--reset', '--network', 'development'], ROOT),
-    'Truffle migration',
+    spawnBg('truffle-migrate-and-seed', 'npm', ['run', 'migrate'], ROOT),
+    'Truffle migration and demo seed',
   );
 
   spawnBg('api', 'node', ['server/index.js'], ROOT);
