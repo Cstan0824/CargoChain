@@ -4826,76 +4826,7 @@ async function loadShipment(deliveryEscrow, lifecycleManager, idParam) {
         lifecycleManager.getAmendmentExistingFunding(requestId, index),
         lifecycleManager.getAmendmentNewMilestones(requestId, index),
       ]);
-      const positional = Array.from(amendment || []);
-      const expandedDeadlineCandidate = Number(amendment[5] ?? 0n);
-      const expandedStatusCandidate = Number(amendment[8] ?? -1);
-      const expandedHistoryRecord = positional.length >= 12
-        && expandedDeadlineCandidate >= 1_000_000_000
-        && expandedDeadlineCandidate <= 10_000_000_000
-        && expandedStatusCandidate >= 0
-        && expandedStatusCandidate < AMENDMENT_STATUS.length;
-      return {
-        id: index,
-        requester: amendment.requester ?? amendment[0],
-        responder: amendment.responder ?? amendment[1],
-        requesterNote: amendment.requesterNote ?? amendment[2] ?? '',
-        rejectionNote: amendment.rejectionNote ?? amendment[3] ?? '',
-        previousDeadline: expandedHistoryRecord
-          ? Number(amendment.previousDeadline ?? amendment[4] ?? 0n)
-          : 0,
-        proposedDeadline: expandedHistoryRecord
-          ? Number(amendment.proposedDeadline ?? amendment[5] ?? 0n)
-          : Number(amendment[4] ?? 0n),
-        additionalFunding: expandedHistoryRecord
-          ? BigInt(amendment.additionalFunding ?? amendment[6] ?? 0n)
-          : BigInt(amendment[5] ?? 0n),
-        responseDeadline: expandedHistoryRecord
-          ? Number(amendment.responseDeadline ?? amendment[7] ?? 0n)
-          : Number(amendment[6] ?? 0n),
-        status: AMENDMENT_STATUS[Number(
-          expandedHistoryRecord
-            ? amendment.status ?? amendment[8]
-            : amendment[7],
-        )] || 'Unknown',
-        createdAt: Number(
-          expandedHistoryRecord
-            ? amendment.createdAt ?? amendment[9] ?? 0n
-            : amendment.createdAt ?? amendment[9] ?? amendment[8] ?? 0n,
-        ),
-        resolvedAt: Number(
-          expandedHistoryRecord
-            ? amendment.resolvedAt ?? amendment[10] ?? 0n
-            : amendment[9] ?? 0n,
-        ),
-         directExtension: expandedHistoryRecord
-           ? Boolean(amendment.directExtension ?? amendment[11] ?? false)
-           : false,
-         gasPolicy: expandedHistoryRecord ? Number(amendment.gasPolicy ?? amendment[12] ?? 0) : 0,
-         responseAllowance: expandedHistoryRecord
-           ? BigInt(amendment.responseAllowance ?? amendment[13] ?? 0n)
-           : 0n,
-         responseAllowanceSpent: expandedHistoryRecord
-           ? BigInt(amendment.responseAllowanceSpent ?? amendment[14] ?? 0n)
-           : 0n,
-         responseAllowanceFunder: expandedHistoryRecord
-           ? amendment.responseAllowanceFunder ?? amendment[15] ?? null
-           : null,
-         responseReimbursed: expandedHistoryRecord
-           ? Boolean(amendment.responseReimbursed ?? amendment[16] ?? false)
-           : false,
-        operationalAllowance: BigInt(amendment.operationalAllowance ?? 0n),
-        existingFunding: Array.from(existingResult || []).map((allocation) => ({
-          milestoneId: Number(allocation.milestoneId ?? allocation[0] ?? 0n),
-          amount: BigInt(allocation.amount ?? allocation[1] ?? 0n),
-        })),
-        newMilestones: Array.from(newResult || []).map((milestone) => ({
-          name: milestone.name ?? milestone[0] ?? '',
-          insertBeforeMilestoneId: BigInt(
-            milestone.insertBeforeMilestoneId ?? milestone[1] ?? 0n,
-          ),
-          amount: BigInt(milestone.amount ?? milestone[2] ?? 0n),
-        })),
-      };
+      return normalizeAmendmentRecord(amendment, index, existingResult, newResult);
     },
   ));
 
@@ -4926,6 +4857,101 @@ async function loadShipment(deliveryEscrow, lifecycleManager, idParam) {
     cancellations,
     amendments,
     events: buildTimelineEvents({ shipper, carrier, createdAt, proposedAmount, milestones }),
+  };
+}
+
+export function normalizeAmendmentRecord(
+  amendment,
+  index = 0,
+  existingResult = [],
+  newResult = [],
+) {
+  const positional = Array.from(amendment || []);
+  const currentLayout = amendment?.operationalAllowance !== undefined
+    || positional.length >= 18;
+  const expandedLayout = currentLayout
+    || amendment?.previousDeadline !== undefined
+    || amendment?.directExtension !== undefined
+    || positional.length >= 12;
+
+  const indexes = currentLayout
+    ? {
+        previousDeadline: 4,
+        proposedDeadline: 5,
+        additionalFunding: 6,
+        operationalAllowance: 7,
+        responseDeadline: 8,
+        status: 9,
+        createdAt: 10,
+        resolvedAt: 11,
+        directExtension: 12,
+        gasPolicy: 13,
+        responseAllowance: 14,
+        responseAllowanceSpent: 15,
+        responseAllowanceFunder: 16,
+        responseReimbursed: 17,
+        responseGasPriceCap: 18,
+      }
+    : expandedLayout
+      ? {
+          previousDeadline: 4,
+          proposedDeadline: 5,
+          additionalFunding: 6,
+          responseDeadline: 7,
+          status: 8,
+          createdAt: 9,
+          resolvedAt: 10,
+          directExtension: 11,
+          gasPolicy: 12,
+          responseAllowance: 13,
+          responseAllowanceSpent: 14,
+          responseAllowanceFunder: 15,
+          responseReimbursed: 16,
+        }
+      : {
+          proposedDeadline: 4,
+          additionalFunding: 5,
+          responseDeadline: 6,
+          status: 7,
+          createdAt: 8,
+          resolvedAt: 9,
+        };
+  const value = (name, fallback = 0n) => (
+    amendment?.[name] ?? positional[indexes[name]] ?? fallback
+  );
+
+  return {
+    id: index,
+    requester: value('requester', positional[0] ?? null),
+    responder: value('responder', positional[1] ?? null),
+    requesterNote: value('requesterNote', positional[2] ?? ''),
+    rejectionNote: value('rejectionNote', positional[3] ?? ''),
+    previousDeadline: expandedLayout ? Number(value('previousDeadline')) : 0,
+    proposedDeadline: Number(value('proposedDeadline')),
+    additionalFunding: BigInt(value('additionalFunding')),
+    operationalAllowance: currentLayout ? BigInt(value('operationalAllowance')) : 0n,
+    responseDeadline: Number(value('responseDeadline')),
+    status: AMENDMENT_STATUS[Number(value('status', -1))] || 'Unknown',
+    createdAt: Number(value('createdAt')),
+    resolvedAt: Number(value('resolvedAt')),
+    directExtension: expandedLayout ? Boolean(value('directExtension', false)) : false,
+    gasPolicy: expandedLayout ? Number(value('gasPolicy')) : 0,
+    responseAllowance: expandedLayout ? BigInt(value('responseAllowance')) : 0n,
+    responseAllowanceSpent: expandedLayout ? BigInt(value('responseAllowanceSpent')) : 0n,
+    responseAllowanceFunder: expandedLayout ? value('responseAllowanceFunder', null) : null,
+    responseReimbursed: expandedLayout ? Boolean(value('responseReimbursed', false)) : false,
+    responseGasPriceCap: currentLayout ? BigInt(value('responseGasPriceCap')) : 0n,
+    existingFunding: Array.from(existingResult || []).map((allocation) => ({
+      milestoneId: Number(allocation.milestoneId ?? allocation[0] ?? 0n),
+      amount: BigInt(allocation.amount ?? allocation[1] ?? 0n),
+    })),
+    newMilestones: Array.from(newResult || []).map((milestone) => ({
+      name: milestone.name ?? milestone[0] ?? '',
+      insertBeforeMilestoneId: BigInt(
+        milestone.insertBeforeMilestoneId ?? milestone[1] ?? 0n,
+      ),
+      amount: BigInt(milestone.amount ?? milestone[2] ?? 0n),
+    })),
   };
 }
 
