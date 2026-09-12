@@ -360,6 +360,51 @@ contract('LifecycleManager', (accounts) => {
     assert.equal(amendmentHistory[0].directExtension, true);
   });
 
+  it('requires carrier acceptance when the shipper extends the deadline and adds a funded milestone', async () => {
+    await createFundedRequest();
+    const before = await escrow.getRequest(1);
+    const originalDeadline = Number(before.deadline);
+    const extendedDeadline = originalDeadline + 24 * 60 * 60;
+    const newMilestoneFunding = web3.utils.toWei('0.2', 'ether');
+
+    await manager.requestAmendment(
+      1,
+      extendedDeadline,
+      await responseDeadline(),
+      'Extend the deadline and add a signed handover checkpoint.',
+      [],
+      [['Signed handover', appendMilestoneId, newMilestoneFunding]],
+      { from: shipper },
+    );
+
+    const pendingRequest = await escrow.getRequest(1);
+    const pendingMilestones = await escrow.getMilestones(1);
+    const pendingAmendment = (await manager.getAmendmentRequests(1))[0];
+    assert.equal(Number(pendingRequest.deadline), originalDeadline);
+    assert.equal(pendingMilestones.length, 2);
+    assert.equal(Number(pendingAmendment.status), 0); // Pending
+    assert.equal(pendingAmendment.responder, carrier);
+    assert.equal(pendingAmendment.directExtension, false);
+    assert.equal(await manager.hasPendingNegotiation(1), true);
+
+    await expectRevert(
+      manager.acceptAmendment(1, 0, { from: shipper }),
+      'caller is not amendment responder',
+    );
+
+    await manager.acceptAmendment(1, 0, { from: carrier });
+
+    const acceptedRequest = await escrow.getRequest(1);
+    const acceptedMilestones = await escrow.getMilestones(1);
+    assert.equal(Number(acceptedRequest.deadline), extendedDeadline);
+    assert.equal(acceptedMilestones.length, 3);
+    assert.equal(acceptedMilestones[2].name, 'Signed handover');
+    assert.equal(
+      acceptedMilestones[2].additionalPayoutAmount.toString(),
+      newMilestoneFunding,
+    );
+  });
+
   it('applies an accepted funded amendment without rewriting original payouts', async () => {
     await createFundedRequest();
     const request = await escrow.getRequest(1);

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   checkpointPaymentState,
   milestoneEscrowAllocation,
+  normalizeAmendmentRecord,
   proofFileError,
   ProofSubmitBox,
   ProofViewerModal,
@@ -27,6 +28,85 @@ function ProofHarness({ proofUris }) {
 }
 
 describe('Shipment Detail checkpoint presentation', () => {
+  it('decodes the current amendment tuple so the carrier sees a pending decision', () => {
+    const requester = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    const responder = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+    const responseAllowanceFunder = '0xcccccccccccccccccccccccccccccccccccccccc';
+    const currentTuple = [
+      requester,
+      responder,
+      'Extend the deadline and add a handover checkpoint.',
+      '',
+      1_800_000_000n,
+      1_800_086_400n,
+      200_000_000_000_000_000n,
+      25_000_000_000_000_000n,
+      1_799_900_000n,
+      0n,
+      1_799_800_000n,
+      0n,
+      false,
+      1n,
+      150_000_000_000_000_000n,
+      0n,
+      responseAllowanceFunder,
+      false,
+      2_000_000_000n,
+    ];
+
+    const amendment = normalizeAmendmentRecord(
+      currentTuple,
+      0,
+      [],
+      [['Signed handover', (2n ** 256n) - 1n, 200_000_000_000_000_000n]],
+    );
+
+    expect(amendment).toMatchObject({
+      requester,
+      responder,
+      status: 'Pending',
+      proposedDeadline: 1_800_086_400,
+      responseDeadline: 1_799_900_000,
+      additionalFunding: 200_000_000_000_000_000n,
+      operationalAllowance: 25_000_000_000_000_000n,
+      directExtension: false,
+      gasPolicy: 1,
+      responseAllowance: 150_000_000_000_000_000n,
+      responseAllowanceFunder,
+      responseGasPriceCap: 2_000_000_000n,
+    });
+    expect(amendment.newMilestones).toEqual([{
+      name: 'Signed handover',
+      insertBeforeMilestoneId: (2n ** 256n) - 1n,
+      amount: 200_000_000_000_000_000n,
+    }]);
+  });
+
+  it('retains the pre-operational-reserve amendment tuple layout', () => {
+    const legacyExpandedTuple = [
+      '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      'Extend the deadline.',
+      '',
+      1_700_000_000n,
+      1_700_086_400n,
+      0n,
+      1_699_900_000n,
+      0n,
+      1_699_800_000n,
+      0n,
+      false,
+    ];
+
+    expect(normalizeAmendmentRecord(legacyExpandedTuple)).toMatchObject({
+      status: 'Pending',
+      proposedDeadline: 1_700_086_400,
+      responseDeadline: 1_699_900_000,
+      operationalAllowance: 0n,
+      directExtension: false,
+    });
+  });
+
   it('keeps the loaded shipment visible while its post-transaction refresh is pending', () => {
     const loadedShipment = { id: 1 };
 
